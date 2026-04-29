@@ -155,15 +155,8 @@ export interface AppConfig {
   googleChatDownloadRoot: string;
 }
 
-export interface FolderBrowserEntry {
-  name: string;
-  path: string;
-}
-
-export interface FolderBrowserResult {
-  currentPath: string;
-  parentPath: string | null;
-  entries: FolderBrowserEntry[];
+export interface NativeFolderPickResult {
+  path: string | null;
 }
 
 export interface GoogleChatDownloadStatus {

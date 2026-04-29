@@ -11,7 +11,6 @@ import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { FolderOpen, Loader2 } from 'lucide-react';
-import FolderPickerDialog from './FolderPickerDialog';
 
 interface CreateProjectDialogProps {
   open: boolean;
@@ -24,7 +23,7 @@ export default function CreateProjectDialog({ open, onClose, onCreated }: Create
   const [projectType, setProjectType] = useState('SI');
   const [splitterTopology, setSplitterTopology] = useState('AUTO');
   const [photoRootPath, setPhotoRootPath] = useState('');
-  const [folderPickerOpen, setFolderPickerOpen] = useState(false);
+  const [pickingFolder, setPickingFolder] = useState(false);
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async (event: React.FormEvent) => {
@@ -41,6 +40,21 @@ export default function CreateProjectDialog({ open, onClose, onCreated }: Create
       alert('Blad podczas tworzenia projektu');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handlePickFolder = async () => {
+    setPickingFolder(true);
+    try {
+      const result = await api.pickFolder(photoRootPath);
+      if (result.path) {
+        setPhotoRootPath(result.path);
+      }
+    } catch (err) {
+      console.error(err);
+      alert('Nie udalo sie otworzyc windowsowego wybierania folderu');
+    } finally {
+      setPickingFolder(false);
     }
   };
 
@@ -86,9 +100,13 @@ export default function CreateProjectDialog({ open, onClose, onCreated }: Create
                   placeholder="D:\projekty\opp13\pw\sap"
                   required
                 />
-                <Button type="button" variant="outline" onClick={() => setFolderPickerOpen(true)}>
-                  <FolderOpen size={16} className="mr-2" />
-                  Wybierz
+                <Button type="button" variant="outline" onClick={handlePickFolder} disabled={pickingFolder}>
+                  {pickingFolder ? (
+                    <Loader2 size={16} className="mr-2 animate-spin" />
+                  ) : (
+                    <FolderOpen size={16} className="mr-2" />
+                  )}
+                  {pickingFolder ? 'Wybieranie...' : 'Wybierz'}
                 </Button>
               </div>
               <p className="text-xs text-muted-foreground">
@@ -141,12 +159,6 @@ export default function CreateProjectDialog({ open, onClose, onCreated }: Create
           </DialogFooter>
         </form>
       </DialogContent>
-      <FolderPickerDialog
-        open={folderPickerOpen}
-        initialPath={photoRootPath}
-        onClose={() => setFolderPickerOpen(false)}
-        onSelect={setPhotoRootPath}
-      />
     </Dialog>
   );
 }

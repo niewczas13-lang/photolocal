@@ -8,9 +8,9 @@ import type {
   AppConfig,
   ChecklistNode,
   ChecklistNodeDetail,
-  FolderBrowserResult,
   GoogleChatDownloadStatus,
   GoogleChatSpace,
+  NativeFolderPickResult,
   ProjectSummary,
 } from './types';
 
@@ -25,10 +25,12 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   getConfig: () => request<AppConfig>('/api/config'),
-  listFolders: (path?: string) => {
-    const query = path ? `?path=${encodeURIComponent(path)}` : '';
-    return request<FolderBrowserResult>(`/api/folders${query}`);
-  },
+  pickFolder: (initialPath: string) =>
+    request<NativeFolderPickResult>('/api/folders/pick', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ initialPath }),
+    }),
   listProjects: () => request<ProjectSummary[]>('/api/projects'),
   listGoogleChatSpaces: () => request<GoogleChatSpace[]>('/api/google-chat/spaces'),
   startGoogleChatDownload: (projectId: string, spaceName: string, spaceDisplayName: string) =>
