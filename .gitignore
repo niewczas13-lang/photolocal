@@ -1,0 +1,16 @@
+node_modules/
+backend/dist/
+frontend/dist/
+logs/
+data/
+*.pid
+.env
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.gpkg
+*.jsonl
+
+pobierzchat/pobrane_zdjecia/
+pobierzchat/token.json
+pobierzchat/credentials.json

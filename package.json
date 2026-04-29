@@ -1,0 +1,20 @@
+{
+  "name": "photo-local",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "install:all": "npm install --workspaces",
+    "dev": "concurrently \"npm run dev --workspace backend\" \"npm run dev --workspace frontend\"",
+    "build": "npm run build --workspace frontend && npm run build --workspace backend",
+    "start": "npm run start --workspace backend",
+    "test": "npm run test --workspace backend && npm run test --workspace frontend"
+  },
+  "workspaces": [
+    "backend",
+    "frontend"
+  ],
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}
