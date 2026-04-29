@@ -10,7 +10,8 @@ import {
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
-import { Loader2 } from 'lucide-react';
+import { FolderOpen, Loader2 } from 'lucide-react';
+import FolderPickerDialog from './FolderPickerDialog';
 
 interface CreateProjectDialogProps {
   open: boolean;
@@ -23,6 +24,7 @@ export default function CreateProjectDialog({ open, onClose, onCreated }: Create
   const [projectType, setProjectType] = useState('SI');
   const [splitterTopology, setSplitterTopology] = useState('AUTO');
   const [photoRootPath, setPhotoRootPath] = useState('');
+  const [folderPickerOpen, setFolderPickerOpen] = useState(false);
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async (event: React.FormEvent) => {
@@ -76,13 +78,19 @@ export default function CreateProjectDialog({ open, onClose, onCreated }: Create
               <label htmlFor="photoRootPath" className="text-sm font-medium leading-none">
                 Folder zadania
               </label>
-              <Input
-                id="photoRootPath"
-                value={photoRootPath}
-                onChange={(event) => setPhotoRootPath(event.target.value)}
-                placeholder="D:\projekty\opp13\pw\sap"
-                required
-              />
+              <div className="grid grid-cols-[1fr_auto] gap-2">
+                <Input
+                  id="photoRootPath"
+                  value={photoRootPath}
+                  onChange={(event) => setPhotoRootPath(event.target.value)}
+                  placeholder="D:\projekty\opp13\pw\sap"
+                  required
+                />
+                <Button type="button" variant="outline" onClick={() => setFolderPickerOpen(true)}>
+                  <FolderOpen size={16} className="mr-2" />
+                  Wybierz
+                </Button>
+              </div>
               <p className="text-xs text-muted-foreground">
                 Aplikacja utworzy w nim folder zdjecia i zapisze tam cala strukture zdjec.
               </p>
@@ -133,6 +141,12 @@ export default function CreateProjectDialog({ open, onClose, onCreated }: Create
           </DialogFooter>
         </form>
       </DialogContent>
+      <FolderPickerDialog
+        open={folderPickerOpen}
+        initialPath={photoRootPath}
+        onClose={() => setFolderPickerOpen(false)}
+        onSelect={setPhotoRootPath}
+      />
     </Dialog>
   );
 }

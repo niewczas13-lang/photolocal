@@ -1,6 +1,8 @@
 node_modules/
 backend/dist/
 frontend/dist/
+frontend/*.tsbuildinfo
+.serena/
 logs/
 data/
 *.pid

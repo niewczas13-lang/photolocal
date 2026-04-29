@@ -5,6 +5,7 @@ import { existsSync } from 'node:fs';
 import { loadConfig } from './config.js';
 import { openDatabase } from './db/connection.js';
 import { runMigrations } from './db/migrations.js';
+import { listFolders } from './filesystem/folder-browser.js';
 import { registerProjectRoutes } from './projects/projects-routes.js';
 
 export async function buildApp() {
@@ -24,6 +25,17 @@ export async function buildApp() {
   app.get('/api/config', async () => ({
     googleChatDownloadRoot: config.googleChatDownloadRoot,
   }));
+  app.get('/api/folders', async (request, reply) => {
+    const { path } = request.query as { path?: string };
+
+    try {
+      return await listFolders(path);
+    } catch (error) {
+      return reply.status(400).send({
+        error: error instanceof Error ? error.message : 'Unable to list folders',
+      });
+    }
+  });
 
   await registerProjectRoutes(app, db);
 

@@ -155,6 +155,17 @@ export interface AppConfig {
   googleChatDownloadRoot: string;
 }
 
+export interface FolderBrowserEntry {
+  name: string;
+  path: string;
+}
+
+export interface FolderBrowserResult {
+  currentPath: string;
+  parentPath: string | null;
+  entries: FolderBrowserEntry[];
+}
+
 export interface GoogleChatDownloadStatus {
   state: 'IDLE' | 'RUNNING' | 'COMPLETED' | 'FAILED';
   projectId: string | null;
