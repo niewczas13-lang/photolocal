@@ -27,11 +27,19 @@ Add-Type -AssemblyName System.Windows.Forms
 $dialog = New-Object System.Windows.Forms.FolderBrowserDialog
 $dialog.Description = 'Wybierz folder zadania'
 $dialog.ShowNewFolderButton = $true
+$owner = New-Object System.Windows.Forms.Form
+$owner.StartPosition = 'CenterScreen'
+$owner.TopMost = $true
+$owner.ShowInTaskbar = $false
+$owner.WindowState = 'Minimized'
+$owner.Show()
+$owner.Activate()
 $initialPath = ${safeInitialPath}
 if ($initialPath -and (Test-Path -LiteralPath $initialPath -PathType Container)) {
   $dialog.SelectedPath = $initialPath
 }
-$result = $dialog.ShowDialog()
+$result = $dialog.ShowDialog($owner)
+$owner.Close()
 if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
   Write-Output $dialog.SelectedPath
   exit 0
