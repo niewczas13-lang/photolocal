@@ -388,6 +388,84 @@ describe('classifyWaitingChatBatches', () => {
     });
   });
 
+  it('matches noisy suffix descriptions that still contain a valid address', async () => {
+    const { db, projects, batches, projectId, dir } = createContext();
+    db.prepare(`UPDATE checklist_nodes SET name = ?, path = ? WHERE id = ?`).run(
+      'UL_MALENICKA_30A',
+      'Zapasy_kabli_instalacyjnych/RADOM_OPP1416/UL_MALENICKA_30A',
+      'node-maleniecka-5',
+    );
+    const folderPath = join(dir, '2025-10-20_Ul. Maleniecka 30A zapas w studni rurka drozna do posesji');
+    const batch = batches.importManifest({
+      projectId,
+      manifest: createManifest(folderPath, 'Ul. Maleniecka 30A zapas w studni rurka drozna do posesji'),
+      status: 'WAITING_FOR_CLASSIFICATION',
+    });
+
+    await classifyWaitingChatBatches({
+      projectId,
+      projectsRepository: projects,
+      batchesRepository: batches,
+      classifyFolder: async () => ({
+        folder: folderPath,
+        imageCount: 1,
+        sampledImages: [join(folderPath, 'photo.jpeg')],
+        model: 'qwen2.5vl:3b',
+        reserveLocation: 'W studni',
+        confidence: 0.91,
+        visualEvidence: ['zapas kabla w studni'],
+        shouldReview: false,
+        rawResponse: '{"reserveLocation":"W studni"}',
+        durationMs: 123,
+        classifiedAt: '2026-04-28T10:00:00.000Z',
+      }),
+    });
+
+    const updated = batches.getBatch(projectId, batch.id);
+    db.close();
+
+    expect(updated).toMatchObject({
+      status: 'READY_FOR_IMPORT',
+      checklistNodeId: 'node-maleniecka-5',
+      reserveLocation: 'W studni',
+    });
+  });
+
+  it('matches spaced point-id forms like OSD 2766 without running vision classification', async () => {
+    const { db, projects, batches, projectId, dir } = createContext();
+    db.prepare(
+      `INSERT INTO checklist_nodes (
+        id, project_id, parent_id, name, path, node_type, address_id,
+        sort_order, min_photos, accepts_photos, status
+      ) VALUES (?, ?, null, ?, ?, 'DISTRIBUTION', null, 1, 1, 1, 'OPEN')`,
+    ).run('node-osd2766-details', projectId, 'Szczegoly_skrzynki', 'OSD2766/Szczegoly_skrzynki');
+    const folderPath = join(dir, 'OSD 2766');
+    const batch = batches.importManifest({
+      projectId,
+      manifest: createManifest(folderPath, 'OSD 2766'),
+      status: 'WAITING_FOR_CLASSIFICATION',
+    });
+
+    await classifyWaitingChatBatches({
+      projectId,
+      projectsRepository: projects,
+      batchesRepository: batches,
+      classifyFolder: async () => {
+        throw new Error('Vision model should not run for spaced OSD folders');
+      },
+    });
+
+    const updated = batches.getBatch(projectId, batch.id);
+    db.close();
+
+    expect(updated).toMatchObject({
+      status: 'READY_FOR_IMPORT',
+      checklistNodeId: 'node-osd2766-details',
+      reserveLocation: null,
+      reviewReason: null,
+    });
+  });
+
   it('sends uncertain or unmatched batches to review', async () => {
     const { db, projects, batches, projectId, dir } = createContext();
     const folderPath = join(dir, 'Nieznana 99');

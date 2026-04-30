@@ -114,4 +114,38 @@ describe('importChatFolders', () => {
       expect.objectContaining({ folderName: '2025-10-27_Malenicka 48_', status: 'WAITING_FOR_CLASSIFICATION' }),
     ]);
   });
+
+  it('routes noisy address folders with construction-note suffixes to classification', async () => {
+    const { db, repository, projectId, dir } = createContext();
+    writeManifest(
+      dir,
+      '2025-10-20_Ul. Maleniecka 30A zapas w studni rurka drozna',
+      'Ul. Maleniecka 30A zapas w studni rurka drozna',
+    );
+
+    const result = await importChatFolders({ projectId, rootPath: dir, repository });
+    const [batch] = repository.listBatches(projectId);
+    db.close();
+
+    expect(result).toEqual({ imported: 1, waitingForClassification: 1, pendingReview: 0 });
+    expect(batch).toMatchObject({
+      folderName: '2025-10-20_Ul. Maleniecka 30A zapas w studni rurka drozna',
+      status: 'WAITING_FOR_CLASSIFICATION',
+    });
+  });
+
+  it('routes spaced point-id folder names to classification', async () => {
+    const { db, repository, projectId, dir } = createContext();
+    writeManifest(dir, 'OSD 2766', 'OSD 2766');
+
+    const result = await importChatFolders({ projectId, rootPath: dir, repository });
+    const [batch] = repository.listBatches(projectId);
+    db.close();
+
+    expect(result).toEqual({ imported: 1, waitingForClassification: 1, pendingReview: 0 });
+    expect(batch).toMatchObject({
+      folderName: 'OSD 2766',
+      status: 'WAITING_FOR_CLASSIFICATION',
+    });
+  });
 });
