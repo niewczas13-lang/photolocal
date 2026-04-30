@@ -135,4 +135,27 @@ describe('ChatBatchesRepository', () => {
     expect(repository.listBatchFiles(projectId, second.id)).toHaveLength(3);
     db.close();
   });
+
+  it('removes selected files from the active batch', () => {
+    const { db, repository, projectId, tempDir } = createRepository();
+    const folderPath = join(tempDir, 'Maleniecka 5');
+    mkdirSync(folderPath, { recursive: true });
+
+    const batch = repository.importManifest({
+      projectId,
+      manifest: createManifest(folderPath),
+      status: 'PENDING_REVIEW',
+      reviewReason: 'Needs human review',
+    });
+    const files = repository.listBatchFiles(projectId, batch.id);
+
+    const removed = repository.removeBatchFiles(projectId, batch.id, [files[0].id]);
+    const remaining = repository.listBatchFiles(projectId, batch.id);
+    const updatedBatch = repository.getBatch(projectId, batch.id);
+    db.close();
+
+    expect(removed).toBe(1);
+    expect(remaining.map((file) => file.id)).toEqual([files[1].id]);
+    expect(updatedBatch?.fileCount).toBe(1);
+  });
 });

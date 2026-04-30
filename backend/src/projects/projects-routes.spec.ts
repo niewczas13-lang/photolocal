@@ -356,11 +356,24 @@ describe('projects routes', () => {
         fileIds: [keepFile.id],
       }),
     });
+    const listResponse = await app.inject({
+      method: 'GET',
+      url: `/api/projects/${project.id}/chat-batches?status=PENDING_REVIEW`,
+    });
     const photos = projects.getNodePhotos(project.id, 'node-work');
     await app.close();
 
     expect(acceptResponse.statusCode).toBe(200);
     expect(acceptResponse.json()).toEqual({ importedPhotos: 1, checklistNodeCount: 1, sourceFileCount: 1 });
+    expect(listResponse.statusCode).toBe(200);
+    expect(listResponse.json()).toEqual([
+      expect.objectContaining({
+        id: batch.id,
+        status: 'PENDING_REVIEW',
+        reviewReason: 'Opis nie wyglada na adres ani punkt checklisty',
+        files: [expect.objectContaining({ fileName: 'skip.png' })],
+      }),
+    ]);
     expect(photos).toHaveLength(1);
     expect(photos[0].sourceFileName).toBe('keep.png');
     expect(photos[0].reserveLocation).toBeNull();

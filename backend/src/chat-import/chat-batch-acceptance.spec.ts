@@ -117,14 +117,12 @@ describe('acceptChatBatch', () => {
     });
 
     const updatedBatch = batches.getBatch(projectId, batch.id);
-    const imports = batches.listFileImports(projectId, batch.id);
     const node5Photos = projects.getNodePhotos(projectId, 'node-maleniecka-5');
     const node7Photos = projects.getNodePhotos(projectId, 'node-maleniecka-7');
     db.close();
 
     expect(result).toEqual({ importedPhotos: 4, checklistNodeCount: 2, sourceFileCount: 2 });
     expect(updatedBatch).toMatchObject({ status: 'IMPORTED', reserveLocation: 'W studni' });
-    expect(imports).toHaveLength(4);
     expect(node5Photos).toHaveLength(2);
     expect(node7Photos).toHaveLength(2);
     expect(node5Photos[0].reserveLocation).toBe('W studni');
@@ -164,14 +162,84 @@ describe('acceptChatBatch', () => {
       }),
     });
 
-    const imports = batches.listFileImports(projectId, batch.id);
+    const updatedBatch = batches.getBatch(projectId, batch.id);
+    const remainingFiles = batches.listBatchFiles(projectId, batch.id);
     const nodePhotos = projects.getNodePhotos(projectId, 'node-maleniecka-5');
     db.close();
 
     expect(result).toEqual({ importedPhotos: 1, checklistNodeCount: 1, sourceFileCount: 1 });
-    expect(imports).toHaveLength(1);
-    expect(imports[0].chatPhotoFileId).toBe(selectedFile.id);
+    expect(updatedBatch).toMatchObject({
+      status: 'PENDING_REVIEW',
+      reviewReason: 'Wiadomosc wyglada na wiele adresow',
+      checklistNodeId: null,
+    });
+    expect(remainingFiles.map((file) => file.fileName)).toEqual(['skip.jpeg']);
     expect(nodePhotos).toHaveLength(1);
     expect(nodePhotos[0].sourceFileName).toBe('photo.jpeg');
+  });
+
+  it('marks the batch as imported when the last remaining files are imported', async () => {
+    const { db, projects, batches, projectId, dir } = createContext();
+    const batch = batches.importManifest({
+      projectId,
+      manifest: createManifest(join(dir, 'Maleniecka 5 i 7')),
+      status: 'PENDING_REVIEW',
+      reviewReason: 'Wiadomosc wyglada na wiele adresow',
+    });
+    const files = batches.listBatchFiles(projectId, batch.id);
+    const firstFile = files.find((file) => file.fileName === 'photo.jpeg');
+    const secondFile = files.find((file) => file.fileName === 'skip.jpeg');
+    if (!firstFile || !secondFile) throw new Error('expected files missing');
+
+    await acceptChatBatch({
+      projectId,
+      batchId: batch.id,
+      checklistNodeIds: ['node-maleniecka-5'],
+      fileIds: [firstFile.id],
+      reserveLocation: 'W studni',
+      projectsRepository: projects,
+      batchesRepository: batches,
+      processPhoto: async () => ({
+        buffer: Buffer.from('processed-photo'),
+        thumbnail: Buffer.from('thumb'),
+        mimeType: 'image/jpeg',
+        fileSize: 15,
+        lat: null,
+        lng: null,
+        capturedAt: null,
+      }),
+    });
+
+    const result = await acceptChatBatch({
+      projectId,
+      batchId: batch.id,
+      checklistNodeIds: ['node-maleniecka-5'],
+      fileIds: [secondFile.id],
+      reserveLocation: 'W studni',
+      projectsRepository: projects,
+      batchesRepository: batches,
+      processPhoto: async () => ({
+        buffer: Buffer.from('processed-photo'),
+        thumbnail: Buffer.from('thumb'),
+        mimeType: 'image/jpeg',
+        fileSize: 15,
+        lat: null,
+        lng: null,
+        capturedAt: null,
+      }),
+    });
+
+    const updatedBatch = batches.getBatch(projectId, batch.id);
+    const remainingFiles = batches.listBatchFiles(projectId, batch.id);
+    db.close();
+
+    expect(result).toEqual({ importedPhotos: 1, checklistNodeCount: 1, sourceFileCount: 1 });
+    expect(updatedBatch).toMatchObject({
+      status: 'IMPORTED',
+      reviewReason: null,
+      checklistNodeId: 'node-maleniecka-5',
+      reserveLocation: 'W studni',
+    });
+    expect(remainingFiles).toEqual([]);
   });
 });

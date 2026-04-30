@@ -99,13 +99,19 @@ export async function acceptChatBatch(input: AcceptChatBatchInput): Promise<Acce
     }
   }
 
+  const importedFileIds = files.map((file) => file.id);
+  input.batchesRepository.removeBatchFiles(input.projectId, input.batchId, importedFileIds);
+  const remainingFiles = input.batchesRepository.listBatchFiles(input.projectId, input.batchId);
+  const isFullyConsumed = remainingFiles.length === 0;
+
   input.batchesRepository.updateDecision({
     projectId: input.projectId,
     batchId: input.batchId,
-    status: 'IMPORTED',
-    reviewReason: null,
-    checklistNodeId: input.checklistNodeIds.length === 1 ? input.checklistNodeIds[0] : null,
-    reserveLocation: input.reserveLocation,
+    status: isFullyConsumed ? 'IMPORTED' : 'PENDING_REVIEW',
+    reviewReason: isFullyConsumed ? null : batch.reviewReason,
+    checklistNodeId:
+      isFullyConsumed && input.checklistNodeIds.length === 1 ? input.checklistNodeIds[0] : null,
+    reserveLocation: isFullyConsumed ? input.reserveLocation : batch.reserveLocation,
     confidence: batch.confidence,
     llmModel: batch.llmModel,
     llmRawResponse: batch.llmRawResponse,

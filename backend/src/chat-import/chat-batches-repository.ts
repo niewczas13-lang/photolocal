@@ -344,6 +344,27 @@ export class ChatBatchesRepository {
       .run(randomUUID(), input.chatPhotoFileId, input.photoId, input.checklistNodeId);
   }
 
+  removeBatchFiles(projectId: string, batchId: string, fileIds: string[]): number {
+    if (fileIds.length === 0) return 0;
+
+    const placeholders = fileIds.map(() => '?').join(', ');
+    const result = this.db
+      .prepare(
+        `DELETE FROM chat_photo_files
+         WHERE batch_id = ?
+           AND id IN (${placeholders})
+           AND EXISTS (
+             SELECT 1
+             FROM chat_photo_batches batch
+             WHERE batch.id = chat_photo_files.batch_id
+               AND batch.project_id = ?
+           )`,
+      )
+      .run(batchId, ...fileIds, projectId);
+
+    return result.changes;
+  }
+
   listFileImports(projectId: string, batchId: string): ChatBatchFileImportRecord[] {
     return this.db
       .prepare(
