@@ -99,6 +99,42 @@ describe('importChatFolders', () => {
     });
   });
 
+  it('sends street-only descriptions to review without LLM classification', async () => {
+    const { db, repository, projectId, dir } = createContext();
+    writeManifest(dir, 'Maleniecka', 'Maleniecka');
+
+    const result = await importChatFolders({ projectId, rootPath: dir, repository });
+    const [batch] = repository.listBatches(projectId);
+    db.close();
+
+    expect(result).toEqual({ imported: 1, waitingForClassification: 0, pendingReview: 1 });
+    expect(batch).toMatchObject({
+      folderName: 'Maleniecka',
+      status: 'PENDING_REVIEW',
+      reviewReason: 'Opis nie wyglada na adres ani punkt checklisty',
+    });
+  });
+
+  it('sends long noisy descriptions with incidental numbers to review', async () => {
+    const { db, repository, projectId, dir } = createContext();
+    writeManifest(
+      dir,
+      'Zapas kabla w studni jutro koparka 3 osoby na miejscu',
+      'Zapas kabla w studni jutro koparka 3 osoby na miejscu',
+    );
+
+    const result = await importChatFolders({ projectId, rootPath: dir, repository });
+    const [batch] = repository.listBatches(projectId);
+    db.close();
+
+    expect(result).toEqual({ imported: 1, waitingForClassification: 0, pendingReview: 1 });
+    expect(batch).toMatchObject({
+      folderName: 'Zapas kabla w studni jutro koparka 3 osoby na miejscu',
+      status: 'PENDING_REVIEW',
+      reviewReason: 'Opis nie wyglada na adres ani punkt checklisty',
+    });
+  });
+
   it('routes address folders with trailing underscores to LLM classification', async () => {
     const { db, repository, projectId, dir } = createContext();
     writeManifest(dir, '2025-10-20_Maleniecka 36B_', 'Maleniecka 36B_');
