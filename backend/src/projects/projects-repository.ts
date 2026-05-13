@@ -71,6 +71,8 @@ export interface RecalculateChecklistResult {
   unchangedNodes: number;
   addedAddresses: number;
   reusedAddresses: number;
+  removedStaleNodes: number;
+  preservedAssignedStaleNodes: number;
 }
 
 function normalizeAddressKeyPart(value: string | null): string {
@@ -279,6 +281,8 @@ export class ProjectsRepository {
       unchangedNodes: 0,
       addedAddresses: 0,
       reusedAddresses: 0,
+      removedStaleNodes: 0,
+      preservedAssignedStaleNodes: 0,
     };
 
     const tx = this.db.transaction(() => {
@@ -344,13 +348,14 @@ export class ProjectsRepository {
 
       const existingNodeRows = this.db
         .prepare(
-          `SELECT id, path
+          `SELECT id, parent_id AS parentId, path
            FROM checklist_nodes
            WHERE project_id = ?`,
         )
-        .all(input.projectId) as Array<{ id: string; path: string }>;
+        .all(input.projectId) as Array<{ id: string; parentId: string | null; path: string }>;
 
       const pathToExistingNodeId = new Map(existingNodeRows.map((node) => [node.path, node.id]));
+      const generatedPaths = new Set(input.checklistNodes.map((node) => node.path));
       const generatedNodeIdToActualId = new Map<string, string>();
       const insertNode = this.db.prepare(
         `INSERT INTO checklist_nodes (
@@ -412,6 +417,60 @@ export class ProjectsRepository {
       }
 
       result.unchangedNodes = Math.max(0, existingNodeRows.length - result.updatedNodes);
+
+      const nodeIdsWithOwnPhotos = new Set(
+        (
+          this.db
+            .prepare(
+              `SELECT checklist_node_id AS nodeId
+               FROM photos
+               WHERE project_id = ?
+               GROUP BY checklist_node_id`,
+            )
+            .all(input.projectId) as Array<{ nodeId: string }>
+        ).map((row) => row.nodeId),
+      );
+      const childIdsByParentId = new Map<string, string[]>();
+      for (const node of existingNodeRows) {
+        if (!node.parentId) continue;
+        const children = childIdsByParentId.get(node.parentId) ?? [];
+        children.push(node.id);
+        childIdsByParentId.set(node.parentId, children);
+      }
+
+      const hasPhotoInSubtree = (nodeId: string): boolean => {
+        if (nodeIdsWithOwnPhotos.has(nodeId)) return true;
+        return (childIdsByParentId.get(nodeId) ?? []).some((childId) => hasPhotoInSubtree(childId));
+      };
+
+      const staleNodes = existingNodeRows.filter((node) => !generatedPaths.has(node.path));
+      const staleNodeIds = new Set(staleNodes.map((node) => node.id));
+      const staleNodeIdsWithPhotos = new Set(
+        staleNodes.filter((node) => hasPhotoInSubtree(node.id)).map((node) => node.id),
+      );
+      const removableStaleNodes = staleNodes.filter((node) => {
+        if (staleNodeIdsWithPhotos.has(node.id)) return false;
+        const staleChildren = childIdsByParentId.get(node.id)?.filter((childId) => staleNodeIds.has(childId)) ?? [];
+        return staleChildren.every((childId) => !staleNodeIdsWithPhotos.has(childId));
+      });
+
+      const updateStaleNode = this.db.prepare(
+        `UPDATE checklist_nodes
+         SET status = 'NOT_APPLICABLE',
+             not_applicable_reason = 'Nie wystepuje w ostatnio przeliczonym GPKG',
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = ? AND project_id = ?`,
+      );
+      for (const nodeId of staleNodeIdsWithPhotos) {
+        updateStaleNode.run(nodeId, input.projectId);
+      }
+      result.preservedAssignedStaleNodes = staleNodeIdsWithPhotos.size;
+
+      const deleteNode = this.db.prepare(`DELETE FROM checklist_nodes WHERE id = ? AND project_id = ?`);
+      for (const node of removableStaleNodes.sort((a, b) => b.path.length - a.path.length)) {
+        deleteNode.run(node.id, input.projectId);
+        result.removedStaleNodes += 1;
+      }
 
       this.db
         .prepare(

@@ -27,6 +27,8 @@ export interface ChecklistRecalculateResult {
   unchangedNodes: number;
   addedAddresses: number;
   reusedAddresses: number;
+  removedStaleNodes: number;
+  preservedAssignedStaleNodes: number;
   project: ProjectSummary;
 }
 

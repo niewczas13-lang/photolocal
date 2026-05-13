@@ -304,7 +304,7 @@ export default function ProjectView({
       await refreshChecklist(selectedNodeId);
       await refreshNodeDetail(selectedNodeId);
       setRecalculateResult(
-        `Dodano ${result.addedNodes}, odswiezono ${result.updatedNodes}, bez zmian ${result.unchangedNodes}. Adresy: nowe ${result.addedAddresses}, rozpoznane ${result.reusedAddresses}.`,
+        `Dodano ${result.addedNodes}, odswiezono ${result.updatedNodes}, usunieto stare bez zdjec ${result.removedStaleNodes}, zostawiono stare ze zdjeciami ${result.preservedAssignedStaleNodes}. Adresy: nowe ${result.addedAddresses}, rozpoznane ${result.reusedAddresses}.`,
       );
       setRecalculateFile(null);
     } catch (err) {
@@ -728,8 +728,8 @@ export default function ProjectView({
                         <div>
                           <h4 className="font-semibold">Przelicz checklistę z GPKG</h4>
                           <p className="text-sm text-muted-foreground">
-                            Operacja dopisuje nowe punkty i odswieza istniejace po sciezce. Nie usuwa zdjec
-                            ani nie zmienia ID punktow, do ktorych sa juz przypisane.
+                            Operacja dopisuje nowe punkty, odswieza istniejace po sciezce i usuwa stare punkty
+                            bez zdjec. Punkty ze zdjeciami zostaja zachowane jako nie dotyczy.
                           </p>
                         </div>
                         <RefreshCw size={18} className="text-muted-foreground mt-1 shrink-0" />
