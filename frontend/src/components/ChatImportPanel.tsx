@@ -50,7 +50,7 @@ export default function ChatImportPanel({ projectId, batches, onChanged }: ChatI
   const [defaultChatRoot, setDefaultChatRoot] = useState('');
   const [rootPath, setRootPath] = useState('');
   const [busyAction, setBusyAction] = useState<
-    'spaces' | 'download' | 'import' | 'classify' | 'accept' | 'invites' | 'accept-invite' | null
+    'spaces' | 'download' | 'import' | 'classify' | 'accept' | 'invites' | 'invite-setup' | 'accept-invite' | null
   >(null);
   const [lastResult, setLastResult] = useState<LastResult>(null);
   const [classificationStatus, setClassificationStatus] = useState<ChatClassificationStatus | null>(null);
@@ -103,6 +103,20 @@ export default function ChatImportPanel({ projectId, batches, onChanged }: ChatI
     } catch (error) {
       console.error(error);
       alert('Blad podczas pobierania zaproszen Google Chat. Jesli Chrome otworzyl sie pierwszy raz, zaloguj konto bota i sprobuj ponownie.');
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const openInviteSetup = async () => {
+    setBusyAction('invite-setup');
+    try {
+      const result = await api.openGoogleChatInviteSetup();
+      setInviteProfileDir(result.profileDir);
+      setInviteDebug(result.debug);
+    } catch (error) {
+      console.error(error);
+      alert('Blad podczas otwierania Chrome do logowania Google Chat');
     } finally {
       setBusyAction(null);
     }
@@ -304,10 +318,16 @@ export default function ChatImportPanel({ projectId, batches, onChanged }: ChatI
                   Laduje widok Google Chat z filtrem pokojow, do ktorych konto bota jeszcze nie dolaczylo.
                 </p>
               </div>
-              <Button variant="outline" disabled={busyAction !== null} onClick={() => void loadInvites()}>
-                {busyAction === 'invites' ? <Loader2 size={16} className="mr-2 animate-spin" /> : <UserPlus size={16} className="mr-2" />}
-                Zaladuj zaproszenia
-              </Button>
+              <div className="flex flex-wrap gap-2">
+                <Button variant="outline" disabled={busyAction !== null} onClick={() => void openInviteSetup()}>
+                  {busyAction === 'invite-setup' ? <Loader2 size={16} className="mr-2 animate-spin" /> : <UserPlus size={16} className="mr-2" />}
+                  Otworz logowanie
+                </Button>
+                <Button variant="outline" disabled={busyAction !== null} onClick={() => void loadInvites()}>
+                  {busyAction === 'invites' ? <Loader2 size={16} className="mr-2 animate-spin" /> : <RefreshCw size={16} className="mr-2" />}
+                  Zaladuj zaproszenia
+                </Button>
+              </div>
             </div>
 
             <div className="grid md:grid-cols-[260px_1fr] gap-3">
@@ -326,8 +346,8 @@ export default function ChatImportPanel({ projectId, batches, onChanged }: ChatI
                   {inviteProfileDir || 'Zostanie pokazany po pierwszym zaladowaniu zaproszen.'}
                 </p>
                 <p className="mt-2 text-muted-foreground">
-                  Przy pierwszym uruchomieniu moze otworzyc sie Chrome. Zaloguj tam konto bota, zamknij okno i kliknij
-                  ponownie zaladowanie zaproszen.
+                  Najpierw kliknij Otworz logowanie. Chrome zostanie otwarty i nie zamknie sie automatycznie,
+                  wiec spokojnie zaloguj konto bota. Potem kliknij Zaladuj zaproszenia.
                 </p>
               </div>
             </div>

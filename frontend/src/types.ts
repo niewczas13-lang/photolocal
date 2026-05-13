@@ -242,6 +242,13 @@ export interface GoogleChatInviteAcceptResult {
   debug: GoogleChatInviteDebugInfo;
 }
 
+export interface GoogleChatInviteSetupResult {
+  started: true;
+  url: string;
+  profileDir: string;
+  debug: GoogleChatInviteDebugInfo;
+}
+
 export interface GoogleChatInviteDebugInfo {
   steps: string[];
   finalUrl: string | null;

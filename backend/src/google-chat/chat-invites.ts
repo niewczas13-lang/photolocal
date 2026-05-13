@@ -84,7 +84,7 @@ function firstUsefulLine(text: string): string | null {
     .split('\n')
     .map((line) => line.trim())
     .filter(Boolean)
-    .filter((line) => !/^(dołącz|dolacz|join)$/i.test(line));
+    .filter((line) => !/^(dolacz|join)$/i.test(line.normalize('NFKD').replace(/[\\u0300-\\u036f]/g, '')));
   return lines[0] ?? null;
 }
 
@@ -239,7 +239,7 @@ export async function acceptChatInvite(input: {
     if (!invite || !invite.allowed) return { accepted: false, invite, debug };
 
     debug.steps.push(`Klikam Dolacz dla zaproszenia ${invite.key}`);
-    await browser.page.getByRole('button', { name: /dołącz|dolacz|join/i }).nth(inviteIndex).click();
+    await browser.page.getByRole('button', { name: /dolacz|join/i }).nth(inviteIndex).click();
     await browser.page.waitForTimeout(2_000);
     return { accepted: true, invite, debug };
   } catch (error) {
@@ -253,3 +253,33 @@ export async function acceptChatInvite(input: {
 export function defaultInviteProfileDir(): string {
   return resolve(dirname(process.env.PHOTO_LOCAL_DB ?? './data/photo-local.sqlite'), 'google-chat-browser-profile');
 }
+
+export async function openChatInvitesSetup(input: {
+  config: ChatInviteBrowserConfig;
+}): Promise<{ started: true; url: string; profileDir: string; debug: ChatInviteDebugInfo }> {
+  const debug = createDebugInfo();
+  debug.steps.push(`Tworze/uzywam profilu Chrome: ${input.config.profileDir}`);
+  await mkdir(input.config.profileDir, { recursive: true });
+  debug.steps.push('Otwieram Chrome do logowania i zostawiam okno otwarte');
+  const context = await chromium.launchPersistentContext(input.config.profileDir, {
+    channel: 'chrome',
+    headless: false,
+    viewport: { width: 1400, height: 900 },
+  });
+  const page = context.pages()[0] ?? (await context.newPage());
+  await page.goto(GOOGLE_CHAT_INVITES_URL, { waitUntil: 'domcontentloaded' });
+  debug.finalUrl = page.url();
+  debug.title = await page.title().catch(() => null);
+
+  context.on('close', () => {
+    debug.steps.push('Chrome setup zamkniety przez uzytkownika');
+  });
+
+  return {
+    started: true,
+    url: GOOGLE_CHAT_INVITES_URL,
+    profileDir: input.config.profileDir,
+    debug,
+  };
+}
+

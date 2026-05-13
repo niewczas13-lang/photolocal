@@ -6,7 +6,7 @@ import { loadConfig } from './config.js';
 import { openDatabase } from './db/connection.js';
 import { runMigrations } from './db/migrations.js';
 import { pickWindowsFolder } from './filesystem/native-folder-picker.js';
-import { acceptChatInvite, listChatInvites } from './google-chat/chat-invites.js';
+import { acceptChatInvite, listChatInvites, openChatInvitesSetup } from './google-chat/chat-invites.js';
 import { registerProjectRoutes } from './projects/projects-routes.js';
 
 export async function buildApp() {
@@ -52,6 +52,21 @@ export async function buildApp() {
     } catch (error) {
       return reply.status(500).send({
         error: error instanceof Error ? error.message : 'Unable to load Google Chat invites',
+      });
+    }
+  });
+
+  app.post('/api/google-chat/invites/setup', async (_request, reply) => {
+    try {
+      return await openChatInvitesSetup({
+        config: {
+          profileDir: config.googleChatInviteProfileDir,
+          headless: false,
+        },
+      });
+    } catch (error) {
+      return reply.status(500).send({
+        error: error instanceof Error ? error.message : 'Unable to open Google Chat invite setup',
       });
     }
   });

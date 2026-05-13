@@ -12,6 +12,7 @@ import type {
   GoogleChatDownloadStatus,
   GoogleChatInviteAcceptResult,
   GoogleChatInviteListResult,
+  GoogleChatInviteSetupResult,
   GoogleChatSpace,
   NativeFolderPickResult,
   ProjectSummary,
@@ -42,6 +43,10 @@ export const api = {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ whitelist }),
+    }),
+  openGoogleChatInviteSetup: () =>
+    request<GoogleChatInviteSetupResult>('/api/google-chat/invites/setup', {
+      method: 'POST',
     }),
   acceptGoogleChatInvite: (inviteKey: string, whitelist: string) =>
     request<GoogleChatInviteAcceptResult>('/api/google-chat/invites/accept', {
