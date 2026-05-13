@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Bot, CheckCircle2, Download, Loader2, MessageSquare, RefreshCw } from 'lucide-react';
+import { Bot, CheckCircle2, Download, Loader2, MessageSquare, RefreshCw, UserPlus } from 'lucide-react';
 import { api } from '../api';
 import type {
   ChatAcceptReadyResult,
@@ -7,6 +7,7 @@ import type {
   ChatClassificationStatus,
   ChatImportResult,
   GoogleChatDownloadStatus,
+  GoogleChatInvite,
   GoogleChatSpace,
 } from '../types';
 import { Badge } from './ui/badge';
@@ -47,7 +48,9 @@ function formatElapsed(ms: number | null | undefined): string {
 export default function ChatImportPanel({ projectId, batches, onChanged }: ChatImportPanelProps) {
   const [defaultChatRoot, setDefaultChatRoot] = useState('');
   const [rootPath, setRootPath] = useState('');
-  const [busyAction, setBusyAction] = useState<'spaces' | 'download' | 'import' | 'classify' | 'accept' | null>(null);
+  const [busyAction, setBusyAction] = useState<
+    'spaces' | 'download' | 'import' | 'classify' | 'accept' | 'invites' | 'accept-invite' | null
+  >(null);
   const [lastResult, setLastResult] = useState<LastResult>(null);
   const [classificationStatus, setClassificationStatus] = useState<ChatClassificationStatus | null>(null);
   const [spaces, setSpaces] = useState<GoogleChatSpace[]>([]);
@@ -56,6 +59,10 @@ export default function ChatImportPanel({ projectId, batches, onChanged }: ChatI
   const [pendingAutoImportKey, setPendingAutoImportKey] = useState<string | null>(null);
   const [completedAutoImportKey, setCompletedAutoImportKey] = useState<string | null>(null);
   const [refreshedClassificationKey, setRefreshedClassificationKey] = useState<string | null>(null);
+  const [inviteWhitelist, setInviteWhitelist] = useState('*@gmail.com');
+  const [invites, setInvites] = useState<GoogleChatInvite[]>([]);
+  const [inviteProfileDir, setInviteProfileDir] = useState('');
+  const [acceptingInviteKey, setAcceptingInviteKey] = useState<string | null>(null);
 
   const counts = useMemo(
     () => ({
@@ -80,6 +87,38 @@ export default function ChatImportPanel({ projectId, batches, onChanged }: ChatI
       console.error(error);
       alert('Blad podczas pobierania listy pokojow Google Chat');
     } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const loadInvites = async () => {
+    setBusyAction('invites');
+    try {
+      const result = await api.listGoogleChatInvites(inviteWhitelist);
+      setInvites(result.invites);
+      setInviteProfileDir(result.profileDir);
+    } catch (error) {
+      console.error(error);
+      alert('Blad podczas pobierania zaproszen Google Chat. Jesli Chrome otworzyl sie pierwszy raz, zaloguj konto bota i sprobuj ponownie.');
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const acceptInvite = async (invite: GoogleChatInvite) => {
+    setBusyAction('accept-invite');
+    setAcceptingInviteKey(invite.key);
+    try {
+      const result = await api.acceptGoogleChatInvite(invite.key, inviteWhitelist);
+      if (!result.accepted) {
+        alert('Nie udalo sie zaakceptowac zaproszenia. Sprawdz whitelist albo odswiez liste.');
+      }
+      await loadInvites();
+    } catch (error) {
+      console.error(error);
+      alert('Blad podczas akceptacji zaproszenia Google Chat');
+    } finally {
+      setAcceptingInviteKey(null);
       setBusyAction(null);
     }
   };
@@ -251,6 +290,82 @@ export default function ChatImportPanel({ projectId, batches, onChanged }: ChatI
             <p className="text-sm text-muted-foreground">
               Wskaz folder z pobranymi paczkami, potem uruchom klasyfikacje. Pewne wyniki trafia do zakladki Do importu.
             </p>
+          </div>
+
+          <div className="rounded-md border p-3 flex flex-col gap-3">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h4 className="font-semibold text-sm">Zaproszenia do pokojow</h4>
+                <p className="text-sm text-muted-foreground">
+                  Laduje widok Google Chat z filtrem pokojow, do ktorych konto bota jeszcze nie dolaczylo.
+                </p>
+              </div>
+              <Button variant="outline" disabled={busyAction !== null} onClick={() => void loadInvites()}>
+                {busyAction === 'invites' ? <Loader2 size={16} className="mr-2 animate-spin" /> : <UserPlus size={16} className="mr-2" />}
+                Zaladuj zaproszenia
+              </Button>
+            </div>
+
+            <div className="grid md:grid-cols-[260px_1fr] gap-3">
+              <div className="flex flex-col gap-1">
+                <span className="text-sm font-medium">Whitelist</span>
+                <textarea
+                  value={inviteWhitelist}
+                  onChange={(event) => setInviteWhitelist(event.target.value)}
+                  className="min-h-24 rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  placeholder={'*@gmail.com\njan@gmail.com'}
+                />
+              </div>
+              <div className="rounded-md bg-muted/30 p-3 text-sm">
+                <p className="font-medium">Profil sesji Chrome</p>
+                <p className="break-all text-muted-foreground">
+                  {inviteProfileDir || 'Zostanie pokazany po pierwszym zaladowaniu zaproszen.'}
+                </p>
+                <p className="mt-2 text-muted-foreground">
+                  Przy pierwszym uruchomieniu moze otworzyc sie Chrome. Zaloguj tam konto bota, zamknij okno i kliknij
+                  ponownie zaladowanie zaproszen.
+                </p>
+              </div>
+            </div>
+
+            {invites.length > 0 ? (
+              <div className="grid gap-2">
+                {invites.map((invite) => (
+                  <div key={invite.key} className="rounded-md border bg-background p-3 text-sm flex flex-col gap-2">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="font-semibold truncate">{invite.roomName ?? 'Pokoj Google Chat'}</p>
+                        <p className="text-muted-foreground">
+                          Zaproszenie od: {invite.senderEmail ?? 'nie wykryto maila'}
+                        </p>
+                      </div>
+                      <Badge variant={invite.allowed ? 'outline' : 'secondary'}>
+                        {invite.allowed ? 'whitelist' : 'poza whitelist'}
+                      </Badge>
+                    </div>
+                    <p className="line-clamp-2 text-muted-foreground">{invite.textPreview}</p>
+                    <div className="flex justify-end">
+                      <Button
+                        size="sm"
+                        disabled={!invite.allowed || busyAction !== null}
+                        onClick={() => void acceptInvite(invite)}
+                      >
+                        {acceptingInviteKey === invite.key ? (
+                          <Loader2 size={16} className="mr-2 animate-spin" />
+                        ) : (
+                          <CheckCircle2 size={16} className="mr-2" />
+                        )}
+                        Dolacz
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                Brak zaladowanych zaproszen. Kliknij zaladowanie, zeby odczytac aktualna liste z Google Chat.
+              </p>
+            )}
           </div>
 
           <div className="rounded-md border p-3 flex flex-col gap-3">

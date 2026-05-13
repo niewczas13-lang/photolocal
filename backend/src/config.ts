@@ -15,6 +15,8 @@ export interface AppConfig {
   googleChatPythonCommand: string;
   googleChatScriptPath: string;
   googleChatDownloadRoot: string;
+  googleChatInviteProfileDir: string;
+  googleChatInviteHeadless: boolean;
 }
 
 export function loadConfig(): AppConfig {
@@ -26,6 +28,10 @@ export function loadConfig(): AppConfig {
   const googleChatPythonCommand = process.env.GOOGLE_CHAT_PYTHON ?? 'python';
   const googleChatScriptPath = resolve(__dirname, '../../pobierzchat/chat.py');
   const googleChatDownloadRoot = resolve(__dirname, '../../pobierzchat/pobrane_zdjecia');
+  const googleChatInviteProfileDir = process.env.GOOGLE_CHAT_INVITE_PROFILE_DIR
+    ? resolve(process.env.GOOGLE_CHAT_INVITE_PROFILE_DIR)
+    : resolve(dirname(dbPath), 'google-chat-browser-profile');
+  const googleChatInviteHeadless = process.env.GOOGLE_CHAT_INVITE_HEADLESS === 'true';
 
   mkdirSync(dirname(dbPath), { recursive: true });
   mkdirSync(dirname(logPath), { recursive: true });
@@ -39,5 +45,7 @@ export function loadConfig(): AppConfig {
     googleChatPythonCommand,
     googleChatScriptPath,
     googleChatDownloadRoot,
+    googleChatInviteProfileDir,
+    googleChatInviteHeadless,
   };
 }

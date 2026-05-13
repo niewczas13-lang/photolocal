@@ -202,6 +202,7 @@ export interface GoogleChatSpace {
 
 export interface AppConfig {
   googleChatDownloadRoot: string;
+  googleChatInviteProfileDir: string;
 }
 
 export interface NativeFolderPickResult {
@@ -218,4 +219,23 @@ export interface GoogleChatDownloadStatus {
   finishedAt?: string;
   error?: string;
   recentLines: string[];
+}
+
+export interface GoogleChatInvite {
+  key: string;
+  roomName: string | null;
+  senderEmail: string | null;
+  textPreview: string;
+  allowed: boolean;
+}
+
+export interface GoogleChatInviteListResult {
+  invites: GoogleChatInvite[];
+  url: string;
+  profileDir: string;
+}
+
+export interface GoogleChatInviteAcceptResult {
+  accepted: boolean;
+  invite: GoogleChatInvite | null;
 }

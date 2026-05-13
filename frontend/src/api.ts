@@ -10,6 +10,8 @@ import type {
   ChecklistNodeDetail,
   ChecklistRecalculateResult,
   GoogleChatDownloadStatus,
+  GoogleChatInviteAcceptResult,
+  GoogleChatInviteListResult,
   GoogleChatSpace,
   NativeFolderPickResult,
   ProjectSummary,
@@ -35,6 +37,18 @@ export const api = {
     }),
   listProjects: () => request<ProjectSummary[]>('/api/projects'),
   listGoogleChatSpaces: () => request<GoogleChatSpace[]>('/api/google-chat/spaces'),
+  listGoogleChatInvites: (whitelist: string) =>
+    request<GoogleChatInviteListResult>('/api/google-chat/invites/list', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ whitelist }),
+    }),
+  acceptGoogleChatInvite: (inviteKey: string, whitelist: string) =>
+    request<GoogleChatInviteAcceptResult>('/api/google-chat/invites/accept', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ inviteKey, whitelist }),
+    }),
   startGoogleChatDownload: (projectId: string, spaceName: string, spaceDisplayName: string) =>
     request<GoogleChatDownloadStatus>(`/api/projects/${projectId}/google-chat/download`, {
       method: 'POST',
