@@ -8,6 +8,7 @@ loadDotenv({ path: resolve(__dirname, '../../.env') });
 
 export interface AppConfig {
   port: number;
+  host: string;
   dbPath: string;
   logPath: string;
   frontendDistPath: string;
@@ -18,6 +19,7 @@ export interface AppConfig {
 
 export function loadConfig(): AppConfig {
   const port = Number(process.env.PHOTO_LOCAL_PORT ?? 4873);
+  const host = process.env.PHOTO_LOCAL_HOST ?? '0.0.0.0';
   const dbPath = resolve(process.env.PHOTO_LOCAL_DB ?? './data/photo-local.sqlite');
   const logPath = resolve(process.env.PHOTO_LOCAL_LOG ?? './logs/app.log');
   const frontendDistPath = resolve(__dirname, '../../frontend/dist');
@@ -30,6 +32,7 @@ export function loadConfig(): AppConfig {
 
   return {
     port,
+    host,
     dbPath,
     logPath,
     frontendDistPath,
