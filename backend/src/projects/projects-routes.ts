@@ -16,10 +16,12 @@ import {
   failChatClassification,
   getChatClassificationStatus,
   startChatClassification,
+  updateChatClassificationDiagnostics,
   updateChatClassificationProgress,
 } from '../chat-import/chat-classification-status.js';
 import { ChatBatchesRepository, type ChatBatchStatus } from '../chat-import/chat-batches-repository.js';
 import { importChatFolders } from '../chat-import/chat-importer.js';
+import { getOllamaDiagnostics } from '../chat-import/ollama-diagnostics.js';
 import { extractGpkg } from '../gpkg/gpkg-extractor.js';
 import {
   getGoogleChatDownloadStatus,
@@ -59,8 +61,19 @@ export async function registerProjectRoutes(app: FastifyInstance, db: Database.D
   const repository = new ProjectsRepository(db);
   const chatBatchesRepository = new ChatBatchesRepository(db);
   let isClosing = false;
+  const classificationDiagnosticsTimers = new Map<string, NodeJS.Timeout>();
+  const stopClassificationDiagnostics = (projectId: string) => {
+    const timer = classificationDiagnosticsTimers.get(projectId);
+    if (!timer) return;
+    clearInterval(timer);
+    classificationDiagnosticsTimers.delete(projectId);
+  };
   app.addHook('onClose', async () => {
     isClosing = true;
+    for (const timer of classificationDiagnosticsTimers.values()) {
+      clearInterval(timer);
+    }
+    classificationDiagnosticsTimers.clear();
   });
   const googleChatConfig = () => {
     const config = loadConfig();
@@ -153,6 +166,17 @@ export async function registerProjectRoutes(app: FastifyInstance, db: Database.D
     }
 
     startChatClassification(projectId);
+    const refreshDiagnostics = async () => {
+      try {
+        updateChatClassificationDiagnostics(projectId, await getOllamaDiagnostics());
+      } catch (error) {
+        app.log.warn({ error }, 'Failed to refresh Ollama diagnostics');
+      }
+    };
+    stopClassificationDiagnostics(projectId);
+    void refreshDiagnostics();
+    classificationDiagnosticsTimers.set(projectId, setInterval(() => void refreshDiagnostics(), 5_000));
+
     setImmediate(() => {
       if (isClosing) return;
 
@@ -163,9 +187,11 @@ export async function registerProjectRoutes(app: FastifyInstance, db: Database.D
         onProgress: updateChatClassificationProgress,
       })
       .then((result) => {
+        stopClassificationDiagnostics(projectId);
         completeChatClassification(projectId, result);
       })
       .catch((error: unknown) => {
+        stopClassificationDiagnostics(projectId);
         failChatClassification(projectId, error);
         app.log.error(error);
       });

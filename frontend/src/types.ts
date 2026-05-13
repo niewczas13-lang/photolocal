@@ -121,6 +121,9 @@ export interface ChatClassificationStatus {
   total: number;
   currentBatchId?: string | null;
   currentFolderName?: string | null;
+  currentStartedAt?: string | null;
+  currentStep?: string | null;
+  currentElapsedMs?: number | null;
   readyForImport?: number;
   pendingReview?: number;
   startedAt?: string;
@@ -128,6 +131,29 @@ export interface ChatClassificationStatus {
   finishedAt?: string;
   error?: string;
   recentDecisions?: ChatClassificationDebugEvent[];
+  diagnostics?: OllamaDiagnostics | null;
+}
+
+export interface OllamaDiagnostics {
+  checkedAt: string;
+  ollamaUrl: string;
+  model: string;
+  ollamaReachable: boolean;
+  modelLoaded: boolean;
+  processor: string | null;
+  size: string | null;
+  sizeVram: string | null;
+  expiresAt: string | null;
+  gpu: NvidiaSmiSnapshot | null;
+  error: string | null;
+}
+
+export interface NvidiaSmiSnapshot {
+  name: string;
+  utilizationGpuPercent: number | null;
+  memoryUsedMiB: number | null;
+  memoryTotalMiB: number | null;
+  temperatureC: number | null;
 }
 
 export interface ChatClassificationDebugEvent {

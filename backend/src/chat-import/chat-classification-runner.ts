@@ -37,6 +37,8 @@ export interface ChatClassificationProgressEvent {
   total: number;
   currentBatchId: string | null;
   currentFolderName: string | null;
+  currentStartedAt?: string | null;
+  currentStep?: string | null;
   lastDecision?: ChatClassificationDebugEvent;
   readyForImport: number;
   pendingReview: number;
@@ -115,6 +117,7 @@ export async function classifyWaitingChatBatches(
 
   for (const batch of batches) {
     await yieldToEventLoop();
+    const currentStartedAt = new Date().toISOString();
 
     input.onProgress?.({
       projectId: input.projectId,
@@ -122,6 +125,8 @@ export async function classifyWaitingChatBatches(
       total: batches.length,
       currentBatchId: batch.id,
       currentFolderName: batch.folderName,
+      currentStartedAt,
+      currentStep: 'Dopasowanie adresu albo analiza Qwen',
       readyForImport: result.readyForImport,
       pendingReview: result.pendingReview,
       startedAt,
@@ -153,6 +158,8 @@ export async function classifyWaitingChatBatches(
         total: batches.length,
         currentBatchId: null,
         currentFolderName: null,
+        currentStartedAt: null,
+        currentStep: null,
         lastDecision: {
           folderName: batch.folderName,
           messageText: batch.messageText,
@@ -208,6 +215,8 @@ export async function classifyWaitingChatBatches(
       total: batches.length,
       currentBatchId: null,
       currentFolderName: null,
+      currentStartedAt: null,
+      currentStep: null,
       lastDecision: {
         folderName: batch.folderName,
         messageText: batch.messageText,

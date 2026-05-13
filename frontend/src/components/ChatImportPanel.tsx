@@ -36,6 +36,14 @@ function safeFolderName(value: string): string {
     .slice(0, 200) || 'brak_nazwy';
 }
 
+function formatElapsed(ms: number | null | undefined): string {
+  if (!ms || ms < 0) return '0s';
+  const seconds = Math.floor(ms / 1000);
+  const minutes = Math.floor(seconds / 60);
+  const rest = seconds % 60;
+  return minutes > 0 ? `${minutes}m ${rest}s` : `${rest}s`;
+}
+
 export default function ChatImportPanel({ projectId, batches, onChanged }: ChatImportPanelProps) {
   const [defaultChatRoot, setDefaultChatRoot] = useState('');
   const [rootPath, setRootPath] = useState('');
@@ -343,10 +351,51 @@ export default function ChatImportPanel({ projectId, batches, onChanged }: ChatI
                 <div className="h-full bg-primary transition-all" style={{ width: `${progressPercent}%` }} />
               </div>
               {classificationStatus.currentFolderName && (
-                <p className="text-muted-foreground">Aktualnie: {classificationStatus.currentFolderName}</p>
+                <div className="rounded-md bg-muted/30 p-2 text-sm">
+                  <p className="font-medium">Aktualnie: {classificationStatus.currentFolderName}</p>
+                  <p className="text-muted-foreground">
+                    {classificationStatus.currentStep ?? 'Przetwarzanie'} · czas paczki:{' '}
+                    {formatElapsed(classificationStatus.currentElapsedMs)}
+                  </p>
+                </div>
               )}
               {classificationStatus.state === 'RUNNING' && (
                 <p className="text-muted-foreground">Model moze zajac VRAM i CPU/GPU do konca tej operacji.</p>
+              )}
+              {classificationStatus.diagnostics && (
+                <div className="rounded-md border bg-muted/20 p-3 text-sm">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-medium">Ollama debug</span>
+                    <Badge variant={classificationStatus.diagnostics.ollamaReachable ? 'outline' : 'destructive'}>
+                      {classificationStatus.diagnostics.ollamaReachable ? 'polaczona' : 'brak polaczenia'}
+                    </Badge>
+                    <Badge variant={classificationStatus.diagnostics.modelLoaded ? 'outline' : 'secondary'}>
+                      {classificationStatus.diagnostics.modelLoaded ? 'model zaladowany' : 'model niezaladowany'}
+                    </Badge>
+                  </div>
+                  <div className="mt-2 grid gap-1 text-muted-foreground md:grid-cols-2">
+                    <span>Model: {classificationStatus.diagnostics.model}</span>
+                    <span>Processor: {classificationStatus.diagnostics.processor ?? 'brak danych z Ollamy'}</span>
+                    <span>VRAM modelu: {classificationStatus.diagnostics.sizeVram ?? 'brak danych'}</span>
+                    <span>Rozmiar modelu: {classificationStatus.diagnostics.size ?? 'brak danych'}</span>
+                    {classificationStatus.diagnostics.gpu && (
+                      <>
+                        <span>GPU: {classificationStatus.diagnostics.gpu.name}</span>
+                        <span>
+                          Uzycie GPU: {classificationStatus.diagnostics.gpu.utilizationGpuPercent ?? '?'}%
+                        </span>
+                        <span>
+                          VRAM karty: {classificationStatus.diagnostics.gpu.memoryUsedMiB ?? '?'} /
+                          {classificationStatus.diagnostics.gpu.memoryTotalMiB ?? '?'} MB
+                        </span>
+                        <span>Temp: {classificationStatus.diagnostics.gpu.temperatureC ?? '?'}°C</span>
+                      </>
+                    )}
+                  </div>
+                  {classificationStatus.diagnostics.error && (
+                    <p className="mt-2 text-amber-700">{classificationStatus.diagnostics.error}</p>
+                  )}
+                </div>
               )}
               {classificationStatus.error && <p className="text-destructive">{classificationStatus.error}</p>}
               {classificationStatus.recentDecisions && classificationStatus.recentDecisions.length > 0 && (
