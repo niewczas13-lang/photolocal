@@ -22,7 +22,7 @@ describe('chat invites helpers', () => {
       [
         {
           buttonIndex: 0,
-          text: 'Budowa OPP0013\nZaproszenie od Jan Kowalski jan@gmail.com\nDołącz',
+          text: 'Budowa OPP0013\nZaproszenie od Jan Kowalski jan@gmail.com\nDolacz',
         },
       ],
       '*@gmail.com',
@@ -41,17 +41,39 @@ describe('chat invites helpers', () => {
       [
         {
           buttonIndex: 0,
-          text: 'PURDA 02 X/04017460 26 uzytkownikow Pawel Dudzinski Z zewnatrz • Zaproszenie od: niewczas13@gmail.com Podglad Dolacz',
+          text:
+            'PURDA 02 X/04017460 26 uzytkownikow Pawel Dudzinski Z zewnatrz - ' +
+            'Zaproszenie od: niewczas13@gmail.com Podglad Dolacz',
         },
       ],
       '*@gmail.com',
     );
 
     expect(invite).toMatchObject({
-      roomName: 'PURDA 02 X/04017460 26 uzytkownikow Pawel Dudzinski',
+      roomName: 'PURDA 02 X/04017460',
       senderEmail: 'niewczas13@gmail.com',
       allowed: true,
     });
   });
-});
 
+  it('handles Google Chat text where action labels are glued to the sender email', () => {
+    const [invite] = mapRawInviteCandidates(
+      [
+        {
+          buttonIndex: 0,
+          text:
+            'PURDA 02 X/04017460 26 u\u017cytkownik\u00f3wPawe\u0142 Dudzi\u0144skiPawe\u0142 Dudzi\u0144skiZ zewn\u0105trz \u2022 ' +
+            'Zaproszenie od: niewczas13@gmail.comPodgl\u0105dDo\u0142\u0105cz',
+        },
+      ],
+      '*@gmail.com',
+    );
+
+    expect(invite).toMatchObject({
+      roomName: 'PURDA 02 X/04017460',
+      senderEmail: 'niewczas13@gmail.com',
+      allowed: true,
+    });
+    expect(invite.textPreview).not.toMatch(/Podgl\u0105d|Do\u0142\u0105cz/i);
+  });
+});

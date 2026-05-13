@@ -43,14 +43,14 @@ interface RawInviteCandidate {
 function normalizePolishText(value: string): string {
   return value
     .normalize('NFKD')
-    .replace(/[łŁ]/g, 'l')
-    .replace(/[ąĄ]/g, 'a')
-    .replace(/[ćĆ]/g, 'c')
-    .replace(/[ęĘ]/g, 'e')
-    .replace(/[ńŃ]/g, 'n')
-    .replace(/[óÓ]/g, 'o')
-    .replace(/[śŚ]/g, 's')
-    .replace(/[źŹżŻ]/g, 'z')
+    .replace(/[\u0142\u0141]/g, 'l')
+    .replace(/[\u0105\u0104]/g, 'a')
+    .replace(/[\u0107\u0106]/g, 'c')
+    .replace(/[\u0119\u0118]/g, 'e')
+    .replace(/[\u0144\u0143]/g, 'n')
+    .replace(/[\u00f3\u00d3]/g, 'o')
+    .replace(/[\u015b\u015a]/g, 's')
+    .replace(/[\u017a\u0179\u017c\u017b]/g, 'z')
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase();
 }
@@ -162,14 +162,45 @@ function inviteKey(text: string): string {
 }
 
 function firstEmail(text: string): string | null {
-  return text.match(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/i)?.[0] ?? null;
+  return text.match(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}(?=$|[^a-z0-9.-])/i)?.[0] ?? null;
+}
+
+function stripInviteActionText(text: string): string {
+  return text
+    .replace(/(?:Podgl(?:\u0105d|ad)|Preview)\s*(?:Do(?:\u0142\u0105cz|lacz)|Join)?\s*$/i, '')
+    .replace(/(?:Do(?:\u0142\u0105cz|lacz)|Join)\s*$/i, '')
+    .trim();
+}
+
+function compactInviteText(text: string): string {
+  return stripInviteActionText(text.replace(/\s+/g, ' '));
+}
+
+function indexOfNormalized(haystack: string, needle: string): number {
+  return normalizePolishText(haystack).indexOf(normalizePolishText(needle));
+}
+
+function emailAfterInviteMarker(text: string): string | null {
+  const compactText = compactInviteText(text);
+  const markerIndex = indexOfNormalized(compactText, 'Zaproszenie od:');
+  const source = stripInviteActionText(markerIndex >= 0 ? compactText.slice(markerIndex) : compactText);
+  return firstEmail(source);
+}
+
+function trimRoomName(text: string): string {
+  const compactText = compactInviteText(text)
+    .replace(/\s+z\s+zewnatrz\s*[•-]?\s*$/i, '')
+    .trim();
+  const userCountMatch = normalizePolishText(compactText).match(/\s+\d+\s+uzytkownikow/);
+  if (userCountMatch?.index === undefined || userCountMatch.index < 1) return compactText;
+  return compactText.slice(0, userCountMatch.index).trim();
 }
 
 function firstUsefulLine(text: string): string | null {
-  const compactText = text.replace(/\s+/g, ' ').trim();
-  const inviteMarker = compactText.match(/\s+Z\s+zewnątrz\s+•\s+Zaproszenie od:|\s+Z\s+zewnatrz\s+•\s+Zaproszenie od:|\s+Zaproszenie od:/i);
-  if (inviteMarker?.index && inviteMarker.index > 0) {
-    return compactText.slice(0, inviteMarker.index).trim();
+  const compactText = compactInviteText(text);
+  const inviteMarkerIndex = indexOfNormalized(compactText, 'Zaproszenie od:');
+  if (inviteMarkerIndex > 0) {
+    return trimRoomName(compactText.slice(0, inviteMarkerIndex));
   }
 
   const lines = text
@@ -183,12 +214,12 @@ function firstUsefulLine(text: string): string | null {
 export function mapRawInviteCandidates(rawCandidates: RawInviteCandidate[], whitelistText: string): ChatInviteCandidate[] {
   const whitelist = parseInviteWhitelist(whitelistText);
   return rawCandidates.map((candidate) => {
-    const senderEmail = firstEmail(candidate.text);
+    const senderEmail = emailAfterInviteMarker(candidate.text);
     return {
       key: inviteKey(candidate.text),
       roomName: firstUsefulLine(candidate.text),
       senderEmail,
-      textPreview: candidate.text.replace(/\s+/g, ' ').trim().slice(0, 500),
+      textPreview: compactInviteText(candidate.text).slice(0, 500),
       allowed: isInviteSenderAllowed(senderEmail, whitelist),
     };
   });
