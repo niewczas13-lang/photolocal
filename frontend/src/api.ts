@@ -49,6 +49,10 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name: newName }),
     }),
+  deleteProject: (projectId: string) =>
+    request<{ ok: true }>(`/api/projects/${projectId}`, {
+      method: 'DELETE',
+    }),
   getChecklist: (projectId: string) => request<ChecklistNode[]>(`/api/projects/${projectId}/checklist`),
   recalculateChecklist: (
     projectId: string,

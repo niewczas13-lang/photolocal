@@ -25,6 +25,56 @@ describe('projects routes', () => {
     expect(response.json()).toEqual([]);
   });
 
+  it('deletes a project from the database without removing its photo folder', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'photo-local-delete-project-'));
+    process.env.PHOTO_LOCAL_DB = join(dir, 'test.sqlite');
+    process.env.PHOTO_BASE_DIR = join(dir, 'photos');
+
+    const { app, db } = await buildApp();
+    const repository = new ProjectsRepository(db);
+    const projectFolder = join(dir, 'photos', 'PROJEKT');
+    mkdirSync(projectFolder, { recursive: true });
+    writeFileSync(join(projectFolder, 'kept.txt'), 'do not delete');
+    const project = repository.createProject({
+      name: 'PROJEKT',
+      projectDefinition: null,
+      projectType: 'SI',
+      splitterTopology: 'SINGLE',
+      splitterTopologySource: 'AUTO',
+      splitterCount: 1,
+      gpkgFileName: 'projekt.gpkg',
+      baseFolder: projectFolder,
+      addresses: [],
+      dacToAddressCableCount: 0,
+      adssToAddressCableCount: 0,
+      checklistNodes: [
+        {
+          id: 'node-upload',
+          projectId: 'project-temp',
+          parentId: null,
+          name: 'Zdjecia',
+          path: 'Notatki_z_budowy/Zdjecia',
+          nodeType: 'STATIC',
+          addressId: null,
+          sortOrder: 0,
+          minPhotos: 1,
+          acceptsPhotos: true,
+        },
+      ],
+    });
+
+    const response = await app.inject({ method: 'DELETE', url: `/api/projects/${project.id}` });
+    const projectsAfterDelete = repository.listProjects();
+    const checklistAfterDelete = repository.getChecklist(project.id);
+    await app.close();
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ ok: true });
+    expect(projectsAfterDelete).toEqual([]);
+    expect(checklistAfterDelete).toEqual([]);
+    expect(existsSync(join(projectFolder, 'kept.txt'))).toBe(true);
+  });
+
   it('stores an uploaded photo against a checklist node', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'photo-local-upload-'));
     process.env.PHOTO_LOCAL_DB = join(dir, 'test.sqlite');

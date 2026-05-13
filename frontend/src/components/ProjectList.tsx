@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react';
-import { CheckCheck, FolderPlus, ChevronRight } from 'lucide-react';
+import { CheckCheck, FolderPlus, ChevronRight, Trash2 } from 'lucide-react';
+import { api } from '../api';
 import type { ProjectSummary } from '../types';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from './ui/tabs';
 import { Button } from './ui/button';
@@ -10,10 +11,12 @@ interface ProjectListProps {
   projects: ProjectSummary[];
   onCreate: () => void;
   onOpen: (projectId: string) => void;
+  onDeleted: (projectId: string) => void;
 }
 
-export default function ProjectList({ projects, onCreate, onOpen }: ProjectListProps) {
+export default function ProjectList({ projects, onCreate, onOpen, onDeleted }: ProjectListProps) {
   const [tab, setTab] = useState<'IN_PROGRESS' | 'COMPLETED'>('IN_PROGRESS');
+  const [deletingProjectId, setDeletingProjectId] = useState<string | null>(null);
 
   const filteredProjects = useMemo(() => {
     return projects.filter((p) => {
@@ -21,6 +24,24 @@ export default function ProjectList({ projects, onCreate, onOpen }: ProjectListP
       return p.status === 'Kompletne';
     });
   }, [projects, tab]);
+
+  const handleDelete = async (project: ProjectSummary) => {
+    const confirmed = window.confirm(
+      `Usunac projekt "${project.name}" z aplikacji?\n\nZdjecia na dysku zostana w folderze:\n${project.baseFolder}`,
+    );
+    if (!confirmed) return;
+
+    setDeletingProjectId(project.id);
+    try {
+      await api.deleteProject(project.id);
+      onDeleted(project.id);
+    } catch (error) {
+      console.error(error);
+      alert('Blad podczas usuwania projektu');
+    } finally {
+      setDeletingProjectId(null);
+    }
+  };
 
   return (
     <section className="container mx-auto p-6 max-w-6xl">
@@ -56,7 +77,7 @@ export default function ProjectList({ projects, onCreate, onOpen }: ProjectListP
           ) : (
             <div className="rounded-xl border border-border overflow-hidden">
               {/* Table Header */}
-              <div className="grid grid-cols-[160px_1fr_220px_36px] bg-muted/50 border-b border-border">
+              <div className="grid grid-cols-[160px_1fr_220px_86px] bg-muted/50 border-b border-border">
                 <div className="px-4 py-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                   Definicja
                 </div>
@@ -81,7 +102,7 @@ export default function ProjectList({ projects, onCreate, onOpen }: ProjectListP
                   <div
                     key={project.id}
                     onClick={() => onOpen(project.id)}
-                    className={`grid grid-cols-[160px_1fr_220px_36px] items-center cursor-pointer transition-colors hover:bg-primary/5 group ${
+                    className={`grid grid-cols-[160px_1fr_220px_86px] items-center cursor-pointer transition-colors hover:bg-primary/5 group ${
                       !isLast ? 'border-b border-border' : ''
                     } ${isComplete ? 'bg-green-500/5' : ''}`}
                   >
@@ -121,8 +142,20 @@ export default function ProjectList({ projects, onCreate, onOpen }: ProjectListP
                       </Badge>
                     </div>
 
-                    {/* Arrow */}
-                    <div className="flex items-center justify-center pr-2">
+                    <div className="flex items-center justify-end gap-1 pr-2">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        disabled={deletingProjectId === project.id}
+                        className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                        title="Usun projekt z aplikacji"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void handleDelete(project);
+                        }}
+                      >
+                        <Trash2 size={15} />
+                      </Button>
                       <ChevronRight size={16} className="text-muted-foreground group-hover:text-primary transition-colors" />
                     </div>
                   </div>

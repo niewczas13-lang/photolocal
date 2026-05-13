@@ -81,7 +81,12 @@ export default function App() {
             }}
           />
         ) : (
-          <ProjectList projects={projects} onCreate={() => setCreating(true)} onOpen={(projectId) => setProjectRoute(projectId)} />
+          <ProjectList
+            projects={projects}
+            onCreate={() => setCreating(true)}
+            onOpen={(projectId) => setProjectRoute(projectId)}
+            onDeleted={(projectId) => setProjects(projects.filter((project) => project.id !== projectId))}
+          />
         )}
       </div>
 

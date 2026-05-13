@@ -274,6 +274,11 @@ export class ProjectsRepository {
       .run(newName, projectId);
   }
 
+  deleteProject(projectId: string): boolean {
+    const result = this.db.prepare(`DELETE FROM projects WHERE id = ?`).run(projectId);
+    return result.changes > 0;
+  }
+
   recalculateChecklist(input: RecalculateChecklistInput): RecalculateChecklistResult {
     const result: RecalculateChecklistResult = {
       addedNodes: 0,

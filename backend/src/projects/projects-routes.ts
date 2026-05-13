@@ -397,6 +397,14 @@ export async function registerProjectRoutes(app: FastifyInstance, db: Database.D
     return repository.getProject(projectId);
   });
 
+  app.delete('/api/projects/:projectId', async (request, reply) => {
+    const { projectId } = request.params as { projectId: string };
+    const deleted = repository.deleteProject(projectId);
+
+    if (!deleted) return reply.status(404).send({ error: 'Project not found' });
+    return { ok: true };
+  });
+
   app.post('/api/projects/:projectId/checklist/recalculate', async (request, reply) => {
     const { projectId } = request.params as { projectId: string };
     const project = repository.getProject(projectId);
