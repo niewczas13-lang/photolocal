@@ -30,6 +30,16 @@ IMAGE_MIME_TYPES = {'image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image
 WORKERS = 20
 
 
+def configure_console_output():
+    """Nie przerywaj pobierania, gdy konsola Windows nie umie wypisac znaku."""
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, 'reconfigure'):
+            stream.reconfigure(errors='replace')
+
+
+configure_console_output()
+
+
 def get_chat_service():
     creds = None
     if os.path.exists('token.json'):
