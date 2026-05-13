@@ -15,6 +15,18 @@ export interface ChatInviteCandidate {
   allowed: boolean;
 }
 
+export interface ChatInviteDebugInfo {
+  steps: string[];
+  finalUrl: string | null;
+  title: string | null;
+  buttonCount: number;
+  joinButtonCount: number;
+  rawCandidateCount: number;
+  bodyTextPreview: string;
+  buttonLabelsPreview: string[];
+  error: string | null;
+}
+
 export interface ChatInviteBrowserConfig {
   profileDir: string;
   headless: boolean;
@@ -23,6 +35,20 @@ export interface ChatInviteBrowserConfig {
 interface RawInviteCandidate {
   buttonIndex: number;
   text: string;
+}
+
+function createDebugInfo(): ChatInviteDebugInfo {
+  return {
+    steps: [],
+    finalUrl: null,
+    title: null,
+    buttonCount: 0,
+    joinButtonCount: 0,
+    rawCandidateCount: 0,
+    bodyTextPreview: '',
+    buttonLabelsPreview: [],
+    error: null,
+  };
 }
 
 export function parseInviteWhitelist(value: string): string[] {
@@ -76,8 +102,13 @@ export function mapRawInviteCandidates(rawCandidates: RawInviteCandidate[], whit
   });
 }
 
-async function openInvitesPage(config: ChatInviteBrowserConfig): Promise<{ page: Page; close: () => Promise<void> }> {
+async function openInvitesPage(
+  config: ChatInviteBrowserConfig,
+  debug: ChatInviteDebugInfo,
+): Promise<{ page: Page; close: () => Promise<void> }> {
+  debug.steps.push(`Tworze/uzywam profilu Chrome: ${config.profileDir}`);
   await mkdir(config.profileDir, { recursive: true });
+  debug.steps.push(`Uruchamiam Chrome: ${config.headless ? 'headless' : 'widoczny'}`);
   const context = await chromium.launchPersistentContext(config.profileDir, {
     channel: 'chrome',
     headless: config.headless,
@@ -85,8 +116,12 @@ async function openInvitesPage(config: ChatInviteBrowserConfig): Promise<{ page:
   });
   const page = context.pages()[0] ?? (await context.newPage());
   page.setDefaultTimeout(20_000);
+  debug.steps.push(`Otwieram ${GOOGLE_CHAT_INVITES_URL}`);
   await page.goto(GOOGLE_CHAT_INVITES_URL, { waitUntil: 'domcontentloaded' });
+  debug.steps.push('DOM zaladowany, czekam 3s na dane Google Chat');
   await page.waitForTimeout(3_000);
+  debug.finalUrl = page.url();
+  debug.title = await page.title().catch(() => null);
 
   return {
     page,
@@ -94,8 +129,43 @@ async function openInvitesPage(config: ChatInviteBrowserConfig): Promise<{ page:
   };
 }
 
+async function collectPageDebug(page: Page): Promise<Omit<ChatInviteDebugInfo, 'steps' | 'error' | 'rawCandidateCount'>> {
+  return page.evaluate(() => {
+    const normalizeLabel = (value: string): string =>
+      value
+        .normalize('NFKD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase();
+    const buttons = Array.from(document.querySelectorAll('button, [role="button"]'));
+    const buttonLabels = buttons.map((button) =>
+      [
+        button.textContent ?? '',
+        button.getAttribute('aria-label') ?? '',
+        button.getAttribute('data-tooltip') ?? '',
+      ]
+        .join(' ')
+        .replace(/\s+/g, ' ')
+        .trim(),
+    );
+    const joinButtonCount = buttonLabels.filter((label) => /\b(dolacz|join)\b/i.test(normalizeLabel(label))).length;
+    return {
+      finalUrl: window.location.href,
+      title: document.title,
+      buttonCount: buttons.length,
+      joinButtonCount,
+      bodyTextPreview: (document.body?.innerText ?? '').replace(/\s+/g, ' ').trim().slice(0, 1000),
+      buttonLabelsPreview: buttonLabels.filter(Boolean).slice(0, 30),
+    };
+  });
+}
+
 async function extractRawInviteCandidates(page: Page): Promise<RawInviteCandidate[]> {
   return page.evaluate(() => {
+    const normalizeLabel = (value: string): string =>
+      value
+        .normalize('NFKD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase();
     const buttons = Array.from(document.querySelectorAll('button, [role="button"]'));
     const joinButtons = buttons.filter((button) => {
       const label = [
@@ -103,7 +173,7 @@ async function extractRawInviteCandidates(page: Page): Promise<RawInviteCandidat
         button.getAttribute('aria-label') ?? '',
         button.getAttribute('data-tooltip') ?? '',
       ].join(' ');
-      return /\b(dołącz|dolacz|join)\b/i.test(label);
+      return /\b(dolacz|join)\b/i.test(normalizeLabel(label));
     });
 
     return joinButtons.map((button, buttonIndex) => {
@@ -128,15 +198,24 @@ async function extractRawInviteCandidates(page: Page): Promise<RawInviteCandidat
 export async function listChatInvites(input: {
   config: ChatInviteBrowserConfig;
   whitelist: string;
-}): Promise<{ invites: ChatInviteCandidate[]; url: string; profileDir: string }> {
-  const browser = await openInvitesPage(input.config);
+}): Promise<{ invites: ChatInviteCandidate[]; url: string; profileDir: string; debug: ChatInviteDebugInfo }> {
+  const debug = createDebugInfo();
+  const browser = await openInvitesPage(input.config, debug);
   try {
+    const pageDebug = await collectPageDebug(browser.page);
+    Object.assign(debug, pageDebug);
     const rawCandidates = await extractRawInviteCandidates(browser.page);
+    debug.rawCandidateCount = rawCandidates.length;
+    debug.steps.push(`Znaleziono kandydatow zaproszen: ${rawCandidates.length}`);
     return {
       invites: mapRawInviteCandidates(rawCandidates, input.whitelist),
       url: GOOGLE_CHAT_INVITES_URL,
       profileDir: input.config.profileDir,
+      debug,
     };
+  } catch (error) {
+    debug.error = error instanceof Error ? error.message : String(error);
+    throw error;
   } finally {
     await browser.close();
   }
@@ -146,18 +225,26 @@ export async function acceptChatInvite(input: {
   config: ChatInviteBrowserConfig;
   whitelist: string;
   inviteKey: string;
-}): Promise<{ accepted: boolean; invite: ChatInviteCandidate | null }> {
-  const browser = await openInvitesPage(input.config);
+}): Promise<{ accepted: boolean; invite: ChatInviteCandidate | null; debug: ChatInviteDebugInfo }> {
+  const debug = createDebugInfo();
+  const browser = await openInvitesPage(input.config, debug);
   try {
+    const pageDebug = await collectPageDebug(browser.page);
+    Object.assign(debug, pageDebug);
     const rawCandidates = await extractRawInviteCandidates(browser.page);
+    debug.rawCandidateCount = rawCandidates.length;
     const invites = mapRawInviteCandidates(rawCandidates, input.whitelist);
     const inviteIndex = invites.findIndex((invite) => invite.key === input.inviteKey);
     const invite = inviteIndex >= 0 ? invites[inviteIndex] : null;
-    if (!invite || !invite.allowed) return { accepted: false, invite };
+    if (!invite || !invite.allowed) return { accepted: false, invite, debug };
 
+    debug.steps.push(`Klikam Dolacz dla zaproszenia ${invite.key}`);
     await browser.page.getByRole('button', { name: /dołącz|dolacz|join/i }).nth(inviteIndex).click();
     await browser.page.waitForTimeout(2_000);
-    return { accepted: true, invite };
+    return { accepted: true, invite, debug };
+  } catch (error) {
+    debug.error = error instanceof Error ? error.message : String(error);
+    throw error;
   } finally {
     await browser.close();
   }

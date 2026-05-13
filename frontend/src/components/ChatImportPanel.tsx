@@ -7,6 +7,7 @@ import type {
   ChatClassificationStatus,
   ChatImportResult,
   GoogleChatDownloadStatus,
+  GoogleChatInviteDebugInfo,
   GoogleChatInvite,
   GoogleChatSpace,
 } from '../types';
@@ -62,6 +63,7 @@ export default function ChatImportPanel({ projectId, batches, onChanged }: ChatI
   const [inviteWhitelist, setInviteWhitelist] = useState('*@gmail.com');
   const [invites, setInvites] = useState<GoogleChatInvite[]>([]);
   const [inviteProfileDir, setInviteProfileDir] = useState('');
+  const [inviteDebug, setInviteDebug] = useState<GoogleChatInviteDebugInfo | null>(null);
   const [acceptingInviteKey, setAcceptingInviteKey] = useState<string | null>(null);
 
   const counts = useMemo(
@@ -97,6 +99,7 @@ export default function ChatImportPanel({ projectId, batches, onChanged }: ChatI
       const result = await api.listGoogleChatInvites(inviteWhitelist);
       setInvites(result.invites);
       setInviteProfileDir(result.profileDir);
+      setInviteDebug(result.debug);
     } catch (error) {
       console.error(error);
       alert('Blad podczas pobierania zaproszen Google Chat. Jesli Chrome otworzyl sie pierwszy raz, zaloguj konto bota i sprobuj ponownie.');
@@ -110,6 +113,7 @@ export default function ChatImportPanel({ projectId, batches, onChanged }: ChatI
     setAcceptingInviteKey(invite.key);
     try {
       const result = await api.acceptGoogleChatInvite(invite.key, inviteWhitelist);
+      setInviteDebug(result.debug);
       if (!result.accepted) {
         alert('Nie udalo sie zaakceptowac zaproszenia. Sprawdz whitelist albo odswiez liste.');
       }
@@ -365,6 +369,46 @@ export default function ChatImportPanel({ projectId, batches, onChanged }: ChatI
               <p className="text-sm text-muted-foreground">
                 Brak zaladowanych zaproszen. Kliknij zaladowanie, zeby odczytac aktualna liste z Google Chat.
               </p>
+            )}
+
+            {inviteDebug && (
+              <details className="rounded-md border bg-muted/20 p-3 text-sm">
+                <summary className="cursor-pointer font-medium">
+                  Debug zaproszen: przyciski {inviteDebug.buttonCount}, Dolacz {inviteDebug.joinButtonCount},
+                  kandydaci {inviteDebug.rawCandidateCount}
+                </summary>
+                <div className="mt-3 flex flex-col gap-3">
+                  <div className="grid gap-1 text-muted-foreground md:grid-cols-2">
+                    <span>URL: {inviteDebug.finalUrl ?? 'brak'}</span>
+                    <span>Tytul: {inviteDebug.title ?? 'brak'}</span>
+                  </div>
+                  {inviteDebug.steps.length > 0 && (
+                    <div>
+                      <p className="font-medium">Kroki</p>
+                      <pre className="mt-1 max-h-32 overflow-auto rounded bg-background p-2 text-xs whitespace-pre-wrap">
+                        {inviteDebug.steps.join('\n')}
+                      </pre>
+                    </div>
+                  )}
+                  {inviteDebug.buttonLabelsPreview.length > 0 && (
+                    <div>
+                      <p className="font-medium">Pierwsze etykiety przyciskow</p>
+                      <pre className="mt-1 max-h-32 overflow-auto rounded bg-background p-2 text-xs whitespace-pre-wrap">
+                        {inviteDebug.buttonLabelsPreview.join('\n')}
+                      </pre>
+                    </div>
+                  )}
+                  {inviteDebug.bodyTextPreview && (
+                    <div>
+                      <p className="font-medium">Podglad tekstu strony</p>
+                      <pre className="mt-1 max-h-40 overflow-auto rounded bg-background p-2 text-xs whitespace-pre-wrap">
+                        {inviteDebug.bodyTextPreview}
+                      </pre>
+                    </div>
+                  )}
+                  {inviteDebug.error && <p className="text-destructive">{inviteDebug.error}</p>}
+                </div>
+              </details>
             )}
           </div>
 
