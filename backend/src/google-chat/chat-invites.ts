@@ -16,6 +16,16 @@ export interface ChatInviteCandidate {
   textPreview: string;
 }
 
+export type ChatInviteSessionState = 'ACTIVE' | 'NEEDS_LOGIN' | 'UNKNOWN';
+
+export interface ChatInviteSessionStatus {
+  state: ChatInviteSessionState;
+  message: string;
+  url: string | null;
+  title: string | null;
+  checkedAt: string;
+}
+
 export interface ChatInviteDebugInfo {
   steps: string[];
   finalUrl: string | null;
@@ -37,6 +47,12 @@ export interface ChatInviteBrowserConfig {
 interface RawInviteCandidate {
   buttonIndex: number;
   text: string;
+}
+
+interface ChromeTargetInfo {
+  url?: string;
+  title?: string;
+  type?: string;
 }
 
 function normalizePolishText(value: string): string {
@@ -134,6 +150,75 @@ async function waitForCdpEndpoint(config: ChatInviteBrowserConfig, debug: ChatIn
   }
 
   throw new Error(`Nie udalo sie polaczyc z Chrome CDP na porcie ${debugPort}`);
+}
+
+function sessionStatusFromTarget(target: ChromeTargetInfo | null): ChatInviteSessionStatus {
+  const url = target?.url ?? null;
+  const title = target?.title ?? null;
+  const normalizedUrl = url?.toLowerCase() ?? '';
+  const checkedAt = new Date().toISOString();
+
+  if (normalizedUrl.includes('accounts.google.com')) {
+    return {
+      state: 'NEEDS_LOGIN',
+      message: 'Trzeba zalogowac konto Google w otwartym oknie Chrome.',
+      url,
+      title,
+      checkedAt,
+    };
+  }
+
+  if (normalizedUrl.includes('chat.google.com')) {
+    return {
+      state: 'ACTIVE',
+      message: 'Sesja Google Chat wyglada na aktywna.',
+      url,
+      title,
+      checkedAt,
+    };
+  }
+
+  return {
+    state: 'UNKNOWN',
+    message: 'Nie udalo sie jednoznacznie sprawdzic sesji. Sprawdz otwarte okno Chrome.',
+    url,
+    title,
+    checkedAt,
+  };
+}
+
+async function readChromeSessionStatus(
+  config: ChatInviteBrowserConfig,
+  debug: ChatInviteDebugInfo,
+): Promise<ChatInviteSessionStatus> {
+  const cdpUrl = await waitForCdpEndpoint(config, debug);
+  const listUrl = `${cdpUrl}/json/list`;
+  const startedAt = Date.now();
+  let lastTarget: ChromeTargetInfo | null = null;
+  let activeTarget: ChromeTargetInfo | null = null;
+
+  while (Date.now() - startedAt < 8_000) {
+    try {
+      const response = await fetch(listUrl);
+      if (response.ok) {
+        const targets = (await response.json()) as ChromeTargetInfo[];
+        lastTarget =
+          targets.find((target) => target.type === 'page' && target.url?.includes('accounts.google.com')) ??
+          targets.find((target) => target.type === 'page' && target.url?.includes('chat.google.com')) ??
+          targets.find((target) => target.type === 'page') ??
+          null;
+        const status = sessionStatusFromTarget(lastTarget);
+        if (status.state === 'NEEDS_LOGIN') return status;
+        if (status.state === 'ACTIVE') activeTarget = lastTarget;
+        if (activeTarget && Date.now() - startedAt > 3_000) return sessionStatusFromTarget(activeTarget);
+      }
+    } catch {
+      // Chrome target list is not ready yet.
+    }
+    await new Promise((resolveTimeout) => setTimeout(resolveTimeout, 500));
+  }
+
+  return sessionStatusFromTarget(lastTarget);
 }
 
 function inviteKey(text: string): string {
@@ -343,12 +428,17 @@ async function clickJoinButton(page: Page, inviteIndex: number): Promise<boolean
 
 export async function listChatInvites(input: {
   config: ChatInviteBrowserConfig;
-}): Promise<{ invites: ChatInviteCandidate[]; url: string; profileDir: string }> {
+}): Promise<{ invites: ChatInviteCandidate[]; url: string; profileDir: string; session: ChatInviteSessionStatus }> {
   const debug = createDebugInfo();
   const browser = await openInvitesPage(input.config, debug);
   try {
     const pageDebug = await collectPageDebug(browser.page);
     Object.assign(debug, pageDebug);
+    const session = sessionStatusFromTarget({
+      url: debug.finalUrl ?? undefined,
+      title: debug.title ?? undefined,
+      type: 'page',
+    });
     const rawCandidates = await extractRawInviteCandidates(browser.page);
     debug.rawCandidateCount = rawCandidates.length;
     debug.steps.push(`Znaleziono kandydatow zaproszen: ${rawCandidates.length}`);
@@ -356,6 +446,7 @@ export async function listChatInvites(input: {
       invites: mapRawInviteCandidates(rawCandidates),
       url: GOOGLE_CHAT_INVITES_URL,
       profileDir: input.config.profileDir,
+      session,
     };
   } catch (error) {
     debug.error = error instanceof Error ? error.message : String(error);
@@ -402,17 +493,19 @@ export function defaultInviteProfileDir(): string {
 
 export async function openChatInvitesSetup(input: {
   config: ChatInviteBrowserConfig;
-}): Promise<{ started: true; url: string; profileDir: string }> {
+}): Promise<{ started: true; url: string; profileDir: string; session: ChatInviteSessionStatus }> {
   const debug = createDebugInfo();
   debug.steps.push(`Tworze/uzywam profilu Chrome: ${input.config.profileDir}`);
   await mkdir(input.config.profileDir, { recursive: true });
   debug.steps.push('Otwieram zwykly Chrome do logowania i zostawiam okno otwarte');
   launchExternalChrome({ ...input.config, headless: false }, debug);
+  const session = await readChromeSessionStatus(input.config, debug);
 
   return {
     started: true,
     url: GOOGLE_CHAT_INVITES_URL,
     profileDir: input.config.profileDir,
+    session,
   };
 }
 

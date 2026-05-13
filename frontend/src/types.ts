@@ -228,10 +228,19 @@ export interface GoogleChatInvite {
   textPreview: string;
 }
 
+export interface GoogleChatInviteSessionStatus {
+  state: 'ACTIVE' | 'NEEDS_LOGIN' | 'UNKNOWN';
+  message: string;
+  url: string | null;
+  title: string | null;
+  checkedAt: string;
+}
+
 export interface GoogleChatInviteListResult {
   invites: GoogleChatInvite[];
   url: string;
   profileDir: string;
+  session: GoogleChatInviteSessionStatus;
 }
 
 export interface GoogleChatInviteAcceptResult {
@@ -243,4 +252,5 @@ export interface GoogleChatInviteSetupResult {
   started: true;
   url: string;
   profileDir: string;
+  session: GoogleChatInviteSessionStatus;
 }

@@ -8,6 +8,7 @@ import type {
   ChatImportResult,
   GoogleChatDownloadStatus,
   GoogleChatInvite,
+  GoogleChatInviteSessionStatus,
   GoogleChatSpace,
 } from '../types';
 import { Badge } from './ui/badge';
@@ -61,6 +62,7 @@ export default function ChatImportPanel({ projectId, batches, onChanged }: ChatI
   const [refreshedClassificationKey, setRefreshedClassificationKey] = useState<string | null>(null);
   const [invites, setInvites] = useState<GoogleChatInvite[]>([]);
   const [inviteProfileDir, setInviteProfileDir] = useState('');
+  const [inviteSession, setInviteSession] = useState<GoogleChatInviteSessionStatus | null>(null);
   const [acceptingInviteKey, setAcceptingInviteKey] = useState<string | null>(null);
 
   const counts = useMemo(
@@ -96,6 +98,7 @@ export default function ChatImportPanel({ projectId, batches, onChanged }: ChatI
       const result = await api.listGoogleChatInvites();
       setInvites(result.invites);
       setInviteProfileDir(result.profileDir);
+      setInviteSession(result.session);
     } catch (error) {
       console.error(error);
       alert('Blad podczas pobierania zaproszen Google Chat. Jesli Chrome otworzyl sie pierwszy raz, zaloguj konto bota i sprobuj ponownie.');
@@ -109,6 +112,7 @@ export default function ChatImportPanel({ projectId, batches, onChanged }: ChatI
     try {
       const result = await api.openGoogleChatInviteSetup();
       setInviteProfileDir(result.profileDir);
+      setInviteSession(result.session);
     } catch (error) {
       console.error(error);
       alert('Blad podczas otwierania Chrome do logowania Google Chat');
@@ -325,14 +329,34 @@ export default function ChatImportPanel({ projectId, batches, onChanged }: ChatI
             </div>
 
             <div className="rounded-md bg-muted/30 p-3 text-sm">
-              <p className="font-medium">Profil sesji Chrome</p>
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="font-medium">Profil sesji Chrome</p>
+                {inviteSession && (
+                  <Badge
+                    variant={
+                      inviteSession.state === 'ACTIVE'
+                        ? 'outline'
+                        : inviteSession.state === 'NEEDS_LOGIN'
+                          ? 'destructive'
+                          : 'secondary'
+                    }
+                  >
+                    {inviteSession.state === 'ACTIVE'
+                      ? 'Sesja aktywna'
+                      : inviteSession.state === 'NEEDS_LOGIN'
+                        ? 'Trzeba sie zalogowac'
+                        : 'Status niepewny'}
+                  </Badge>
+                )}
+              </div>
               <p className="break-all text-muted-foreground">
                 {inviteProfileDir || 'Zostanie pokazany po pierwszym zaladowaniu zaproszen.'}
               </p>
               <p className="mt-2 text-muted-foreground">
-                Najpierw kliknij Otworz logowanie. Chrome zostanie otwarty i nie zamknie sie automatycznie,
-                wiec spokojnie zaloguj konto bota. Potem kliknij Zaladuj zaproszenia.
+                {inviteSession?.message ??
+                  'Najpierw kliknij Otworz logowanie. Chrome zostanie otwarty i nie zamknie sie automatycznie, wiec spokojnie zaloguj konto bota. Potem kliknij Zaladuj zaproszenia.'}
               </p>
+              {inviteSession?.url && <p className="mt-1 break-all text-xs text-muted-foreground">{inviteSession.url}</p>}
             </div>
 
             {invites.length > 0 ? (
