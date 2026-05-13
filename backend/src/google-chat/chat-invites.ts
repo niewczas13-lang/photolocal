@@ -40,6 +40,21 @@ interface RawInviteCandidate {
   text: string;
 }
 
+function normalizePolishText(value: string): string {
+  return value
+    .normalize('NFKD')
+    .replace(/[łŁ]/g, 'l')
+    .replace(/[ąĄ]/g, 'a')
+    .replace(/[ćĆ]/g, 'c')
+    .replace(/[ęĘ]/g, 'e')
+    .replace(/[ńŃ]/g, 'n')
+    .replace(/[óÓ]/g, 'o')
+    .replace(/[śŚ]/g, 's')
+    .replace(/[źŹżŻ]/g, 'z')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+}
+
 function createDebugInfo(): ChatInviteDebugInfo {
   return {
     steps: [],
@@ -153,7 +168,7 @@ function firstUsefulLine(text: string): string | null {
     .split('\n')
     .map((line) => line.trim())
     .filter(Boolean)
-    .filter((line) => !/^(dolacz|join)$/i.test(line.normalize('NFKD').replace(/[\u0300-\u036f]/g, '')));
+    .filter((line) => !/^(dolacz|join)$/i.test(normalizePolishText(line)));
   return lines[0] ?? null;
 }
 
@@ -201,6 +216,14 @@ async function collectPageDebug(page: Page): Promise<Omit<ChatInviteDebugInfo, '
     const normalizeLabel = (value: string): string =>
       value
         .normalize('NFKD')
+        .replace(/[łŁ]/g, 'l')
+        .replace(/[ąĄ]/g, 'a')
+        .replace(/[ćĆ]/g, 'c')
+        .replace(/[ęĘ]/g, 'e')
+        .replace(/[ńŃ]/g, 'n')
+        .replace(/[óÓ]/g, 'o')
+        .replace(/[śŚ]/g, 's')
+        .replace(/[źŹżŻ]/g, 'z')
         .replace(/[\u0300-\u036f]/g, '')
         .toLowerCase();
     const buttons = Array.from(document.querySelectorAll('button, [role="button"]'));
@@ -231,6 +254,14 @@ async function extractRawInviteCandidates(page: Page): Promise<RawInviteCandidat
     const normalizeLabel = (value: string): string =>
       value
         .normalize('NFKD')
+        .replace(/[łŁ]/g, 'l')
+        .replace(/[ąĄ]/g, 'a')
+        .replace(/[ćĆ]/g, 'c')
+        .replace(/[ęĘ]/g, 'e')
+        .replace(/[ńŃ]/g, 'n')
+        .replace(/[óÓ]/g, 'o')
+        .replace(/[śŚ]/g, 's')
+        .replace(/[źŹżŻ]/g, 'z')
         .replace(/[\u0300-\u036f]/g, '')
         .toLowerCase();
     const buttons = Array.from(document.querySelectorAll('button, [role="button"]'));

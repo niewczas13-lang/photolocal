@@ -22,7 +22,7 @@ describe('chat invites helpers', () => {
       [
         {
           buttonIndex: 0,
-          text: 'Budowa OPP0013\nZaproszenie od Jan Kowalski jan@gmail.com\nDolacz',
+          text: 'Budowa OPP0013\nZaproszenie od Jan Kowalski jan@gmail.com\nDołącz',
         },
       ],
       '*@gmail.com',
