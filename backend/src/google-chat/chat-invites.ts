@@ -95,19 +95,21 @@ function launchExternalChrome(config: ChatInviteBrowserConfig, debug: ChatInvite
   debug.steps.push(`Uruchamiam zwykly Chrome: ${chromePath}`);
   debug.steps.push(`Remote debugging port: ${debugPort}`);
 
-  const child = spawn(
-    chromePath,
-    [
+  const args = [
       `--remote-debugging-port=${debugPort}`,
       `--user-data-dir=${config.profileDir}`,
       '--no-first-run',
-      '--new-window',
-      GOOGLE_CHAT_INVITES_URL,
-    ],
+    ...(config.headless ? ['--headless=new', '--disable-gpu'] : ['--new-window']),
+    GOOGLE_CHAT_INVITES_URL,
+  ];
+
+  const child = spawn(
+    chromePath,
+    args,
     {
       detached: true,
       stdio: 'ignore',
-      windowsHide: false,
+      windowsHide: config.headless,
     },
   );
   child.unref();
@@ -164,6 +166,12 @@ function firstEmail(text: string): string | null {
 }
 
 function firstUsefulLine(text: string): string | null {
+  const compactText = text.replace(/\s+/g, ' ').trim();
+  const inviteMarker = compactText.match(/\s+Z\s+zewnątrz\s+•\s+Zaproszenie od:|\s+Z\s+zewnatrz\s+•\s+Zaproszenie od:|\s+Zaproszenie od:/i);
+  if (inviteMarker?.index && inviteMarker.index > 0) {
+    return compactText.slice(0, inviteMarker.index).trim();
+  }
+
   const lines = text
     .split('\n')
     .map((line) => line.trim())

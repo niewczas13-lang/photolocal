@@ -355,19 +355,19 @@ export default function ChatImportPanel({ projectId, batches, onChanged }: ChatI
             {invites.length > 0 ? (
               <div className="grid gap-2">
                 {invites.map((invite) => (
-                  <div key={invite.key} className="rounded-md border bg-background p-3 text-sm flex flex-col gap-2">
+                  <div key={invite.key} className="min-w-0 rounded-md border bg-background p-3 text-sm flex flex-col gap-2 overflow-hidden">
                     <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="font-semibold truncate">{invite.roomName ?? 'Pokoj Google Chat'}</p>
-                        <p className="text-muted-foreground">
+                      <div className="min-w-0 flex-1">
+                        <p className="font-semibold break-words">{invite.roomName ?? 'Pokoj Google Chat'}</p>
+                        <p className="text-muted-foreground break-words">
                           Zaproszenie od: {invite.senderEmail ?? 'nie wykryto maila'}
                         </p>
                       </div>
-                      <Badge variant={invite.allowed ? 'outline' : 'secondary'}>
+                      <Badge variant={invite.allowed ? 'outline' : 'secondary'} className="shrink-0">
                         {invite.allowed ? 'whitelist' : 'poza whitelist'}
                       </Badge>
                     </div>
-                    <p className="line-clamp-2 text-muted-foreground">{invite.textPreview}</p>
+                    <p className="max-h-12 overflow-hidden break-words text-muted-foreground">{invite.textPreview}</p>
                     <div className="flex justify-end">
                       <Button
                         size="sm"

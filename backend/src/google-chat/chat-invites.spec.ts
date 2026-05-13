@@ -35,5 +35,23 @@ describe('chat invites helpers', () => {
     });
     expect(invite.key).toHaveLength(16);
   });
+
+  it('extracts a readable room name from compact Google Chat invite text', () => {
+    const [invite] = mapRawInviteCandidates(
+      [
+        {
+          buttonIndex: 0,
+          text: 'PURDA 02 X/04017460 26 uzytkownikow Pawel Dudzinski Z zewnatrz • Zaproszenie od: niewczas13@gmail.com Podglad Dolacz',
+        },
+      ],
+      '*@gmail.com',
+    );
+
+    expect(invite).toMatchObject({
+      roomName: 'PURDA 02 X/04017460 26 uzytkownikow Pawel Dudzinski',
+      senderEmail: 'niewczas13@gmail.com',
+      allowed: true,
+    });
+  });
 });
 
