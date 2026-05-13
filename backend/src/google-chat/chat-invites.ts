@@ -332,6 +332,38 @@ async function extractRawInviteCandidates(page: Page): Promise<RawInviteCandidat
   });
 }
 
+async function clickJoinButton(page: Page, inviteIndex: number): Promise<boolean> {
+  return page.evaluate((targetIndex) => {
+    const normalizeLabel = (value: string): string =>
+      value
+        .normalize('NFKD')
+        .replace(/[\u0142\u0141]/g, 'l')
+        .replace(/[\u0105\u0104]/g, 'a')
+        .replace(/[\u0107\u0106]/g, 'c')
+        .replace(/[\u0119\u0118]/g, 'e')
+        .replace(/[\u0144\u0143]/g, 'n')
+        .replace(/[\u00f3\u00d3]/g, 'o')
+        .replace(/[\u015b\u015a]/g, 's')
+        .replace(/[\u017a\u0179\u017c\u017b]/g, 'z')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase();
+    const buttons = Array.from(document.querySelectorAll('button, [role="button"]'));
+    const joinButtons = buttons.filter((button) => {
+      const label = [
+        button.textContent ?? '',
+        button.getAttribute('aria-label') ?? '',
+        button.getAttribute('data-tooltip') ?? '',
+      ].join(' ');
+      return /\b(dolacz|join)\b/i.test(normalizeLabel(label));
+    });
+    const target = joinButtons[targetIndex];
+    if (!(target instanceof HTMLElement)) return false;
+    target.scrollIntoView({ block: 'center', inline: 'center' });
+    target.click();
+    return true;
+  }, inviteIndex);
+}
+
 export async function listChatInvites(input: {
   config: ChatInviteBrowserConfig;
   whitelist: string;
@@ -375,8 +407,11 @@ export async function acceptChatInvite(input: {
     const invite = inviteIndex >= 0 ? invites[inviteIndex] : null;
     if (!invite || !invite.allowed) return { accepted: false, invite, debug };
 
-    debug.steps.push(`Klikam Dolacz dla zaproszenia ${invite.key}`);
-    await browser.page.getByRole('button', { name: /dolacz|join/i }).nth(inviteIndex).click();
+    debug.steps.push(`Klikam Dolacz dla zaproszenia ${invite.key} na pozycji ${inviteIndex}`);
+    const clicked = await clickJoinButton(browser.page, inviteIndex);
+    if (!clicked) {
+      throw new Error(`Nie znaleziono przycisku Dolacz dla zaproszenia ${invite.key}`);
+    }
     await browser.page.waitForTimeout(2_000);
     return { accepted: true, invite, debug };
   } catch (error) {
