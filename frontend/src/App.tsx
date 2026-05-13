@@ -6,14 +6,49 @@ import ProjectView from './components/ProjectView';
 import type { ProjectSummary } from './types';
 import { Camera } from 'lucide-react';
 
+export type ProjectTab = 'photos' | 'missing' | 'import' | 'ready' | 'review';
+
+interface AppRoute {
+  projectId: string | null;
+  tab: ProjectTab;
+}
+
+const DEFAULT_TAB: ProjectTab = 'photos';
+const PROJECT_TABS = new Set<ProjectTab>(['photos', 'missing', 'import', 'ready', 'review']);
+
+function parseRoute(): AppRoute {
+  const hash = window.location.hash.replace(/^#\/?/, '');
+  const parts = hash.split('/').filter(Boolean);
+
+  if (parts[0] !== 'projects' || !parts[1]) {
+    return { projectId: null, tab: DEFAULT_TAB };
+  }
+
+  const tab = PROJECT_TABS.has(parts[2] as ProjectTab) ? (parts[2] as ProjectTab) : DEFAULT_TAB;
+  return { projectId: decodeURIComponent(parts[1]), tab };
+}
+
+function setProjectRoute(projectId: string | null, tab: ProjectTab = DEFAULT_TAB): void {
+  window.location.hash = projectId ? `/projects/${encodeURIComponent(projectId)}/${tab}` : '/';
+}
+
 export default function App() {
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [creating, setCreating] = useState(false);
-  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+  const [route, setRoute] = useState<AppRoute>(() => parseRoute());
 
   useEffect(() => {
     void api.listProjects().then(setProjects);
   }, []);
+
+  useEffect(() => {
+    const handleHashChange = () => setRoute(parseRoute());
+    window.addEventListener('hashchange', handleHashChange);
+    return () => window.removeEventListener('hashchange', handleHashChange);
+  }, []);
+
+  const selectedProjectId = route.projectId;
+  const selectedProject = selectedProjectId ? projects.find((project) => project.id === selectedProjectId) : null;
 
   return (
     <main className="min-h-screen bg-background text-foreground flex flex-col font-sans selection:bg-primary/20">
@@ -29,19 +64,21 @@ export default function App() {
 
       {/* Main View Area */}
       <div className="flex-1 flex flex-col">
-        {selectedProjectId && projects.find(p => p.id === selectedProjectId) ? (
+        {selectedProjectId && selectedProject ? (
           <ProjectView 
-            project={projects.find(p => p.id === selectedProjectId)!} 
+            project={selectedProject}
+            initialTab={route.tab}
             onBack={() => {
-              setSelectedProjectId(null);
+              setProjectRoute(null);
               void api.listProjects().then(setProjects);
             }} 
+            onTabChange={(tab) => setProjectRoute(selectedProjectId, tab)}
             onRename={(newName) => {
               setProjects(projects.map(p => p.id === selectedProjectId ? { ...p, name: newName } : p));
             }}
           />
         ) : (
-          <ProjectList projects={projects} onCreate={() => setCreating(true)} onOpen={setSelectedProjectId} />
+          <ProjectList projects={projects} onCreate={() => setCreating(true)} onOpen={(projectId) => setProjectRoute(projectId)} />
         )}
       </div>
 

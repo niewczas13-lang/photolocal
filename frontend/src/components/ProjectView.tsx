@@ -21,6 +21,7 @@ import ChatReviewPanel from './ChatReviewPanel';
 import ChecklistTree from './ChecklistTree';
 import MissingPanel from './MissingPanel';
 import PhotoDropzone from './PhotoDropzone';
+import type { ProjectTab } from '../App';
 
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -30,7 +31,9 @@ import { Card, CardContent } from './ui/card';
 
 interface ProjectViewProps {
   project: ProjectSummary;
+  initialTab: ProjectTab;
   onBack: () => void;
+  onTabChange: (tab: ProjectTab) => void;
   onRename: (newName: string) => void;
 }
 
@@ -98,7 +101,7 @@ function formatBytes(value: number): string {
   return `${(value / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export default function ProjectView({ project, onBack, onRename }: ProjectViewProps) {
+export default function ProjectView({ project, initialTab, onBack, onTabChange, onRename }: ProjectViewProps) {
   const projectId = project.id;
   const [nodes, setNodes] = useState<ChecklistNode[]>([]);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
@@ -111,7 +114,7 @@ export default function ProjectView({ project, onBack, onRename }: ProjectViewPr
   const [movingPhotos, setMovingPhotos] = useState(false);
   const [editingName, setEditingName] = useState(false);
   const [draftName, setDraftName] = useState(project.name);
-  const [activeTab, setActiveTab] = useState<'photos' | 'missing' | 'import' | 'ready' | 'review'>('photos');
+  const [activeTab, setActiveTab] = useState<ProjectTab>(initialTab);
   const [chatBatches, setChatBatches] = useState<ChatBatch[]>([]);
 
   const handleRename = async () => {
@@ -173,6 +176,10 @@ export default function ProjectView({ project, onBack, onRename }: ProjectViewPr
   }, [projectId]);
 
   useEffect(() => {
+    setActiveTab(initialTab);
+  }, [initialTab, projectId]);
+
+  useEffect(() => {
     void refreshNodeDetail(selectedNodeId);
   }, [projectId, selectedNodeId]);
 
@@ -188,6 +195,7 @@ export default function ProjectView({ project, onBack, onRename }: ProjectViewPr
     const ancestors = collectAncestorIds(nodes, node.id) ?? [];
     setExpandedIds((current) => new Set([...current, ...ancestors]));
     setActiveTab('photos');
+    onTabChange('photos');
   };
 
   const handleAcceptChatBatch = async (
@@ -368,7 +376,15 @@ export default function ProjectView({ project, onBack, onRename }: ProjectViewPr
 
         {/* Right Column - Work Area */}
         <div className="flex-1 flex flex-col bg-background min-w-0">
-          <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'photos' | 'missing' | 'import' | 'ready' | 'review')} className="flex-1 flex flex-col min-h-0">
+          <Tabs
+            value={activeTab}
+            onValueChange={(value) => {
+              const nextTab = value as ProjectTab;
+              setActiveTab(nextTab);
+              onTabChange(nextTab);
+            }}
+            className="flex-1 flex flex-col min-h-0"
+          >
             <div className="px-6 pt-4 border-b border-border shrink-0">
               <TabsList className="mb-[-1px] rounded-none border-b-0 bg-transparent p-0 gap-6">
                 <TabsTrigger 

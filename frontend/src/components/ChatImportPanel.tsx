@@ -55,6 +55,7 @@ export default function ChatImportPanel({ projectId, batches, onChanged }: ChatI
   const [downloadStatus, setDownloadStatus] = useState<GoogleChatDownloadStatus | null>(null);
   const [pendingAutoImportKey, setPendingAutoImportKey] = useState<string | null>(null);
   const [completedAutoImportKey, setCompletedAutoImportKey] = useState<string | null>(null);
+  const [refreshedClassificationKey, setRefreshedClassificationKey] = useState<string | null>(null);
 
   const counts = useMemo(
     () => ({
@@ -170,6 +171,19 @@ export default function ChatImportPanel({ projectId, batches, onChanged }: ChatI
       window.clearInterval(interval);
     };
   }, [projectId]);
+
+  useEffect(() => {
+    if (
+      classificationStatus?.state !== 'COMPLETED' ||
+      !classificationStatus.finishedAt ||
+      refreshedClassificationKey === classificationStatus.finishedAt
+    ) {
+      return;
+    }
+
+    setRefreshedClassificationKey(classificationStatus.finishedAt);
+    void onChanged();
+  }, [classificationStatus, onChanged, refreshedClassificationKey]);
 
   useEffect(() => {
     if (
