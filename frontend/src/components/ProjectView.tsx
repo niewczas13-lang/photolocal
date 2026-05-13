@@ -124,6 +124,7 @@ export default function ProjectView({
   const [movingPhotos, setMovingPhotos] = useState(false);
   const [editingName, setEditingName] = useState(false);
   const [draftName, setDraftName] = useState(project.name);
+  const [savingName, setSavingName] = useState(false);
   const [activeTab, setActiveTab] = useState<ProjectTab>(initialTab);
   const [chatBatches, setChatBatches] = useState<ChatBatch[]>([]);
   const [recalculateFile, setRecalculateFile] = useState<File | null>(null);
@@ -139,13 +140,17 @@ export default function ProjectView({
       setDraftName(project.name);
       return;
     }
+    setSavingName(true);
     try {
-      await api.renameProject(projectId, draftName.trim());
-      onRename(draftName.trim());
+      const updatedProject = await api.renameProject(projectId, draftName.trim());
+      onProjectUpdated(updatedProject);
+      onRename(updatedProject.name);
       setEditingName(false);
     } catch (err) {
       console.error(err);
       alert('Blad podczas zmiany nazwy');
+    } finally {
+      setSavingName(false);
     }
   };
 
@@ -366,7 +371,13 @@ export default function ProjectView({
                   }}
                   className="h-8 w-64"
                 />
-                <Button size="icon" variant="ghost" onClick={handleRename} className="h-8 w-8 text-green-500 hover:text-green-600">
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  disabled={savingName}
+                  onClick={handleRename}
+                  className="h-8 w-8 text-green-500 hover:text-green-600"
+                >
                   <Check size={16} />
                 </Button>
               </div>
@@ -690,6 +701,34 @@ export default function ProjectView({
                       Dane bazowe projektu i bezpieczne przeliczanie checklisty z GPKG.
                     </p>
                   </div>
+
+                  <Card>
+                    <CardContent className="p-4 flex flex-col gap-4">
+                      <div>
+                        <h4 className="font-semibold">Nazwa projektu</h4>
+                        <p className="text-sm text-muted-foreground">
+                          Ta nazwa jest widoczna na liscie projektow i w naglowku zadania.
+                        </p>
+                      </div>
+                      <div className="flex flex-col sm:flex-row gap-3">
+                        <Input
+                          value={draftName}
+                          onChange={(event) => setDraftName(event.target.value)}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter') void handleRename();
+                          }}
+                          placeholder="Nazwa projektu"
+                        />
+                        <Button
+                          onClick={handleRename}
+                          disabled={savingName || !draftName.trim() || draftName.trim() === project.name}
+                          className="sm:w-36"
+                        >
+                          {savingName ? 'Zapisuje...' : 'Zapisz nazwe'}
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
 
                   <Card>
                     <CardContent className="p-4 grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
