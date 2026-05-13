@@ -7,7 +7,6 @@ import type {
   ChatClassificationStatus,
   ChatImportResult,
   GoogleChatDownloadStatus,
-  GoogleChatInviteDebugInfo,
   GoogleChatInvite,
   GoogleChatSpace,
 } from '../types';
@@ -60,10 +59,8 @@ export default function ChatImportPanel({ projectId, batches, onChanged }: ChatI
   const [pendingAutoImportKey, setPendingAutoImportKey] = useState<string | null>(null);
   const [completedAutoImportKey, setCompletedAutoImportKey] = useState<string | null>(null);
   const [refreshedClassificationKey, setRefreshedClassificationKey] = useState<string | null>(null);
-  const [inviteWhitelist, setInviteWhitelist] = useState('*@gmail.com');
   const [invites, setInvites] = useState<GoogleChatInvite[]>([]);
   const [inviteProfileDir, setInviteProfileDir] = useState('');
-  const [inviteDebug, setInviteDebug] = useState<GoogleChatInviteDebugInfo | null>(null);
   const [acceptingInviteKey, setAcceptingInviteKey] = useState<string | null>(null);
 
   const counts = useMemo(
@@ -96,10 +93,9 @@ export default function ChatImportPanel({ projectId, batches, onChanged }: ChatI
   const loadInvites = async () => {
     setBusyAction('invites');
     try {
-      const result = await api.listGoogleChatInvites(inviteWhitelist);
+      const result = await api.listGoogleChatInvites();
       setInvites(result.invites);
       setInviteProfileDir(result.profileDir);
-      setInviteDebug(result.debug);
     } catch (error) {
       console.error(error);
       alert('Blad podczas pobierania zaproszen Google Chat. Jesli Chrome otworzyl sie pierwszy raz, zaloguj konto bota i sprobuj ponownie.');
@@ -113,7 +109,6 @@ export default function ChatImportPanel({ projectId, batches, onChanged }: ChatI
     try {
       const result = await api.openGoogleChatInviteSetup();
       setInviteProfileDir(result.profileDir);
-      setInviteDebug(result.debug);
     } catch (error) {
       console.error(error);
       alert('Blad podczas otwierania Chrome do logowania Google Chat');
@@ -126,10 +121,9 @@ export default function ChatImportPanel({ projectId, batches, onChanged }: ChatI
     setBusyAction('accept-invite');
     setAcceptingInviteKey(invite.key);
     try {
-      const result = await api.acceptGoogleChatInvite(invite.key, inviteWhitelist);
-      setInviteDebug(result.debug);
+      const result = await api.acceptGoogleChatInvite(invite.key);
       if (!result.accepted) {
-        alert('Nie udalo sie zaakceptowac zaproszenia. Sprawdz whitelist albo odswiez liste.');
+        alert('Nie udalo sie zaakceptowac zaproszenia. Odswiez liste i sprobuj ponownie.');
       }
       await loadInvites();
     } catch (error) {
@@ -330,26 +324,15 @@ export default function ChatImportPanel({ projectId, batches, onChanged }: ChatI
               </div>
             </div>
 
-            <div className="grid md:grid-cols-[260px_1fr] gap-3">
-              <div className="flex flex-col gap-1">
-                <span className="text-sm font-medium">Whitelist</span>
-                <textarea
-                  value={inviteWhitelist}
-                  onChange={(event) => setInviteWhitelist(event.target.value)}
-                  className="min-h-24 rounded-md border border-input bg-background px-3 py-2 text-sm"
-                  placeholder={'*@gmail.com\njan@gmail.com'}
-                />
-              </div>
-              <div className="rounded-md bg-muted/30 p-3 text-sm">
-                <p className="font-medium">Profil sesji Chrome</p>
-                <p className="break-all text-muted-foreground">
-                  {inviteProfileDir || 'Zostanie pokazany po pierwszym zaladowaniu zaproszen.'}
-                </p>
-                <p className="mt-2 text-muted-foreground">
-                  Najpierw kliknij Otworz logowanie. Chrome zostanie otwarty i nie zamknie sie automatycznie,
-                  wiec spokojnie zaloguj konto bota. Potem kliknij Zaladuj zaproszenia.
-                </p>
-              </div>
+            <div className="rounded-md bg-muted/30 p-3 text-sm">
+              <p className="font-medium">Profil sesji Chrome</p>
+              <p className="break-all text-muted-foreground">
+                {inviteProfileDir || 'Zostanie pokazany po pierwszym zaladowaniu zaproszen.'}
+              </p>
+              <p className="mt-2 text-muted-foreground">
+                Najpierw kliknij Otworz logowanie. Chrome zostanie otwarty i nie zamknie sie automatycznie,
+                wiec spokojnie zaloguj konto bota. Potem kliknij Zaladuj zaproszenia.
+              </p>
             </div>
 
             {invites.length > 0 ? (
@@ -363,15 +346,12 @@ export default function ChatImportPanel({ projectId, batches, onChanged }: ChatI
                           Zaproszenie od: {invite.senderEmail ?? 'nie wykryto maila'}
                         </p>
                       </div>
-                      <Badge variant={invite.allowed ? 'outline' : 'secondary'} className="shrink-0">
-                        {invite.allowed ? 'whitelist' : 'poza whitelist'}
-                      </Badge>
                     </div>
                     <p className="max-h-12 overflow-hidden break-words text-muted-foreground">{invite.textPreview}</p>
                     <div className="flex justify-end">
                       <Button
                         size="sm"
-                        disabled={!invite.allowed || busyAction !== null}
+                        disabled={busyAction !== null}
                         onClick={() => void acceptInvite(invite)}
                       >
                         {acceptingInviteKey === invite.key ? (
@@ -391,45 +371,6 @@ export default function ChatImportPanel({ projectId, batches, onChanged }: ChatI
               </p>
             )}
 
-            {inviteDebug && (
-              <details className="rounded-md border bg-muted/20 p-3 text-sm">
-                <summary className="cursor-pointer font-medium">
-                  Debug zaproszen: przyciski {inviteDebug.buttonCount}, Dolacz {inviteDebug.joinButtonCount},
-                  kandydaci {inviteDebug.rawCandidateCount}
-                </summary>
-                <div className="mt-3 flex flex-col gap-3">
-                  <div className="grid gap-1 text-muted-foreground md:grid-cols-2">
-                    <span>URL: {inviteDebug.finalUrl ?? 'brak'}</span>
-                    <span>Tytul: {inviteDebug.title ?? 'brak'}</span>
-                  </div>
-                  {inviteDebug.steps.length > 0 && (
-                    <div>
-                      <p className="font-medium">Kroki</p>
-                      <pre className="mt-1 max-h-32 overflow-auto rounded bg-background p-2 text-xs whitespace-pre-wrap">
-                        {inviteDebug.steps.join('\n')}
-                      </pre>
-                    </div>
-                  )}
-                  {inviteDebug.buttonLabelsPreview.length > 0 && (
-                    <div>
-                      <p className="font-medium">Pierwsze etykiety przyciskow</p>
-                      <pre className="mt-1 max-h-32 overflow-auto rounded bg-background p-2 text-xs whitespace-pre-wrap">
-                        {inviteDebug.buttonLabelsPreview.join('\n')}
-                      </pre>
-                    </div>
-                  )}
-                  {inviteDebug.bodyTextPreview && (
-                    <div>
-                      <p className="font-medium">Podglad tekstu strony</p>
-                      <pre className="mt-1 max-h-40 overflow-auto rounded bg-background p-2 text-xs whitespace-pre-wrap">
-                        {inviteDebug.bodyTextPreview}
-                      </pre>
-                    </div>
-                  )}
-                  {inviteDebug.error && <p className="text-destructive">{inviteDebug.error}</p>}
-                </div>
-              </details>
-            )}
           </div>
 
           <div className="rounded-md border p-3 flex flex-col gap-3">

@@ -39,15 +39,13 @@ export async function buildApp() {
     }
   });
 
-  app.post('/api/google-chat/invites/list', async (request, reply) => {
-    const body = (request.body ?? {}) as { whitelist?: string };
+  app.post('/api/google-chat/invites/list', async (_request, reply) => {
     try {
       return await listChatInvites({
         config: {
           profileDir: config.googleChatInviteProfileDir,
           headless: config.googleChatInviteHeadless,
         },
-        whitelist: body.whitelist ?? '',
       });
     } catch (error) {
       return reply.status(500).send({
@@ -72,7 +70,7 @@ export async function buildApp() {
   });
 
   app.post('/api/google-chat/invites/accept', async (request, reply) => {
-    const body = (request.body ?? {}) as { whitelist?: string; inviteKey?: string };
+    const body = (request.body ?? {}) as { inviteKey?: string };
     if (!body.inviteKey) return reply.status(400).send({ error: 'inviteKey is required' });
 
     try {
@@ -81,7 +79,6 @@ export async function buildApp() {
           profileDir: config.googleChatInviteProfileDir,
           headless: config.googleChatInviteHeadless,
         },
-        whitelist: body.whitelist ?? '',
         inviteKey: body.inviteKey,
       });
     } catch (error) {

@@ -14,7 +14,6 @@ export interface ChatInviteCandidate {
   roomName: string | null;
   senderEmail: string | null;
   textPreview: string;
-  allowed: boolean;
 }
 
 export interface ChatInviteDebugInfo {
@@ -137,26 +136,6 @@ async function waitForCdpEndpoint(config: ChatInviteBrowserConfig, debug: ChatIn
   throw new Error(`Nie udalo sie polaczyc z Chrome CDP na porcie ${debugPort}`);
 }
 
-export function parseInviteWhitelist(value: string): string[] {
-  return value
-    .split(/[\n,;]+/g)
-    .map((entry) => entry.trim().toLowerCase())
-    .filter(Boolean);
-}
-
-export function isInviteSenderAllowed(senderEmail: string | null, whitelist: string[]): boolean {
-  if (!senderEmail) return false;
-  const email = senderEmail.toLowerCase();
-  const domain = email.split('@')[1] ?? '';
-
-  return whitelist.some((entry) => {
-    const normalized = entry.toLowerCase();
-    if (normalized === email) return true;
-    if (normalized === `*@${domain}` || normalized === `@${domain}` || normalized === domain) return true;
-    return normalized.startsWith('*.') && domain.endsWith(normalized.slice(2));
-  });
-}
-
 function inviteKey(text: string): string {
   return createHash('sha1').update(text).digest('hex').slice(0, 16);
 }
@@ -211,8 +190,7 @@ function firstUsefulLine(text: string): string | null {
   return lines[0] ?? null;
 }
 
-export function mapRawInviteCandidates(rawCandidates: RawInviteCandidate[], whitelistText: string): ChatInviteCandidate[] {
-  const whitelist = parseInviteWhitelist(whitelistText);
+export function mapRawInviteCandidates(rawCandidates: RawInviteCandidate[]): ChatInviteCandidate[] {
   return rawCandidates.map((candidate) => {
     const senderEmail = emailAfterInviteMarker(candidate.text);
     return {
@@ -220,7 +198,6 @@ export function mapRawInviteCandidates(rawCandidates: RawInviteCandidate[], whit
       roomName: firstUsefulLine(candidate.text),
       senderEmail,
       textPreview: compactInviteText(candidate.text).slice(0, 500),
-      allowed: isInviteSenderAllowed(senderEmail, whitelist),
     };
   });
 }
@@ -366,8 +343,7 @@ async function clickJoinButton(page: Page, inviteIndex: number): Promise<boolean
 
 export async function listChatInvites(input: {
   config: ChatInviteBrowserConfig;
-  whitelist: string;
-}): Promise<{ invites: ChatInviteCandidate[]; url: string; profileDir: string; debug: ChatInviteDebugInfo }> {
+}): Promise<{ invites: ChatInviteCandidate[]; url: string; profileDir: string }> {
   const debug = createDebugInfo();
   const browser = await openInvitesPage(input.config, debug);
   try {
@@ -377,10 +353,9 @@ export async function listChatInvites(input: {
     debug.rawCandidateCount = rawCandidates.length;
     debug.steps.push(`Znaleziono kandydatow zaproszen: ${rawCandidates.length}`);
     return {
-      invites: mapRawInviteCandidates(rawCandidates, input.whitelist),
+      invites: mapRawInviteCandidates(rawCandidates),
       url: GOOGLE_CHAT_INVITES_URL,
       profileDir: input.config.profileDir,
-      debug,
     };
   } catch (error) {
     debug.error = error instanceof Error ? error.message : String(error);
@@ -392,9 +367,8 @@ export async function listChatInvites(input: {
 
 export async function acceptChatInvite(input: {
   config: ChatInviteBrowserConfig;
-  whitelist: string;
   inviteKey: string;
-}): Promise<{ accepted: boolean; invite: ChatInviteCandidate | null; debug: ChatInviteDebugInfo }> {
+}): Promise<{ accepted: boolean; invite: ChatInviteCandidate | null }> {
   const debug = createDebugInfo();
   const browser = await openInvitesPage(input.config, debug);
   try {
@@ -402,10 +376,10 @@ export async function acceptChatInvite(input: {
     Object.assign(debug, pageDebug);
     const rawCandidates = await extractRawInviteCandidates(browser.page);
     debug.rawCandidateCount = rawCandidates.length;
-    const invites = mapRawInviteCandidates(rawCandidates, input.whitelist);
+    const invites = mapRawInviteCandidates(rawCandidates);
     const inviteIndex = invites.findIndex((invite) => invite.key === input.inviteKey);
     const invite = inviteIndex >= 0 ? invites[inviteIndex] : null;
-    if (!invite || !invite.allowed) return { accepted: false, invite, debug };
+    if (!invite) return { accepted: false, invite };
 
     debug.steps.push(`Klikam Dolacz dla zaproszenia ${invite.key} na pozycji ${inviteIndex}`);
     const clicked = await clickJoinButton(browser.page, inviteIndex);
@@ -413,7 +387,7 @@ export async function acceptChatInvite(input: {
       throw new Error(`Nie znaleziono przycisku Dolacz dla zaproszenia ${invite.key}`);
     }
     await browser.page.waitForTimeout(2_000);
-    return { accepted: true, invite, debug };
+    return { accepted: true, invite };
   } catch (error) {
     debug.error = error instanceof Error ? error.message : String(error);
     throw error;
@@ -428,7 +402,7 @@ export function defaultInviteProfileDir(): string {
 
 export async function openChatInvitesSetup(input: {
   config: ChatInviteBrowserConfig;
-}): Promise<{ started: true; url: string; profileDir: string; debug: ChatInviteDebugInfo }> {
+}): Promise<{ started: true; url: string; profileDir: string }> {
   const debug = createDebugInfo();
   debug.steps.push(`Tworze/uzywam profilu Chrome: ${input.config.profileDir}`);
   await mkdir(input.config.profileDir, { recursive: true });
@@ -439,7 +413,6 @@ export async function openChatInvitesSetup(input: {
     started: true,
     url: GOOGLE_CHAT_INVITES_URL,
     profileDir: input.config.profileDir,
-    debug,
   };
 }
 

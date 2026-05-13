@@ -226,37 +226,21 @@ export interface GoogleChatInvite {
   roomName: string | null;
   senderEmail: string | null;
   textPreview: string;
-  allowed: boolean;
 }
 
 export interface GoogleChatInviteListResult {
   invites: GoogleChatInvite[];
   url: string;
   profileDir: string;
-  debug: GoogleChatInviteDebugInfo;
 }
 
 export interface GoogleChatInviteAcceptResult {
   accepted: boolean;
   invite: GoogleChatInvite | null;
-  debug: GoogleChatInviteDebugInfo;
 }
 
 export interface GoogleChatInviteSetupResult {
   started: true;
   url: string;
   profileDir: string;
-  debug: GoogleChatInviteDebugInfo;
-}
-
-export interface GoogleChatInviteDebugInfo {
-  steps: string[];
-  finalUrl: string | null;
-  title: string | null;
-  buttonCount: number;
-  joinButtonCount: number;
-  rawCandidateCount: number;
-  bodyTextPreview: string;
-  buttonLabelsPreview: string[];
-  error: string | null;
 }

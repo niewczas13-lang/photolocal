@@ -1,22 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { isInviteSenderAllowed, mapRawInviteCandidates, parseInviteWhitelist } from './chat-invites.js';
+import { mapRawInviteCandidates } from './chat-invites.js';
 
 describe('chat invites helpers', () => {
-  it('parses whitelist entries from lines, commas and semicolons', () => {
-    expect(parseInviteWhitelist('jan@gmail.com\n *@gmail.com;firma.pl')).toEqual([
-      'jan@gmail.com',
-      '*@gmail.com',
-      'firma.pl',
-    ]);
-  });
-
-  it('allows exact emails and domains', () => {
-    expect(isInviteSenderAllowed('jan@gmail.com', ['jan@gmail.com'])).toBe(true);
-    expect(isInviteSenderAllowed('adam@gmail.com', ['*@gmail.com'])).toBe(true);
-    expect(isInviteSenderAllowed('adam@gmail.com', ['gmail.com'])).toBe(true);
-    expect(isInviteSenderAllowed('adam@other.com', ['gmail.com'])).toBe(false);
-  });
-
   it('maps raw Google Chat card text to invite candidates', () => {
     const [invite] = mapRawInviteCandidates(
       [
@@ -25,13 +10,11 @@ describe('chat invites helpers', () => {
           text: 'Budowa OPP0013\nZaproszenie od Jan Kowalski jan@gmail.com\nDolacz',
         },
       ],
-      '*@gmail.com',
     );
 
     expect(invite).toMatchObject({
       roomName: 'Budowa OPP0013',
       senderEmail: 'jan@gmail.com',
-      allowed: true,
     });
     expect(invite.key).toHaveLength(16);
   });
@@ -46,13 +29,11 @@ describe('chat invites helpers', () => {
             'Zaproszenie od: niewczas13@gmail.com Podglad Dolacz',
         },
       ],
-      '*@gmail.com',
     );
 
     expect(invite).toMatchObject({
       roomName: 'PURDA 02 X/04017460',
       senderEmail: 'niewczas13@gmail.com',
-      allowed: true,
     });
   });
 
@@ -66,13 +47,11 @@ describe('chat invites helpers', () => {
             'Zaproszenie od: niewczas13@gmail.comPodgl\u0105dDo\u0142\u0105cz',
         },
       ],
-      '*@gmail.com',
     );
 
     expect(invite).toMatchObject({
       roomName: 'PURDA 02 X/04017460',
       senderEmail: 'niewczas13@gmail.com',
-      allowed: true,
     });
     expect(invite.textPreview).not.toMatch(/Podgl\u0105d|Do\u0142\u0105cz/i);
   });

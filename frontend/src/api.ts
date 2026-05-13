@@ -38,21 +38,19 @@ export const api = {
     }),
   listProjects: () => request<ProjectSummary[]>('/api/projects'),
   listGoogleChatSpaces: () => request<GoogleChatSpace[]>('/api/google-chat/spaces'),
-  listGoogleChatInvites: (whitelist: string) =>
+  listGoogleChatInvites: () =>
     request<GoogleChatInviteListResult>('/api/google-chat/invites/list', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ whitelist }),
     }),
   openGoogleChatInviteSetup: () =>
     request<GoogleChatInviteSetupResult>('/api/google-chat/invites/setup', {
       method: 'POST',
     }),
-  acceptGoogleChatInvite: (inviteKey: string, whitelist: string) =>
+  acceptGoogleChatInvite: (inviteKey: string) =>
     request<GoogleChatInviteAcceptResult>('/api/google-chat/invites/accept', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ inviteKey, whitelist }),
+      body: JSON.stringify({ inviteKey }),
     }),
   startGoogleChatDownload: (projectId: string, spaceName: string, spaceDisplayName: string) =>
     request<GoogleChatDownloadStatus>(`/api/projects/${projectId}/google-chat/download`, {
