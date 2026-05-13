@@ -63,21 +63,23 @@ export default function ProjectList({ projects, onCreate, onOpen, onDeleted }: P
         </Button>
       </div>
 
+      <div className="mb-6 rounded-xl border border-border bg-card p-3 shadow-sm">
+        <div className="relative w-full">
+          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+          <input
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            placeholder="Szukaj po definicji projektu, nazwie albo pliku GPKG"
+            className="h-10 w-full rounded-lg border border-input bg-background pl-9 pr-3 text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+          />
+        </div>
+      </div>
+
       <Tabs defaultValue="IN_PROGRESS" value={tab} onValueChange={(v) => setTab(v as any)} className="w-full">
         <TabsList className="mb-6">
           <TabsTrigger value="IN_PROGRESS">W trakcie</TabsTrigger>
           <TabsTrigger value="COMPLETED">Ukończone</TabsTrigger>
         </TabsList>
-        <div className="mb-6 -mt-3 relative w-full md:max-w-sm">
-          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-          <input
-            value={searchQuery}
-            onChange={(event) => setSearchQuery(event.target.value)}
-            placeholder="Szukaj definicji lub nazwy"
-            className="h-9 w-full rounded-lg border border-input bg-background pl-9 pr-3 text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-          />
-        </div>
-
         <TabsContent value={tab} className="mt-0 outline-none">
           {filteredProjects.length === 0 ? (
             <div className="flex flex-col items-center justify-center min-h-[240px] border border-dashed border-border rounded-xl text-center gap-4">
