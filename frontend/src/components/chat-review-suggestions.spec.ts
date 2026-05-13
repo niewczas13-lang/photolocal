@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { getSuggestedCandidates, type CandidateNode } from './chat-review-suggestions';
+import { getCandidateDisplay, getSuggestedCandidates, type CandidateNode } from './chat-review-suggestions';
 
 const candidates: CandidateNode[] = [
   {
@@ -78,5 +78,20 @@ describe('chat review suggestions', () => {
     });
 
     expect(suggested.some(({ candidate }) => candidate.id === 'address-7')).toBe(true);
+  });
+
+  it('uses the checklist category as the primary display label for generic folders', () => {
+    expect(getCandidateDisplay(candidates.find((candidate) => candidate.id === 'notes')!)).toEqual({
+      primary: 'Notatki z budowy',
+      secondary: 'Zdjecia',
+    });
+    expect(getCandidateDisplay(candidates.find((candidate) => candidate.id === 'pge')!)).toEqual({
+      primary: 'Podwieszenie kabla PGE',
+      secondary: 'Budowa liniowa',
+    });
+    expect(getCandidateDisplay(candidates.find((candidate) => candidate.id === 'work')!)).toEqual({
+      primary: 'Wykopy/Przeciski',
+      secondary: 'Prace zanikowe',
+    });
   });
 });

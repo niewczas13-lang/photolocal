@@ -17,6 +17,21 @@ export interface SuggestedCandidate {
   score: number;
 }
 
+export interface CandidateDisplay {
+  primary: string;
+  secondary: string;
+}
+
+const FRIENDLY_SEGMENT_LABELS: Record<string, string> = {
+  budowa_liniowa: 'Budowa liniowa',
+  notatki_z_budowy: 'Notatki z budowy',
+  podwieszenie_kabla_pge: 'Podwieszenie kabla PGE',
+  podwieszenie_kabli: 'Podwieszenie kabli',
+  prace_zanikowe: 'Prace zanikowe',
+  wykopy_przeciski: 'Wykopy/Przeciski',
+  zdjecia: 'Zdjecia',
+};
+
 export function normalize(value: string): string {
   return value
     .normalize('NFKD')
@@ -26,6 +41,40 @@ export function normalize(value: string): string {
     .replace(/\s+/g, ' ')
     .trim()
     .toLowerCase();
+}
+
+function prettifySegment(value: string): string {
+  const lower = value.trim().toLowerCase();
+  const mapped = FRIENDLY_SEGMENT_LABELS[lower];
+  if (mapped) return mapped;
+  return value.replace(/_/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+export function getCandidateDisplay(candidate: CandidateNode): CandidateDisplay {
+  const segments = candidate.path.split('/').filter(Boolean);
+  const leaf = segments.at(-1) ?? candidate.name;
+  const parent = segments.length > 1 ? segments.at(-2) : null;
+  const parentLabel = parent ? prettifySegment(parent) : null;
+  const leafLabel = prettifySegment(leaf);
+
+  if (candidate.nodeType === 'CABLE_RESERVE') {
+    return {
+      primary: prettifySegment(candidate.name),
+      secondary: candidate.path,
+    };
+  }
+
+  if (parentLabel && parentLabel !== leafLabel) {
+    return {
+      primary: parentLabel,
+      secondary: leafLabel,
+    };
+  }
+
+  return {
+    primary: leafLabel,
+    secondary: candidate.path,
+  };
 }
 
 export function collectAcceptingNodes(nodes: ChecklistNode[]): CandidateNode[] {

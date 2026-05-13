@@ -8,6 +8,7 @@ import { Card, CardContent } from './ui/card';
 import { Input } from './ui/input';
 import {
   collectAcceptingNodes,
+  getCandidateDisplay,
   getSuggestedCandidates,
   normalize,
 } from './chat-review-suggestions';
@@ -243,36 +244,43 @@ export default function ChatReviewPanel({
                   </div>
 
                   <div className="grid md:grid-cols-2 gap-2">
-                    {suggested.map(({ candidate }) => (
-                      <label
-                        key={candidate.id}
-                        className="flex items-start gap-2 rounded-md border p-2 text-sm cursor-pointer hover:bg-muted/50"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={selected.has(candidate.id)}
-                          onChange={() =>
-                            toggleCandidate(
-                              batch.id,
-                              candidate.id,
-                              batch.checklistNodeId ? [batch.checklistNodeId] : [],
-                            )
-                          }
-                          className="mt-1"
-                        />
-                        <span className="min-w-0">
-                          <span className="flex items-center gap-2 min-w-0">
-                            <span className="block font-medium truncate">{candidate.name}</span>
-                            {candidate.nodeType === 'CABLE_RESERVE' && (
-                              <Badge variant="secondary" className="shrink-0 text-[10px]">
-                                zapas
-                              </Badge>
-                            )}
+                    {suggested.map(({ candidate }) => {
+                      const display = getCandidateDisplay(candidate);
+                      return (
+                        <label
+                          key={candidate.id}
+                          className="flex items-start gap-2 rounded-md border p-2 text-sm cursor-pointer hover:bg-muted/50"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={selected.has(candidate.id)}
+                            onChange={() =>
+                              toggleCandidate(
+                                batch.id,
+                                candidate.id,
+                                batch.checklistNodeId ? [batch.checklistNodeId] : [],
+                              )
+                            }
+                            className="mt-1"
+                          />
+                          <span className="min-w-0">
+                            <span className="flex items-center gap-2 min-w-0">
+                              <span className="block font-semibold truncate text-foreground">
+                                {display.primary}
+                              </span>
+                              {candidate.nodeType === 'CABLE_RESERVE' && (
+                                <Badge variant="secondary" className="shrink-0 text-[10px]">
+                                  zapas
+                                </Badge>
+                              )}
+                            </span>
+                            <span className="block text-xs text-muted-foreground truncate">
+                              {display.secondary}
+                            </span>
                           </span>
-                          <span className="block text-xs text-muted-foreground truncate">{candidate.path}</span>
-                        </span>
-                      </label>
-                    ))}
+                        </label>
+                      );
+                    })}
                   </div>
                 </div>
               </div>
