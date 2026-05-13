@@ -54,12 +54,17 @@ export default function App() {
     <main className="min-h-screen bg-background text-foreground flex flex-col font-sans selection:bg-primary/20">
       {/* Global Topbar */}
       <header className="h-16 shrink-0 border-b border-border bg-background/80 backdrop-blur-xl sticky top-0 z-50 flex items-center px-6 shadow-sm">
-        <div className="flex items-center gap-3">
+        <button
+          type="button"
+          onClick={() => setProjectRoute(null)}
+          className="flex items-center gap-3 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          title="Wroc do strony glownej"
+        >
           <div className="bg-primary/10 p-2 rounded-lg text-primary">
             <Camera size={22} strokeWidth={2.5} />
           </div>
           <h1 className="text-xl font-bold tracking-tight">Photo Local</h1>
-        </div>
+        </button>
       </header>
 
       {/* Main View Area */}

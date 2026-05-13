@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { CheckCheck, FolderPlus, ChevronRight, Trash2 } from 'lucide-react';
+import { CheckCheck, FolderPlus, ChevronRight, Trash2, Search } from 'lucide-react';
 import { api } from '../api';
 import type { ProjectSummary } from '../types';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from './ui/tabs';
@@ -17,13 +17,20 @@ interface ProjectListProps {
 export default function ProjectList({ projects, onCreate, onOpen, onDeleted }: ProjectListProps) {
   const [tab, setTab] = useState<'IN_PROGRESS' | 'COMPLETED'>('IN_PROGRESS');
   const [deletingProjectId, setDeletingProjectId] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
 
   const filteredProjects = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
     return projects.filter((p) => {
-      if (tab === 'IN_PROGRESS') return p.status !== 'Kompletne';
-      return p.status === 'Kompletne';
+      const matchesTab = tab === 'IN_PROGRESS' ? p.status !== 'Kompletne' : p.status === 'Kompletne';
+      if (!matchesTab) return false;
+      if (!query) return true;
+
+      return [p.projectDefinition, p.name, p.gpkgFileName]
+        .filter(Boolean)
+        .some((value) => value!.toLowerCase().includes(query));
     });
-  }, [projects, tab]);
+  }, [projects, searchQuery, tab]);
 
   const handleDelete = async (project: ProjectSummary) => {
     const confirmed = window.confirm(
@@ -61,6 +68,15 @@ export default function ProjectList({ projects, onCreate, onOpen, onDeleted }: P
           <TabsTrigger value="IN_PROGRESS">W trakcie</TabsTrigger>
           <TabsTrigger value="COMPLETED">Ukończone</TabsTrigger>
         </TabsList>
+        <div className="mb-6 -mt-3 relative w-full md:max-w-sm">
+          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+          <input
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            placeholder="Szukaj definicji lub nazwy"
+            className="h-9 w-full rounded-lg border border-input bg-background pl-9 pr-3 text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+          />
+        </div>
 
         <TabsContent value={tab} className="mt-0 outline-none">
           {filteredProjects.length === 0 ? (
