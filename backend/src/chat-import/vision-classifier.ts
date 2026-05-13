@@ -3,7 +3,7 @@ import { basename, join, resolve } from 'node:path';
 
 import sharp from 'sharp';
 
-export const RESERVE_LOCATIONS = ['W studni', 'Doziemny', 'Inne', 'Niepewne'] as const;
+export const RESERVE_LOCATIONS = ['W studni', 'Doziemny', 'Napowietrzny', 'Inne', 'Niepewne'] as const;
 
 export type ReserveClassification = (typeof RESERVE_LOCATIONS)[number];
 
@@ -277,6 +277,7 @@ function buildPrompt(folderName: string, imageCount: number): string {
     'Wybierz dokladnie jedna etykiete:',
     '- "W studni": widac studnie/komore/zasobnik, jej sciany, wnetrze, dno, pokrywe albo kabel ulozony wewnatrz tej studni. Jesli kabel lezy na ziemi lub dnie, ale wewnatrz studni/komory, to nadal jest "W studni".',
     '- "Doziemny": zapas kabla/rury lezy w otwartym wykopie, bez widocznej studni, komory, zasobnika lub pokrywy. To moze byc granica dzialki, ziemia, trawa, piasek, rura HDPE, ale bez komory.',
+    '- "Napowietrzny": drop lub kabel swiatlowodowy jest zwiniety na slupie, podwieszony przy slupie albo widac zapas kabla na podbudowie slupowej nad ziemia.',
     '- "Inne": zdjecia nie przedstawiaja zapasu kabla.',
     '- "Niepewne": nie da sie pewnie rozpoznac albo zdjecia sa mieszane.',
     '',
@@ -286,7 +287,7 @@ function buildPrompt(folderName: string, imageCount: number): string {
     'visualEvidence ma byc tablica krotkich stringow. Nie dodawaj image_url, obiektow ani markdown.',
     'Odpowiedz wylacznie poprawnym JSON, bez markdown:',
     '{"reserveLocation":"W studni","confidence":0.0,"visualEvidence":["..."],"reason":"..."}',
-    'W polu reserveLocation wpisz jedna dokladna wartosc: "W studni", "Doziemny", "Inne" albo "Niepewne". Nie wpisuj listy opcji.',
+    'W polu reserveLocation wpisz jedna dokladna wartosc: "W studni", "Doziemny", "Napowietrzny", "Inne" albo "Niepewne". Nie wpisuj listy opcji.',
   ].join('\n');
 }
 
@@ -304,7 +305,13 @@ function extractJsonObject(text: string): string {
 }
 
 function normalizeReserveLocation(value: unknown): ReserveClassification {
-  if (value === 'W studni' || value === 'Doziemny' || value === 'Inne' || value === 'Niepewne') {
+  if (
+    value === 'W studni' ||
+    value === 'Doziemny' ||
+    value === 'Napowietrzny' ||
+    value === 'Inne' ||
+    value === 'Niepewne'
+  ) {
     return value;
   }
 

@@ -51,6 +51,46 @@ export interface CreateProjectInput {
   checklistNodes: GeneratedChecklistNode[];
 }
 
+export interface RecalculateChecklistInput {
+  projectId: string;
+  projectDefinition: string | null;
+  projectType: ProjectType;
+  splitterTopology: SplitterTopology;
+  splitterTopologySource: SplitterTopologySource;
+  splitterCount: number;
+  gpkgFileName: string;
+  addresses: ChecklistAddress[];
+  dacToAddressCableCount: number;
+  adssToAddressCableCount: number;
+  checklistNodes: GeneratedChecklistNode[];
+}
+
+export interface RecalculateChecklistResult {
+  addedNodes: number;
+  updatedNodes: number;
+  unchangedNodes: number;
+  addedAddresses: number;
+  reusedAddresses: number;
+}
+
+function normalizeAddressKeyPart(value: string | null): string {
+  return (value ?? '').trim().replace(/\s+/g, ' ').toUpperCase();
+}
+
+function getAddressMergeKey(address: {
+  city: string;
+  street: string;
+  buildingNo: string | null;
+  distributionPoint: string | null;
+}): string {
+  return [
+    normalizeAddressKeyPart(address.city),
+    normalizeAddressKeyPart(address.street),
+    normalizeAddressKeyPart(address.buildingNo),
+    normalizeAddressKeyPart(address.distributionPoint),
+  ].join('|');
+}
+
 export class ProjectsRepository {
   constructor(private readonly db: Database.Database) {}
 
@@ -230,6 +270,180 @@ export class ProjectsRepository {
     this.db
       .prepare(`UPDATE projects SET name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
       .run(newName, projectId);
+  }
+
+  recalculateChecklist(input: RecalculateChecklistInput): RecalculateChecklistResult {
+    const result: RecalculateChecklistResult = {
+      addedNodes: 0,
+      updatedNodes: 0,
+      unchangedNodes: 0,
+      addedAddresses: 0,
+      reusedAddresses: 0,
+    };
+
+    const tx = this.db.transaction(() => {
+      const existingAddressRows = this.db
+        .prepare(
+          `SELECT
+            id,
+            city,
+            street,
+            building_no AS buildingNo,
+            distribution_point AS distributionPoint
+          FROM addresses
+          WHERE project_id = ?`,
+        )
+        .all(input.projectId) as Array<{
+          id: string;
+          city: string;
+          street: string;
+          buildingNo: string | null;
+          distributionPoint: string | null;
+        }>;
+
+      const addressKeyToId = new Map<string, string>();
+      for (const address of existingAddressRows) {
+        addressKeyToId.set(getAddressMergeKey(address), address.id);
+      }
+
+      const generatedAddressIdToActualId = new Map<string, string>();
+      const insertAddress = this.db.prepare(
+        `INSERT INTO addresses (
+          id, project_id, city, street, building_no, property_id, parcel_number,
+          distribution_point, lat, lng, household_count, business_unit_count
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      );
+
+      for (const address of input.addresses) {
+        const key = getAddressMergeKey(address);
+        const existingId = addressKeyToId.get(key);
+        if (existingId) {
+          generatedAddressIdToActualId.set(address.id, existingId);
+          result.reusedAddresses += 1;
+          continue;
+        }
+
+        insertAddress.run(
+          address.id,
+          input.projectId,
+          address.city,
+          address.street,
+          address.buildingNo,
+          address.propertyId,
+          address.parcelNumber,
+          address.distributionPoint,
+          address.lat,
+          address.lng,
+          address.householdCount,
+          address.businessUnitCount,
+        );
+        addressKeyToId.set(key, address.id);
+        generatedAddressIdToActualId.set(address.id, address.id);
+        result.addedAddresses += 1;
+      }
+
+      const existingNodeRows = this.db
+        .prepare(
+          `SELECT id, path
+           FROM checklist_nodes
+           WHERE project_id = ?`,
+        )
+        .all(input.projectId) as Array<{ id: string; path: string }>;
+
+      const pathToExistingNodeId = new Map(existingNodeRows.map((node) => [node.path, node.id]));
+      const generatedNodeIdToActualId = new Map<string, string>();
+      const insertNode = this.db.prepare(
+        `INSERT INTO checklist_nodes (
+          id, project_id, parent_id, name, path, node_type, address_id,
+          sort_order, min_photos, accepts_photos, status
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'OPEN')`,
+      );
+      const updateNode = this.db.prepare(
+        `UPDATE checklist_nodes
+         SET parent_id = ?,
+             name = ?,
+             node_type = ?,
+             address_id = ?,
+             sort_order = ?,
+             min_photos = ?,
+             accepts_photos = ?,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = ? AND project_id = ?`,
+      );
+
+      for (const node of input.checklistNodes) {
+        const existingId = pathToExistingNodeId.get(node.path);
+        const actualId = existingId ?? node.id;
+        generatedNodeIdToActualId.set(node.id, actualId);
+        const actualParentId = node.parentId ? (generatedNodeIdToActualId.get(node.parentId) ?? null) : null;
+        const actualAddressId = node.addressId
+          ? (generatedAddressIdToActualId.get(node.addressId) ?? node.addressId)
+          : null;
+
+        if (existingId) {
+          updateNode.run(
+            actualParentId,
+            node.name,
+            node.nodeType,
+            actualAddressId,
+            node.sortOrder,
+            node.minPhotos,
+            node.acceptsPhotos ? 1 : 0,
+            existingId,
+            input.projectId,
+          );
+          result.updatedNodes += 1;
+        } else {
+          insertNode.run(
+            node.id,
+            input.projectId,
+            actualParentId,
+            node.name,
+            node.path,
+            node.nodeType,
+            actualAddressId,
+            node.sortOrder,
+            node.minPhotos,
+            node.acceptsPhotos ? 1 : 0,
+          );
+          pathToExistingNodeId.set(node.path, node.id);
+          result.addedNodes += 1;
+        }
+      }
+
+      result.unchangedNodes = Math.max(0, existingNodeRows.length - result.updatedNodes);
+
+      this.db
+        .prepare(
+          `UPDATE projects
+           SET project_definition = ?,
+               project_type = ?,
+               splitter_topology = ?,
+               splitter_count = ?,
+               splitter_topology_source = ?,
+               gpkg_file_name = ?,
+               address_count = ?,
+               dac_to_address_cable_count = ?,
+               adss_to_address_cable_count = ?,
+               updated_at = CURRENT_TIMESTAMP
+           WHERE id = ?`,
+        )
+        .run(
+          input.projectDefinition,
+          input.projectType,
+          input.splitterTopology,
+          input.splitterCount,
+          input.splitterTopologySource,
+          input.gpkgFileName,
+          input.addresses.length,
+          input.dacToAddressCableCount,
+          input.adssToAddressCableCount,
+          input.projectId,
+        );
+    });
+
+    tx();
+    return result;
   }
 
   getChecklistNode(projectId: string, nodeId: string) {

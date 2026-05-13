@@ -12,10 +12,12 @@ import {
   AlertCircle,
   Inbox,
   Download,
-  ClipboardCheck
+  ClipboardCheck,
+  Settings,
+  RefreshCw,
 } from 'lucide-react';
 import { api } from '../api';
-import type { ChatBatch, ChecklistNode, ChecklistNodeDetail, ChecklistPhoto, ProjectSummary } from '../types';
+import type { ChatBatch, ChecklistNode, ChecklistNodeDetail, ChecklistPhoto, ProjectSummary, ReserveLocation } from '../types';
 import ChatImportPanel from './ChatImportPanel';
 import ChatReviewPanel from './ChatReviewPanel';
 import ChecklistTree from './ChecklistTree';
@@ -35,6 +37,7 @@ interface ProjectViewProps {
   onBack: () => void;
   onTabChange: (tab: ProjectTab) => void;
   onRename: (newName: string) => void;
+  onProjectUpdated: (project: ProjectSummary) => void;
 }
 
 function findNode(nodes: ChecklistNode[], nodeId: string): ChecklistNode | null {
@@ -101,12 +104,19 @@ function formatBytes(value: number): string {
   return `${(value / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export default function ProjectView({ project, initialTab, onBack, onTabChange, onRename }: ProjectViewProps) {
+export default function ProjectView({
+  project,
+  initialTab,
+  onBack,
+  onTabChange,
+  onRename,
+  onProjectUpdated,
+}: ProjectViewProps) {
   const projectId = project.id;
   const [nodes, setNodes] = useState<ChecklistNode[]>([]);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [nodeDetail, setNodeDetail] = useState<ChecklistNodeDetail | null>(null);
-  const [reserveLocation, setReserveLocation] = useState<'Doziemny' | 'W studni'>('Doziemny');
+  const [reserveLocation, setReserveLocation] = useState<ReserveLocation>('Doziemny');
   const [uploading, setUploading] = useState(false);
   const [search, setSearch] = useState('');
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
@@ -116,6 +126,12 @@ export default function ProjectView({ project, initialTab, onBack, onTabChange, 
   const [draftName, setDraftName] = useState(project.name);
   const [activeTab, setActiveTab] = useState<ProjectTab>(initialTab);
   const [chatBatches, setChatBatches] = useState<ChatBatch[]>([]);
+  const [recalculateFile, setRecalculateFile] = useState<File | null>(null);
+  const [recalculateTopology, setRecalculateTopology] = useState<'AUTO' | 'SINGLE' | 'CASCADE'>(
+    project.splitterTopologySource === 'MANUAL' ? project.splitterTopology : 'AUTO',
+  );
+  const [recalculating, setRecalculating] = useState(false);
+  const [recalculateResult, setRecalculateResult] = useState<string | null>(null);
 
   const handleRename = async () => {
     if (!draftName.trim() || draftName.trim() === project.name) {
@@ -180,6 +196,11 @@ export default function ProjectView({ project, initialTab, onBack, onTabChange, 
   }, [initialTab, projectId]);
 
   useEffect(() => {
+    setDraftName(project.name);
+    setRecalculateTopology(project.splitterTopologySource === 'MANUAL' ? project.splitterTopology : 'AUTO');
+  }, [project.name, project.splitterTopology, project.splitterTopologySource]);
+
+  useEffect(() => {
     void refreshNodeDetail(selectedNodeId);
   }, [projectId, selectedNodeId]);
 
@@ -194,6 +215,9 @@ export default function ProjectView({ project, initialTab, onBack, onTabChange, 
     setSelectedNodeId(node.id);
     const ancestors = collectAncestorIds(nodes, node.id) ?? [];
     setExpandedIds((current) => new Set([...current, ...ancestors]));
+    if (node.path.startsWith('Zapasy_kabli_napowietrznych')) {
+      setReserveLocation('Napowietrzny');
+    }
     setActiveTab('photos');
     onTabChange('photos');
   };
@@ -201,7 +225,7 @@ export default function ProjectView({ project, initialTab, onBack, onTabChange, 
   const handleAcceptChatBatch = async (
     batchId: string,
     checklistNodeIds: string[],
-    nextReserveLocation: 'Doziemny' | 'W studni' | null,
+    nextReserveLocation: ReserveLocation | null,
     fileIds: string[],
   ) => {
     try {
@@ -230,7 +254,8 @@ export default function ProjectView({ project, initialTab, onBack, onTabChange, 
 
     setUploading(true);
     try {
-      const location = selectedNode.path.startsWith('Zapasy_kabli_instalacyjnych')
+      const location = selectedNode.path.startsWith('Zapasy_kabli_instalacyjnych') ||
+        selectedNode.path.startsWith('Zapasy_kabli_napowietrznych')
         ? reserveLocation
         : null;
       for (const file of files) {
@@ -246,7 +271,7 @@ export default function ProjectView({ project, initialTab, onBack, onTabChange, 
     }
   };
 
-  const handleBulkMove = async (nextLocation: 'Doziemny' | 'W studni') => {
+  const handleBulkMove = async (nextLocation: ReserveLocation) => {
     if (!selectedNodeId || selectedPhotoIds.size === 0) return;
 
     setMovingPhotos(true);
@@ -260,6 +285,33 @@ export default function ProjectView({ project, initialTab, onBack, onTabChange, 
       alert('Blad podczas przenoszenia zdjec');
     } finally {
       setMovingPhotos(false);
+    }
+  };
+
+  const handleRecalculateChecklist = async () => {
+    if (!recalculateFile) return;
+
+    setRecalculating(true);
+    setRecalculateResult(null);
+    try {
+      const result = await api.recalculateChecklist(
+        projectId,
+        recalculateFile,
+        project.projectType,
+        recalculateTopology,
+      );
+      onProjectUpdated(result.project);
+      await refreshChecklist(selectedNodeId);
+      await refreshNodeDetail(selectedNodeId);
+      setRecalculateResult(
+        `Dodano ${result.addedNodes}, odswiezono ${result.updatedNodes}, bez zmian ${result.unchangedNodes}. Adresy: nowe ${result.addedAddresses}, rozpoznane ${result.reusedAddresses}.`,
+      );
+      setRecalculateFile(null);
+    } catch (err) {
+      console.error(err);
+      alert('Blad podczas przeliczania checklisty');
+    } finally {
+      setRecalculating(false);
     }
   };
 
@@ -422,6 +474,13 @@ export default function ProjectView({ project, initialTab, onBack, onTabChange, 
                   <Inbox size={16} className="mr-2" />
                   Review {chatBatches.filter((batch) => batch.status === 'PENDING_REVIEW').length > 0 ? `(${chatBatches.filter((batch) => batch.status === 'PENDING_REVIEW').length})` : ''}
                 </TabsTrigger>
+                <TabsTrigger
+                  value="settings"
+                  className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-2 py-3 text-sm font-medium shadow-none"
+                >
+                  <Settings size={16} className="mr-2" />
+                  Ustawienia
+                </TabsTrigger>
               </TabsList>
             </div>
 
@@ -437,15 +496,15 @@ export default function ProjectView({ project, initialTab, onBack, onTabChange, 
                           <p className="text-sm text-muted-foreground">{selectedNode.path}</p>
                         </div>
                         
-                        {selectedNode.path.startsWith('Zapasy_kabli_instalacyjnych') && (
+                        {(selectedNode.path.startsWith('Zapasy_kabli_instalacyjnych') ||
+                          selectedNode.path.startsWith('Zapasy_kabli_napowietrznych')) && (
                           <div className="flex flex-col gap-2 p-4 bg-muted/30 border border-border rounded-lg mb-2">
                             <span className="text-sm font-semibold">Wybierz rodzaj zapasu przed wgraniem zdjęcia:</span>
-                            <div className="flex gap-2">
+                            <div className="grid grid-cols-3 gap-2">
                               <Button
                                 variant={reserveLocation === 'Doziemny' ? 'default' : 'outline'}
                                 size="sm"
                                 onClick={() => setReserveLocation('Doziemny')}
-                                className="flex-1"
                               >
                                 Zapas doziemny
                               </Button>
@@ -453,9 +512,15 @@ export default function ProjectView({ project, initialTab, onBack, onTabChange, 
                                 variant={reserveLocation === 'W studni' ? 'default' : 'outline'}
                                 size="sm"
                                 onClick={() => setReserveLocation('W studni')}
-                                className="flex-1"
                               >
                                 Zapas w studni
+                              </Button>
+                              <Button
+                                variant={reserveLocation === 'Napowietrzny' ? 'default' : 'outline'}
+                                size="sm"
+                                onClick={() => setReserveLocation('Napowietrzny')}
+                              >
+                                Zapas napow.
                               </Button>
                             </div>
                           </div>
@@ -612,6 +677,102 @@ export default function ProjectView({ project, initialTab, onBack, onTabChange, 
                       await refreshChatBatches();
                     }}
                   />
+                </div>
+              </div>
+            </TabsContent>
+
+            <TabsContent value="settings" className="flex-1 flex flex-col min-h-0 mt-0 data-[state=inactive]:hidden">
+              <div className="flex-1 overflow-y-auto min-h-0">
+                <div className="p-6 max-w-4xl mx-auto w-full flex flex-col gap-6">
+                  <div>
+                    <h3 className="text-lg font-bold">Wlasciwosci projektu</h3>
+                    <p className="text-sm text-muted-foreground">
+                      Dane bazowe projektu i bezpieczne przeliczanie checklisty z GPKG.
+                    </p>
+                  </div>
+
+                  <Card>
+                    <CardContent className="p-4 grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                      <div>
+                        <p className="text-muted-foreground">Typ projektu</p>
+                        <p className="font-medium">{project.projectType}</p>
+                      </div>
+                      <div>
+                        <p className="text-muted-foreground">Topologia splitterow</p>
+                        <p className="font-medium">
+                          {project.splitterTopology} ({project.splitterTopologySource})
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-muted-foreground">GPKG</p>
+                        <p className="font-medium">{project.gpkgFileName}</p>
+                      </div>
+                      <div>
+                        <p className="text-muted-foreground">Adresy / zapasy</p>
+                        <p className="font-medium">
+                          {project.addressCount} adresow, {project.dacToAddressCableCount} doziemnych,
+                          {' '}
+                          {project.adssToAddressCableCount} napowietrznych
+                        </p>
+                      </div>
+                      <div className="md:col-span-2">
+                        <p className="text-muted-foreground">Folder zdjec</p>
+                        <p className="font-medium break-all">{project.baseFolder}</p>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  <Card>
+                    <CardContent className="p-4 flex flex-col gap-4">
+                      <div className="flex items-start justify-between gap-4">
+                        <div>
+                          <h4 className="font-semibold">Przelicz checklistę z GPKG</h4>
+                          <p className="text-sm text-muted-foreground">
+                            Operacja dopisuje nowe punkty i odswieza istniejace po sciezce. Nie usuwa zdjec
+                            ani nie zmienia ID punktow, do ktorych sa juz przypisane.
+                          </p>
+                        </div>
+                        <RefreshCw size={18} className="text-muted-foreground mt-1 shrink-0" />
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-[1fr_220px] gap-3">
+                        <Input
+                          type="file"
+                          accept=".gpkg"
+                          onChange={(event) => setRecalculateFile(event.target.files?.[0] ?? null)}
+                        />
+                        <select
+                          value={recalculateTopology}
+                          onChange={(event) =>
+                            setRecalculateTopology(event.target.value as 'AUTO' | 'SINGLE' | 'CASCADE')
+                          }
+                          className="h-10 rounded-md border border-input bg-background px-3 text-sm"
+                        >
+                          <option value="AUTO">Topologia: auto</option>
+                          <option value="SINGLE">Topologia: SINGLE</option>
+                          <option value="CASCADE">Topologia: CASCADE</option>
+                        </select>
+                      </div>
+
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="text-sm text-muted-foreground">
+                          {recalculateFile ? recalculateFile.name : 'Wybierz plik GPKG do przeliczenia.'}
+                        </p>
+                        <Button
+                          onClick={handleRecalculateChecklist}
+                          disabled={!recalculateFile || recalculating}
+                        >
+                          {recalculating ? 'Przeliczam...' : 'Przelicz checklistę'}
+                        </Button>
+                      </div>
+
+                      {recalculateResult && (
+                        <div className="rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-800">
+                          {recalculateResult}
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
                 </div>
               </div>
             </TabsContent>

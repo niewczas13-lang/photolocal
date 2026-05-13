@@ -13,6 +13,17 @@ function tableExists(db: Database.Database, tableName: string): boolean {
   return Boolean(row);
 }
 
+function getTableColumns(db: Database.Database, tableName: string): Set<string> {
+  const rows = db.prepare(`PRAGMA table_info(${q(tableName)})`).all() as Array<{ name: string }>;
+  return new Set(rows.map((row) => row.name));
+}
+
+function tableHasColumns(db: Database.Database, tableName: string, columns: string[]): boolean {
+  if (!tableExists(db, tableName)) return false;
+  const tableColumns = getTableColumns(db, tableName);
+  return columns.every((column) => tableColumns.has(column));
+}
+
 export function inferSplitterTopology(splitterCount: number): SplitterTopology {
   return splitterCount > 2 ? 'CASCADE' : 'SINGLE';
 }
@@ -209,6 +220,7 @@ function extractProjectName(db: Database.Database): string | null {
 function extractSplices(db: Database.Database): MufaEntry[] {
   const tables = ['Urządzenia Pasywne', '_Urządzenia Pasywne', 'Urzadzenia Pasywne', '_Urzadzenia Pasywne'];
   const results = new Map<string, MufaEntry>();
+  const projectedSpliceNodes = extractProjectedSpliceNodes(db);
 
   for (const tableName of tables) {
     if (!tableExists(db, tableName)) continue;
@@ -227,9 +239,14 @@ function extractSplices(db: Database.Database): MufaEntry[] {
         
         const hasZS = wezel?.includes('ZS') || oznaczenie?.includes('ZS');
         const hasOSD = wezel?.includes('OSD') || oznaczenie?.includes('OSD');
+        const canonicalWezel = canonicalZsName(wezel);
+        const canonicalOznaczenie = canonicalZsName(oznaczenie);
+        const hasProjectedSplice =
+          (canonicalWezel && projectedSpliceNodes.has(canonicalWezel)) ||
+          (canonicalOznaczenie && projectedSpliceNodes.has(canonicalOznaczenie));
         
         // Według uwag: ma być to ZS (np. po nazwie wezła ZS00004), a nie OSD.
-        if (wezel && hasZS && !hasOSD) {
+        if (wezel && hasZS && !hasOSD && hasProjectedSplice) {
           results.set(wezel, { wezel, oznaczenie: oznaczenie || wezel });
         }
       }
@@ -238,6 +255,51 @@ function extractSplices(db: Database.Database): MufaEntry[] {
 
   const zsList = Array.from(results.values()).sort((a, b) => a.wezel.localeCompare(b.wezel, 'pl'));
   return zsList;
+}
+
+function extractProjectedSpliceNodes(db: Database.Database): Set<string> {
+  const fiberTables = ['Włókna', 'Wlokna'];
+  const requiredColumns = [
+    'wezel_pocz',
+    'oznaczenie_urzadzenia_pocz',
+    'typ_polaczenia_pocz',
+    'pigtail_pocz_spaw',
+    'wezel_kon',
+    'oznaczenie_urzadzenia_kon',
+    'typ_polaczenia_kon',
+    'pigtail_kon_spaw',
+  ];
+  const nodes = new Set<string>();
+
+  for (const tableName of fiberTables) {
+    if (!tableHasColumns(db, tableName, requiredColumns)) continue;
+
+    const rows = db.prepare(`SELECT * FROM ${q(tableName)}`).all() as Array<Record<string, unknown>>;
+    for (const row of rows) {
+      if (!hasProjectedSpliceMarker(row)) continue;
+
+      for (const field of ['wezel_pocz', 'oznaczenie_urzadzenia_pocz', 'wezel_kon', 'oznaczenie_urzadzenia_kon']) {
+        const value = typeof row[field] === 'string' ? row[field] : '';
+        const zsName = canonicalZsName(value);
+        if (zsName) nodes.add(zsName);
+      }
+    }
+  }
+
+  return nodes;
+}
+
+function hasProjectedSpliceMarker(row: Record<string, unknown>): boolean {
+  return ['typ_polaczenia_pocz', 'pigtail_pocz_spaw', 'typ_polaczenia_kon', 'pigtail_kon_spaw'].some((field) => {
+    const value = typeof row[field] === 'string' ? row[field].toLowerCase() : '';
+    return value.includes('spaw') && value.includes('projekt');
+  });
+}
+
+function canonicalZsName(value: string | null): string | null {
+  if (!value) return null;
+  const match = /(?:O_)?([A-Z0-9_-]+\/ZS\d+)/i.exec(value);
+  return match ? match[1].toUpperCase() : null;
 }
 
 export function extractSplicePlaceholder(): void {} // keep lint happy

@@ -61,7 +61,7 @@ export interface ChatClassificationDebugEvent {
   visualEvidence: string[];
 }
 
-const VALID_RESERVE_LOCATIONS = new Set<ReserveClassification>(['Doziemny', 'W studni']);
+const VALID_RESERVE_LOCATIONS = new Set<ReserveClassification>(['Doziemny', 'W studni', 'Napowietrzny']);
 
 function decideStatus(
   classification: ChatFolderClassification,

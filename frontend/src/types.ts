@@ -5,10 +5,29 @@ export interface ProjectSummary {
   id: string;
   name: string;
   projectDefinition: string | null;
+  projectType: ProjectType;
+  splitterTopology: SplitterTopology;
+  splitterTopologySource: 'AUTO' | 'MANUAL';
+  splitterCount: number;
+  gpkgFileName: string;
+  baseFolder: string;
+  addressCount: number;
+  dacToAddressCableCount: number;
+  adssToAddressCableCount: number;
   progressDone: number;
   progressTotal: number;
   status: 'W trakcie' | 'Kompletne';
+  createdAt: string;
   updatedAt: string;
+}
+
+export interface ChecklistRecalculateResult {
+  addedNodes: number;
+  updatedNodes: number;
+  unchangedNodes: number;
+  addedAddresses: number;
+  reusedAddresses: number;
+  project: ProjectSummary;
 }
 
 export interface ChecklistNode {
@@ -35,8 +54,10 @@ export interface ChecklistPhoto {
   lng: number | null;
   capturedAt: string | null;
   uploadedAt: string;
-  reserveLocation: 'Doziemny' | 'W studni' | null;
+  reserveLocation: ReserveLocation | null;
 }
+
+export type ReserveLocation = 'Doziemny' | 'W studni' | 'Napowietrzny';
 
 export interface ChecklistNodeDetail {
   id: string;
@@ -86,7 +107,7 @@ export interface ChatBatch {
   status: ChatBatchStatus;
   reviewReason: string | null;
   checklistNodeId: string | null;
-  reserveLocation: 'Doziemny' | 'W studni' | null;
+  reserveLocation: ReserveLocation | null;
   confidence: number | null;
   llmModel: string | null;
   llmRawResponse: string | null;
@@ -160,7 +181,7 @@ export interface ChatClassificationDebugEvent {
   folderName: string;
   messageText: string;
   model: string;
-  reserveLocation: 'Doziemny' | 'W studni' | 'Inne' | 'Niepewne';
+  reserveLocation: ReserveLocation | 'Inne' | 'Niepewne';
   confidence: number;
   shouldReview: boolean;
   reviewReason: string | null;

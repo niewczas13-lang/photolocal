@@ -8,10 +8,12 @@ import type {
   AppConfig,
   ChecklistNode,
   ChecklistNodeDetail,
+  ChecklistRecalculateResult,
   GoogleChatDownloadStatus,
   GoogleChatSpace,
   NativeFolderPickResult,
   ProjectSummary,
+  ReserveLocation,
 } from './types';
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
@@ -48,6 +50,21 @@ export const api = {
       body: JSON.stringify({ name: newName }),
     }),
   getChecklist: (projectId: string) => request<ChecklistNode[]>(`/api/projects/${projectId}/checklist`),
+  recalculateChecklist: (
+    projectId: string,
+    gpkgFile: File,
+    projectType: string,
+    splitterTopology: string,
+  ) => {
+    const formData = new FormData();
+    formData.append('projectType', projectType);
+    formData.append('splitterTopology', splitterTopology);
+    formData.append('gpkg', gpkgFile);
+    return request<ChecklistRecalculateResult>(`/api/projects/${projectId}/checklist/recalculate`, {
+      method: 'POST',
+      body: formData,
+    });
+  },
   getChecklistNode: (projectId: string, nodeId: string) =>
     request<ChecklistNodeDetail>(`/api/projects/${projectId}/checklist/${nodeId}`),
   listChatBatches: (projectId: string, status?: ChatBatchStatus) => {
@@ -78,7 +95,7 @@ export const api = {
     projectId: string,
     batchId: string,
     checklistNodeIds: string[],
-    reserveLocation: 'Doziemny' | 'W studni' | null,
+    reserveLocation: ReserveLocation | null,
     fileIds: string[],
   ) =>
     request<{ importedPhotos: number; checklistNodeCount: number; sourceFileCount: number }>(
@@ -129,7 +146,7 @@ export const api = {
     projectId: string,
     nodeId: string,
     photoIds: string[],
-    reserveLocation: 'Doziemny' | 'W studni',
+    reserveLocation: ReserveLocation,
   ) =>
     request<{ moved: number }>(`/api/projects/${projectId}/checklist/${nodeId}/photos/reclassify`, {
       method: 'POST',

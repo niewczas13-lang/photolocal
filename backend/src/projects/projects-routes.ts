@@ -29,9 +29,22 @@ import {
   startGoogleChatDownload,
 } from '../google-chat/google-chat-downloader.js';
 import { generateChecklistNodes } from '../checklist/checklist-generator.js';
+import type { ChecklistAddress, GeneratedChecklistNode } from '../checklist/checklist-generator.js';
 import { loadConfig } from '../config.js';
 import type { ProjectType, SplitterTopology } from '../types.js';
-import { processPhoto, resolvePhotoTarget, type ReserveLocation } from '../photos/photo-processor.js';
+import { isReserveLocation, processPhoto, resolvePhotoTarget, type ReserveLocation } from '../photos/photo-processor.js';
+
+interface PreparedChecklistFromGpkg {
+  projectDefinition: string | null;
+  projectType: ProjectType;
+  splitterTopology: SplitterTopology;
+  splitterTopologySource: 'AUTO' | 'MANUAL';
+  splitterCount: number;
+  addresses: ChecklistAddress[];
+  checklistNodes: GeneratedChecklistNode[];
+  dacToAddressCableCount: number;
+  adssToAddressCableCount: number;
+}
 
 function toTree(rows: any[]) {
   const map = new Map<string, any>();
@@ -55,6 +68,45 @@ function toTree(rows: any[]) {
   }
 
   return roots;
+}
+
+function prepareChecklistFromGpkg(input: {
+  projectId: string;
+  projectName: string;
+  gpkgPath: string;
+  projectType: ProjectType;
+  manualTopology: SplitterTopology | 'AUTO' | undefined;
+}): PreparedChecklistFromGpkg {
+  const extracted = extractGpkg(input.gpkgPath);
+  const splitterTopology =
+    input.manualTopology && input.manualTopology !== 'AUTO'
+      ? input.manualTopology
+      : extracted.suggestedSplitterTopology;
+  const addresses = extracted.addresses.map((addr) => ({
+    ...addr,
+    id: randomUUID(),
+  }));
+
+  return {
+    projectDefinition: extracted.suggestedProjectDefinition ?? null,
+    projectType: input.projectType,
+    splitterTopology,
+    splitterTopologySource: input.manualTopology && input.manualTopology !== 'AUTO' ? 'MANUAL' : 'AUTO',
+    splitterCount: extracted.splitterCount,
+    addresses,
+    checklistNodes: generateChecklistNodes({
+      projectId: input.projectId,
+      projectName: input.projectName,
+      projectType: input.projectType,
+      splitterTopology,
+      addresses,
+      splices: extracted.splices,
+      dacToAddressCableEntries: extracted.dacToAddressCableEntries,
+      adssToAddressCableEntries: extracted.adssToAddressCableEntries,
+    }),
+    dacToAddressCableCount: extracted.dacToAddressCableEntries.length,
+    adssToAddressCableCount: extracted.adssToAddressCableEntries.length,
+  };
 }
 
 export async function registerProjectRoutes(app: FastifyInstance, db: Database.Database): Promise<void> {
@@ -244,10 +296,7 @@ export async function registerProjectRoutes(app: FastifyInstance, db: Database.D
     };
     const checklistNodeIds = Array.isArray(body.checklistNodeIds) ? body.checklistNodeIds.filter(Boolean) : [];
     const fileIds = Array.isArray(body.fileIds) ? body.fileIds.filter(Boolean) : undefined;
-    const reserveLocation =
-      body.reserveLocation === 'Doziemny' || body.reserveLocation === 'W studni'
-        ? body.reserveLocation
-        : null;
+    const reserveLocation = isReserveLocation(body.reserveLocation) ? body.reserveLocation : null;
 
     if (checklistNodeIds.length === 0) {
       return reply.status(400).send({ error: 'checklistNodeIds are required' });
@@ -348,6 +397,69 @@ export async function registerProjectRoutes(app: FastifyInstance, db: Database.D
     return repository.getProject(projectId);
   });
 
+  app.post('/api/projects/:projectId/checklist/recalculate', async (request, reply) => {
+    const { projectId } = request.params as { projectId: string };
+    const project = repository.getProject(projectId);
+    let projectType: ProjectType | undefined;
+    let manualTopology: SplitterTopology | 'AUTO' | undefined;
+    let gpkgFileName: string | null = null;
+    let gpkgBuffer: Buffer | null = null;
+
+    if (!project) return reply.status(404).send({ error: 'Project not found' });
+
+    for await (const part of request.parts()) {
+      if (part.type === 'file') {
+        gpkgFileName = part.filename;
+        gpkgBuffer = await part.toBuffer();
+      } else if (part.fieldname === 'projectType') {
+        const value = String(part.value);
+        projectType = value === 'KPO' ? 'KPO' : 'SI';
+      } else if (part.fieldname === 'splitterTopology') {
+        const value = String(part.value);
+        manualTopology = value === 'SINGLE' || value === 'CASCADE' ? value : 'AUTO';
+      }
+    }
+
+    if (!gpkgFileName || !gpkgBuffer) return reply.status(400).send({ error: 'No file uploaded' });
+
+    const tempGpkgPath = join(tmpdir(), `photo-local-recalculate-${randomUUID()}.gpkg`);
+    writeFileSync(tempGpkgPath, gpkgBuffer);
+
+    try {
+      const prepared = prepareChecklistFromGpkg({
+        projectId,
+        projectName: project.name,
+        gpkgPath: tempGpkgPath,
+        projectType: projectType ?? project.projectType,
+        manualTopology:
+          manualTopology ??
+          (project.splitterTopologySource === 'MANUAL' ? project.splitterTopology : 'AUTO'),
+      });
+      const result = repository.recalculateChecklist({
+        projectId,
+        projectDefinition: prepared.projectDefinition,
+        projectType: prepared.projectType,
+        splitterTopology: prepared.splitterTopology,
+        splitterTopologySource: prepared.splitterTopologySource,
+        splitterCount: prepared.splitterCount,
+        gpkgFileName,
+        addresses: prepared.addresses,
+        dacToAddressCableCount: prepared.dacToAddressCableCount,
+        adssToAddressCableCount: prepared.adssToAddressCableCount,
+        checklistNodes: prepared.checklistNodes,
+      });
+
+      return {
+        ...result,
+        project: repository.getProject(projectId),
+      };
+    } finally {
+      if (existsSync(tempGpkgPath)) {
+        unlinkSync(tempGpkgPath);
+      }
+    }
+  });
+
   app.post('/api/projects/:projectId/checklist/:nodeId/not-applicable', async (request) => {
     const { projectId, nodeId } = request.params as { projectId: string; nodeId: string };
     const body = request.body as { reason?: string };
@@ -379,7 +491,7 @@ export async function registerProjectRoutes(app: FastifyInstance, db: Database.D
         sourceBuffer = await part.toBuffer();
       } else if (part.fieldname === 'reserveLocation') {
         const value = String(part.value);
-        reserveLocation = value === 'Doziemny' || value === 'W studni' ? value : null;
+        reserveLocation = isReserveLocation(value) ? value : null;
       }
     }
 
@@ -439,10 +551,7 @@ export async function registerProjectRoutes(app: FastifyInstance, db: Database.D
       return reply.status(400).send({ error: 'Only cable reserve photos can be reclassified' });
     }
 
-    const reserveLocation =
-      body.reserveLocation === 'Doziemny' || body.reserveLocation === 'W studni'
-        ? body.reserveLocation
-        : null;
+    const reserveLocation = isReserveLocation(body.reserveLocation) ? body.reserveLocation : null;
     const photoIds = Array.isArray(body.photoIds) ? body.photoIds.filter(Boolean) : [];
 
     if (!reserveLocation || photoIds.length === 0) {
@@ -514,8 +623,8 @@ export async function registerProjectRoutes(app: FastifyInstance, db: Database.D
     writeFileSync(tempGpkgPath, gpkgBuffer);
 
     try {
-      const extracted = extractGpkg(tempGpkgPath);
       const projectId = randomUUID();
+      const extracted = extractGpkg(tempGpkgPath);
       const projectName = extracted.suggestedProjectName ?? gpkgFileName.replace(/\.gpkg$/i, '');
 
       const projectFolder = resolveProjectPhotoFolder(photoRootPath);

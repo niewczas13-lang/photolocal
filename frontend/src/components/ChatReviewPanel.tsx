@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Check, Images, Search, X } from 'lucide-react';
 import { api } from '../api';
-import type { ChatBatch, ChecklistNode } from '../types';
+import type { ChatBatch, ChecklistNode, ReserveLocation } from '../types';
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
 import { Card, CardContent } from './ui/card';
@@ -14,7 +14,7 @@ interface ChatReviewPanelProps {
   onAccept: (
     batchId: string,
     checklistNodeIds: string[],
-    reserveLocation: 'Doziemny' | 'W studni' | null,
+    reserveLocation: ReserveLocation | null,
     fileIds: string[],
   ) => Promise<void>;
   onReject: (batchId: string) => Promise<void>;
@@ -77,7 +77,7 @@ export default function ChatReviewPanel({
   const candidates = useMemo(() => collectAcceptingNodes(nodes), [nodes]);
   const [selectedByBatch, setSelectedByBatch] = useState<Record<string, Set<string>>>({});
   const [selectedFilesByBatch, setSelectedFilesByBatch] = useState<Record<string, Set<string>>>({});
-  const [locationByBatch, setLocationByBatch] = useState<Record<string, 'Doziemny' | 'W studni'>>({});
+  const [locationByBatch, setLocationByBatch] = useState<Record<string, ReserveLocation>>({});
   const [queryByBatch, setQueryByBatch] = useState<Record<string, string>>({});
   const [acceptingBatchId, setAcceptingBatchId] = useState<string | null>(null);
   const [rejectingBatchId, setRejectingBatchId] = useState<string | null>(null);
@@ -249,6 +249,14 @@ export default function ChatReviewPanel({
                       onClick={() => setLocationByBatch((current) => ({ ...current, [batch.id]: 'W studni' }))}
                     >
                       W studni
+                    </Button>
+                    <Button
+                      variant={location === 'Napowietrzny' ? 'default' : 'outline'}
+                      size="sm"
+                      onClick={() => setLocationByBatch((current) => ({ ...current, [batch.id]: 'Napowietrzny' }))}
+                      className="col-span-2"
+                    >
+                      Napowietrzny
                     </Button>
                   </div>
                 </div>

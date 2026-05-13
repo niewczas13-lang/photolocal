@@ -16,7 +16,21 @@ describe('photo processor naming', () => {
       sourceFileName: 'IMG_001.jpg',
     });
 
-    expect(target.relativeFolder).toBe('Zapasy_kabli_instalacyjnych/doziemne/WRONCKIEJ_13');
+    expect(target.relativeFolder).toBe('Zapasy_kabli_instalacyjnych/Zapasy_doziemne/WRONCKIEJ_13');
     expect(target.fileName).toBe('WRONCKIEJ_13_foto1.jpeg');
+  });
+
+  it('routes aerial reserve photos into napowietrzne folder', () => {
+    const target = resolvePhotoTarget({
+      projectFolder: 'D:/Baza/PROJEKT',
+      nodePath: 'Zapasy_kabli_napowietrznych/OSD2640/WRONCKIEJ_13',
+      nodeName: 'WRONCKIEJ_13',
+      existingCount: 1,
+      reserveLocation: 'Napowietrzny',
+      sourceFileName: 'IMG_002.jpg',
+    });
+
+    expect(target.relativeFolder).toBe('Zapasy_kabli_napowietrznych/Zapasy_napowietrzne/WRONCKIEJ_13');
+    expect(target.fileName).toBe('WRONCKIEJ_13_foto2.jpeg');
   });
 });

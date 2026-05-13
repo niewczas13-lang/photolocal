@@ -1,5 +1,5 @@
 import type { ProjectsRepository } from '../projects/projects-repository.js';
-import type { ProcessedPhoto } from '../photos/photo-processor.js';
+import { isReserveLocation, type ProcessedPhoto, type ReserveLocation } from '../photos/photo-processor.js';
 import { acceptChatBatch } from './chat-batch-acceptance.js';
 import type { ChatBatchesRepository } from './chat-batches-repository.js';
 
@@ -14,10 +14,6 @@ export interface AcceptReadyChatBatchesResult {
   importedBatches: number;
   importedPhotos: number;
   skippedBatches: number;
-}
-
-function isAcceptedReserveLocation(value: string | null): value is 'Doziemny' | 'W studni' {
-  return value === 'Doziemny' || value === 'W studni';
 }
 
 export async function acceptReadyChatBatches(
@@ -50,7 +46,7 @@ export async function acceptReadyChatBatches(
     const node = input.projectsRepository.getChecklistNode(input.projectId, batch.checklistNodeId);
     const needsReserveLocation = node?.nodeType === 'CABLE_RESERVE';
 
-    if (needsReserveLocation && !isAcceptedReserveLocation(batch.reserveLocation)) {
+    if (needsReserveLocation && !isReserveLocation(batch.reserveLocation)) {
       input.batchesRepository.updateDecision({
         projectId: input.projectId,
         batchId: batch.id,
@@ -66,7 +62,7 @@ export async function acceptReadyChatBatches(
       continue;
     }
 
-    const reserveLocation = needsReserveLocation && isAcceptedReserveLocation(batch.reserveLocation)
+    const reserveLocation: ReserveLocation | null = needsReserveLocation && isReserveLocation(batch.reserveLocation)
       ? batch.reserveLocation
       : null;
     const imported = await acceptChatBatch({

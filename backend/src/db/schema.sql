@@ -87,7 +87,7 @@ CREATE TABLE IF NOT EXISTS chat_photo_batches (
   )),
   review_reason TEXT,
   checklist_node_id TEXT REFERENCES checklist_nodes(id) ON DELETE SET NULL,
-  reserve_location TEXT CHECK (reserve_location IN ('Doziemny', 'W studni') OR reserve_location IS NULL),
+  reserve_location TEXT CHECK (reserve_location IN ('Doziemny', 'W studni', 'Napowietrzny') OR reserve_location IS NULL),
   confidence REAL,
   llm_model TEXT,
   llm_raw_response TEXT,

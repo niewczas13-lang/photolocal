@@ -51,6 +51,23 @@ describe('parseVisionClassification', () => {
     expect(result.shouldReview).toBe(false);
   });
 
+  it('parses aerial reserve classification as a confident reserve location', () => {
+    const result = parseVisionClassification(`{
+      "reserveLocation": "Napowietrzny",
+      "confidence": 0.91,
+      "visualEvidence": ["drop zwinięty na słupie"]
+    }`);
+
+    expect(result).toEqual({
+      reserveLocation: 'Napowietrzny',
+      confidence: 0.91,
+      visualEvidence: ['drop zwinięty na słupie'],
+      reason: undefined,
+      shouldReview: false,
+    });
+  });
+
+
   it('extracts visual evidence descriptions from object arrays', () => {
     const result = parseVisionClassification(`{
       "reserveLocation": "W studni",

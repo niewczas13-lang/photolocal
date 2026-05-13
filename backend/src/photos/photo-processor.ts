@@ -3,7 +3,13 @@ import { extname, join } from 'node:path';
 import sharp from 'sharp';
 import { safeFolderName } from '../utils/path-names.js';
 
-export type ReserveLocation = 'Doziemny' | 'W studni';
+export const RESERVE_LOCATIONS = ['Doziemny', 'W studni', 'Napowietrzny'] as const;
+
+export type ReserveLocation = (typeof RESERVE_LOCATIONS)[number];
+
+export function isReserveLocation(value: unknown): value is ReserveLocation {
+  return typeof value === 'string' && RESERVE_LOCATIONS.includes(value as ReserveLocation);
+}
 
 export interface ResolvePhotoTargetInput {
   projectFolder: string;
@@ -35,10 +41,22 @@ export function buildReservePhotoName(addressName: string, index: number): strin
 }
 
 export function resolvePhotoTarget(input: ResolvePhotoTargetInput): PhotoTarget {
-  if (input.nodePath.startsWith('Zapasy_kabli_instalacyjnych') && input.reserveLocation) {
-    const installType = input.reserveLocation === 'Doziemny' ? 'Zapasy_doziemne' : 'Zapasy_w_studni';
+  if (
+    (input.nodePath.startsWith('Zapasy_kabli_instalacyjnych') ||
+      input.nodePath.startsWith('Zapasy_kabli_napowietrznych')) &&
+    input.reserveLocation
+  ) {
+    const root = input.reserveLocation === 'Napowietrzny'
+      ? 'Zapasy_kabli_napowietrznych'
+      : 'Zapasy_kabli_instalacyjnych';
+    const installType =
+      input.reserveLocation === 'Doziemny'
+        ? 'Zapasy_doziemne'
+        : input.reserveLocation === 'W studni'
+          ? 'Zapasy_w_studni'
+          : 'Zapasy_napowietrzne';
     const addressName = safeFolderName(input.nodeName);
-    const relativeFolder = `Zapasy_kabli_instalacyjnych/${installType}/${addressName}`;
+    const relativeFolder = `${root}/${installType}/${addressName}`;
     const fileName = buildReservePhotoName(addressName, input.existingCount + 1);
     return {
       relativeFolder,

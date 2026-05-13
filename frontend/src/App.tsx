@@ -6,7 +6,7 @@ import ProjectView from './components/ProjectView';
 import type { ProjectSummary } from './types';
 import { Camera } from 'lucide-react';
 
-export type ProjectTab = 'photos' | 'missing' | 'import' | 'ready' | 'review';
+export type ProjectTab = 'photos' | 'missing' | 'import' | 'ready' | 'review' | 'settings';
 
 interface AppRoute {
   projectId: string | null;
@@ -14,7 +14,7 @@ interface AppRoute {
 }
 
 const DEFAULT_TAB: ProjectTab = 'photos';
-const PROJECT_TABS = new Set<ProjectTab>(['photos', 'missing', 'import', 'ready', 'review']);
+const PROJECT_TABS = new Set<ProjectTab>(['photos', 'missing', 'import', 'ready', 'review', 'settings']);
 
 function parseRoute(): AppRoute {
   const hash = window.location.hash.replace(/^#\/?/, '');
@@ -75,6 +75,9 @@ export default function App() {
             onTabChange={(tab) => setProjectRoute(selectedProjectId, tab)}
             onRename={(newName) => {
               setProjects(projects.map(p => p.id === selectedProjectId ? { ...p, name: newName } : p));
+            }}
+            onProjectUpdated={(updatedProject) => {
+              setProjects(projects.map(p => p.id === selectedProjectId ? updatedProject : p));
             }}
           />
         ) : (
