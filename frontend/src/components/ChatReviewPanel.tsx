@@ -6,6 +6,11 @@ import { Badge } from './ui/badge';
 import { Button } from './ui/button';
 import { Card, CardContent } from './ui/card';
 import { Input } from './ui/input';
+import {
+  collectAcceptingNodes,
+  getSuggestedCandidates,
+  normalize,
+} from './chat-review-suggestions';
 
 interface ChatReviewPanelProps {
   projectId: string;
@@ -21,47 +26,6 @@ interface ChatReviewPanelProps {
   emptyTitle?: string;
   emptyDescription?: string;
   acceptLabel?: string;
-}
-
-interface CandidateNode {
-  id: string;
-  name: string;
-  path: string;
-  nodeType: ChecklistNode['nodeType'];
-}
-
-function normalize(value: string): string {
-  return value
-    .normalize('NFKD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[_-]+/g, ' ')
-    .replace(/[^a-z0-9]+/gi, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .toLowerCase();
-}
-
-function collectAcceptingNodes(nodes: ChecklistNode[]): CandidateNode[] {
-  return nodes.flatMap((node) => {
-    const self =
-      node.acceptsPhotos
-        ? [{ id: node.id, name: node.name, path: node.path, nodeType: node.nodeType }]
-        : [];
-    return [...self, ...collectAcceptingNodes(node.children)];
-  });
-}
-
-function scoreCandidate(batch: ChatBatch, candidate: CandidateNode): number {
-  const source = normalize(`${batch.messageText} ${batch.folderName}`);
-  const name = normalize(candidate.name);
-  const parts = name.split(' ').filter(Boolean);
-  const number = parts.at(-1) ?? '';
-  const street = parts.slice(0, -1).join(' ');
-
-  if (name && source.includes(name)) return 100;
-  if (street && number && source.includes(street) && source.includes(number)) return 80;
-  if (number && source.includes(number)) return 30;
-  return 0;
 }
 
 export default function ChatReviewPanel({
@@ -168,17 +132,12 @@ export default function ChatReviewPanel({
           const candidate = candidates.find((item) => item.id === nodeId);
           return candidate?.nodeType === 'CABLE_RESERVE';
         });
-        const suggested = candidates
-          .map((candidate) => ({ candidate, score: scoreCandidate(batch, candidate) }))
-          .filter(
-            ({ candidate, score }) =>
-              selected.has(candidate.id) ||
-              score > 0 ||
-              (query &&
-                (normalize(candidate.name).includes(query) || normalize(candidate.path).includes(query))),
-          )
-          .sort((left, right) => right.score - left.score || left.candidate.name.localeCompare(right.candidate.name))
-          .slice(0, query ? 40 : 12);
+        const suggested = getSuggestedCandidates({
+          batch,
+          candidates,
+          selected,
+          query,
+        });
 
         return (
           <Card key={batch.id}>
