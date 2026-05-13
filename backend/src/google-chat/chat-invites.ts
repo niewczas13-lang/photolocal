@@ -1,4 +1,6 @@
 import { createHash } from 'node:crypto';
+import { spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import type { Page } from 'playwright-core';
@@ -30,6 +32,7 @@ export interface ChatInviteDebugInfo {
 export interface ChatInviteBrowserConfig {
   profileDir: string;
   headless: boolean;
+  debugPort?: number;
 }
 
 interface RawInviteCandidate {
@@ -49,6 +52,72 @@ function createDebugInfo(): ChatInviteDebugInfo {
     buttonLabelsPreview: [],
     error: null,
   };
+}
+
+function inviteDebugPort(config: ChatInviteBrowserConfig): number {
+  return config.debugPort ?? 9222;
+}
+
+function chromeCandidates(): string[] {
+  return [
+    process.env.GOOGLE_CHROME_PATH ?? '',
+    'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+  ].filter(Boolean);
+}
+
+function findChromeExecutable(): string {
+  const chromePath = chromeCandidates().find((candidate) => existsSync(candidate));
+  if (!chromePath) {
+    throw new Error('Nie znaleziono chrome.exe. Ustaw GOOGLE_CHROME_PATH w .env.');
+  }
+  return chromePath;
+}
+
+function launchExternalChrome(config: ChatInviteBrowserConfig, debug: ChatInviteDebugInfo): void {
+  const chromePath = findChromeExecutable();
+  const debugPort = inviteDebugPort(config);
+  debug.steps.push(`Uruchamiam zwykly Chrome: ${chromePath}`);
+  debug.steps.push(`Remote debugging port: ${debugPort}`);
+
+  const child = spawn(
+    chromePath,
+    [
+      `--remote-debugging-port=${debugPort}`,
+      `--user-data-dir=${config.profileDir}`,
+      '--no-first-run',
+      '--new-window',
+      GOOGLE_CHAT_INVITES_URL,
+    ],
+    {
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: false,
+    },
+  );
+  child.unref();
+}
+
+async function waitForCdpEndpoint(config: ChatInviteBrowserConfig, debug: ChatInviteDebugInfo): Promise<string> {
+  const debugPort = inviteDebugPort(config);
+  const cdpUrl = `http://127.0.0.1:${debugPort}`;
+  const versionUrl = `${cdpUrl}/json/version`;
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < 12_000) {
+    try {
+      const response = await fetch(versionUrl);
+      if (response.ok) {
+        debug.steps.push(`Chrome CDP gotowy: ${cdpUrl}`);
+        return cdpUrl;
+      }
+    } catch {
+      // Chrome is still starting.
+    }
+    await new Promise((resolveTimeout) => setTimeout(resolveTimeout, 500));
+  }
+
+  throw new Error(`Nie udalo sie polaczyc z Chrome CDP na porcie ${debugPort}`);
 }
 
 export function parseInviteWhitelist(value: string): string[] {
@@ -84,7 +153,7 @@ function firstUsefulLine(text: string): string | null {
     .split('\n')
     .map((line) => line.trim())
     .filter(Boolean)
-    .filter((line) => !/^(dolacz|join)$/i.test(line.normalize('NFKD').replace(/[\\u0300-\\u036f]/g, '')));
+    .filter((line) => !/^(dolacz|join)$/i.test(line.normalize('NFKD').replace(/[\u0300-\u036f]/g, '')));
   return lines[0] ?? null;
 }
 
@@ -108,12 +177,10 @@ async function openInvitesPage(
 ): Promise<{ page: Page; close: () => Promise<void> }> {
   debug.steps.push(`Tworze/uzywam profilu Chrome: ${config.profileDir}`);
   await mkdir(config.profileDir, { recursive: true });
-  debug.steps.push(`Uruchamiam Chrome: ${config.headless ? 'headless' : 'widoczny'}`);
-  const context = await chromium.launchPersistentContext(config.profileDir, {
-    channel: 'chrome',
-    headless: config.headless,
-    viewport: { width: 1400, height: 900 },
-  });
+  launchExternalChrome(config, debug);
+  const cdpUrl = await waitForCdpEndpoint(config, debug);
+  const browser = await chromium.connectOverCDP(cdpUrl);
+  const context = browser.contexts()[0] ?? (await browser.newContext());
   const page = context.pages()[0] ?? (await context.newPage());
   page.setDefaultTimeout(20_000);
   debug.steps.push(`Otwieram ${GOOGLE_CHAT_INVITES_URL}`);
@@ -125,7 +192,7 @@ async function openInvitesPage(
 
   return {
     page,
-    close: async () => context.close(),
+    close: async () => browser.close(),
   };
 }
 
@@ -260,20 +327,8 @@ export async function openChatInvitesSetup(input: {
   const debug = createDebugInfo();
   debug.steps.push(`Tworze/uzywam profilu Chrome: ${input.config.profileDir}`);
   await mkdir(input.config.profileDir, { recursive: true });
-  debug.steps.push('Otwieram Chrome do logowania i zostawiam okno otwarte');
-  const context = await chromium.launchPersistentContext(input.config.profileDir, {
-    channel: 'chrome',
-    headless: false,
-    viewport: { width: 1400, height: 900 },
-  });
-  const page = context.pages()[0] ?? (await context.newPage());
-  await page.goto(GOOGLE_CHAT_INVITES_URL, { waitUntil: 'domcontentloaded' });
-  debug.finalUrl = page.url();
-  debug.title = await page.title().catch(() => null);
-
-  context.on('close', () => {
-    debug.steps.push('Chrome setup zamkniety przez uzytkownika');
-  });
+  debug.steps.push('Otwieram zwykly Chrome do logowania i zostawiam okno otwarte');
+  launchExternalChrome({ ...input.config, headless: false }, debug);
 
   return {
     started: true,
