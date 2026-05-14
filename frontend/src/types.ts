@@ -205,10 +205,6 @@ export interface AppConfig {
   googleChatInviteProfileDir: string;
 }
 
-export interface NativeFolderPickResult {
-  path: string | null;
-}
-
 export interface GoogleChatDownloadStatus {
   state: 'IDLE' | 'RUNNING' | 'COMPLETED' | 'FAILED';
   projectId: string | null;

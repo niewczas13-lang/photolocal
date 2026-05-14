@@ -14,7 +14,6 @@ import type {
   GoogleChatInviteListResult,
   GoogleChatInviteSetupResult,
   GoogleChatSpace,
-  NativeFolderPickResult,
   ProjectSummary,
   ReserveLocation,
 } from './types';
@@ -30,12 +29,6 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   getConfig: () => request<AppConfig>('/api/config'),
-  pickFolder: (initialPath: string) =>
-    request<NativeFolderPickResult>('/api/folders/pick', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ initialPath }),
-    }),
   listProjects: () => request<ProjectSummary[]>('/api/projects'),
   listGoogleChatSpaces: () => request<GoogleChatSpace[]>('/api/google-chat/spaces'),
   listGoogleChatInvites: () =>

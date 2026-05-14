@@ -10,7 +10,7 @@ import {
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
-import { FolderOpen, Loader2 } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 
 interface CreateProjectDialogProps {
   open: boolean;
@@ -23,7 +23,6 @@ export default function CreateProjectDialog({ open, onClose, onCreated }: Create
   const [projectType, setProjectType] = useState('SI');
   const [splitterTopology, setSplitterTopology] = useState('AUTO');
   const [photoRootPath, setPhotoRootPath] = useState('');
-  const [pickingFolder, setPickingFolder] = useState(false);
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async (event: React.FormEvent) => {
@@ -40,21 +39,6 @@ export default function CreateProjectDialog({ open, onClose, onCreated }: Create
       alert('Blad podczas tworzenia projektu');
     } finally {
       setLoading(false);
-    }
-  };
-
-  const handlePickFolder = async () => {
-    setPickingFolder(true);
-    try {
-      const result = await api.pickFolder(photoRootPath);
-      if (result.path) {
-        setPhotoRootPath(result.path);
-      }
-    } catch (err) {
-      console.error(err);
-      alert('Nie udalo sie otworzyc windowsowego wybierania folderu');
-    } finally {
-      setPickingFolder(false);
     }
   };
 
@@ -92,25 +76,15 @@ export default function CreateProjectDialog({ open, onClose, onCreated }: Create
               <label htmlFor="photoRootPath" className="text-sm font-medium leading-none">
                 Folder zadania
               </label>
-              <div className="grid grid-cols-[1fr_auto] gap-2">
-                <Input
-                  id="photoRootPath"
-                  value={photoRootPath}
-                  onChange={(event) => setPhotoRootPath(event.target.value)}
-                  placeholder="D:\projekty\opp13\pw\sap"
-                  required
-                />
-                <Button type="button" variant="outline" onClick={handlePickFolder} disabled={pickingFolder}>
-                  {pickingFolder ? (
-                    <Loader2 size={16} className="mr-2 animate-spin" />
-                  ) : (
-                    <FolderOpen size={16} className="mr-2" />
-                  )}
-                  {pickingFolder ? 'Wybieranie...' : 'Wybierz'}
-                </Button>
-              </div>
+              <Input
+                id="photoRootPath"
+                value={photoRootPath}
+                onChange={(event) => setPhotoRootPath(event.target.value)}
+                placeholder="C:\PhotoLocal\projekty\OPP0013"
+                required
+              />
               <p className="text-xs text-muted-foreground">
-                Aplikacja utworzy w nim folder zdjecia i zapisze tam cala strukture zdjec.
+                Wpisz sciezke widoczna dla komputera, na ktorym dziala backend. Aplikacja utworzy w niej folder zdjecia.
               </p>
             </div>
             
