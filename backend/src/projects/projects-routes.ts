@@ -33,6 +33,7 @@ import type { ChecklistAddress, GeneratedChecklistNode } from '../checklist/chec
 import { loadConfig } from '../config.js';
 import type { ProjectType, SplitterTopology } from '../types.js';
 import { isReserveLocation, processPhoto, resolvePhotoTarget, type ReserveLocation } from '../photos/photo-processor.js';
+import { runProjectOperation } from '../utils/project-operation-queue.js';
 
 interface PreparedChecklistFromGpkg {
   projectDefinition: string | null;
@@ -68,6 +69,16 @@ function toTree(rows: any[]) {
   }
 
   return roots;
+}
+
+function getChatAcceptErrorStatus(error: unknown): 409 | 500 {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes('already imported') ||
+    message.includes('already rejected') ||
+    message.includes('no remaining files') ||
+    message.includes('no longer available')
+    ? 409
+    : 500;
 }
 
 function prepareChecklistFromGpkg(input: {
@@ -263,11 +274,20 @@ export async function registerProjectRoutes(app: FastifyInstance, db: Database.D
 
     if (!project) return reply.status(404).send({ error: 'Project not found' });
 
-    return acceptReadyChatBatches({
-      projectId,
-      projectsRepository: repository,
-      batchesRepository: chatBatchesRepository,
-    });
+    try {
+      return await runProjectOperation(projectId, () =>
+        acceptReadyChatBatches({
+          projectId,
+          projectsRepository: repository,
+          batchesRepository: chatBatchesRepository,
+        }),
+      );
+    } catch (error) {
+      app.log.error({ error, projectId }, 'Failed to accept ready chat batches');
+      return reply.status(getChatAcceptErrorStatus(error)).send({
+        error: error instanceof Error ? error.message : 'Blad podczas importu gotowych paczek',
+      });
+    }
   });
 
   app.get('/api/projects/:projectId/chat-batches/:batchId/files/:fileId/file', async (request, reply) => {
@@ -331,18 +351,24 @@ export async function registerProjectRoutes(app: FastifyInstance, db: Database.D
       return reply.status(400).send({ error: 'reserveLocation is required for cable reserve nodes' });
     }
 
-    const config = loadConfig();
-    const result = await acceptChatBatch({
-      projectId,
-      batchId,
-      checklistNodeIds,
-      fileIds,
-      reserveLocation,
-      projectsRepository: repository,
-      batchesRepository: chatBatchesRepository,
-    });
-
-    return result;
+    try {
+      return await runProjectOperation(projectId, () =>
+        acceptChatBatch({
+          projectId,
+          batchId,
+          checklistNodeIds,
+          fileIds,
+          reserveLocation,
+          projectsRepository: repository,
+          batchesRepository: chatBatchesRepository,
+        }),
+      );
+    } catch (error) {
+      app.log.error({ error, projectId, batchId }, 'Failed to accept chat batch');
+      return reply.status(getChatAcceptErrorStatus(error)).send({
+        error: error instanceof Error ? error.message : 'Blad podczas akceptacji paczki z czatu',
+      });
+    }
   });
 
   app.post('/api/projects/:projectId/chat-batches/:batchId/reject', async (request, reply) => {

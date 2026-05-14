@@ -46,6 +46,7 @@ export default function ChatReviewPanel({
   const [queryByBatch, setQueryByBatch] = useState<Record<string, string>>({});
   const [acceptingBatchId, setAcceptingBatchId] = useState<string | null>(null);
   const [rejectingBatchId, setRejectingBatchId] = useState<string | null>(null);
+  const isBusy = acceptingBatchId !== null || rejectingBatchId !== null;
 
   const toggleCandidate = (batchId: string, nodeId: string, defaultNodeIds: string[] = []) => {
     setSelectedByBatch((current) => {
@@ -288,7 +289,7 @@ export default function ChatReviewPanel({
               <div className="flex justify-end">
                 <Button
                   variant="outline"
-                  disabled={rejectingBatchId === batch.id || acceptingBatchId === batch.id}
+                  disabled={isBusy}
                   onClick={() => void handleReject(batch.id)}
                   className="mr-2"
                 >
@@ -296,11 +297,13 @@ export default function ChatReviewPanel({
                   Odrzuc paczke
                 </Button>
                 <Button
-                  disabled={selected.size === 0 || selectedFileIds.length === 0 || acceptingBatchId === batch.id}
+                  disabled={selected.size === 0 || selectedFileIds.length === 0 || isBusy}
                   onClick={() => void handleAccept(batch.id)}
                 >
                   <Check size={16} className="mr-2" />
-                  {acceptLabel} {selectedFileIds.length} zdjec do {selected.size || 0} folderow
+                  {acceptingBatchId === batch.id
+                    ? 'Importuje...'
+                    : `${acceptLabel} ${selectedFileIds.length} zdjec do ${selected.size || 0} folderow`}
                 </Button>
               </div>
             </CardContent>
