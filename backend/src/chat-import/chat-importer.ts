@@ -59,6 +59,11 @@ export async function importChatFolders(input: ImportChatFoldersInput): Promise<
   };
 
   for (const manifest of manifests) {
+    const existingBatch = input.repository.findBatchForManifest(input.projectId, manifest);
+    if (existingBatch) {
+      continue;
+    }
+
     const decision = decideInitialStatus(manifest);
 
     input.repository.importManifest({

@@ -278,6 +278,11 @@ export class ChatBatchesRepository {
     return (rows as ChatBatchRow[]).map(toBatchRecord);
   }
 
+  findBatchForManifest(projectId: string, manifest: ChatManifest): ChatBatchRecord | undefined {
+    const batch = this.findBatchIdentity(projectId, manifest.messageName, manifest.folderPath);
+    return batch ? this.getBatch(projectId, batch.id) : undefined;
+  }
+
   getBatch(projectId: string, batchId: string): ChatBatchRecord | undefined {
     const row = this.db
       .prepare(

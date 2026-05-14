@@ -184,4 +184,52 @@ describe('importChatFolders', () => {
       status: 'WAITING_FOR_CLASSIFICATION',
     });
   });
+
+  it('does not send previously handled batches back to classification or review', async () => {
+    const { db, repository, projectId, dir } = createContext();
+    writeManifest(dir, 'Maleniecka 5', 'Maleniecka 5');
+    writeManifest(dir, 'brak_opisu', '');
+    writeManifest(dir, 'Tu nie ma przejscia', 'Tu nie ma przejscia');
+
+    await importChatFolders({ projectId, rootPath: dir, repository });
+    const initialBatches = repository.listBatches(projectId);
+    const waiting = initialBatches.find((batch) => batch.folderName === 'Maleniecka 5');
+    const reviewWithoutAddress = initialBatches.find((batch) => batch.folderName === 'Tu nie ma przejscia');
+    const reviewWithoutDescription = initialBatches.find((batch) => batch.folderName === 'brak_opisu');
+    if (!waiting || !reviewWithoutAddress || !reviewWithoutDescription) {
+      throw new Error('Expected test batches were not created');
+    }
+
+    repository.updateDecision({
+      projectId,
+      batchId: waiting.id,
+      status: 'IMPORTED',
+      reserveLocation: 'Doziemny',
+      confidence: 0.95,
+    });
+    repository.updateDecision({
+      projectId,
+      batchId: reviewWithoutAddress.id,
+      status: 'REJECTED',
+      reviewReason: 'Odrzucone recznie',
+    });
+    repository.updateDecision({
+      projectId,
+      batchId: reviewWithoutDescription.id,
+      status: 'READY_FOR_IMPORT',
+    });
+
+    const result = await importChatFolders({ projectId, rootPath: dir, repository });
+    const batches = repository.listBatches(projectId);
+    db.close();
+
+    expect(result).toEqual({ imported: 0, waitingForClassification: 0, pendingReview: 0 });
+    expect(batches).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ folderName: 'Tu nie ma przejscia', status: 'REJECTED' }),
+        expect.objectContaining({ folderName: 'Maleniecka 5', status: 'IMPORTED' }),
+        expect.objectContaining({ folderName: 'brak_opisu', status: 'READY_FOR_IMPORT' }),
+      ]),
+    );
+  });
 });
