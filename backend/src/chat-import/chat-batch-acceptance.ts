@@ -30,16 +30,19 @@ export interface AcceptChatBatchResult {
 export async function acceptChatBatch(input: AcceptChatBatchInput): Promise<AcceptChatBatchResult> {
   const project = input.projectsRepository.getProject(input.projectId);
   const batch = input.batchesRepository.getBatch(input.projectId, input.batchId);
+  const batchFiles = input.batchesRepository.listBatchFiles(input.projectId, input.batchId);
   const files = input.fileIds && input.fileIds.length > 0
-    ? input.batchesRepository
-        .listBatchFiles(input.projectId, input.batchId)
-        .filter((file) => input.fileIds?.includes(file.id))
-    : input.batchesRepository.listBatchFiles(input.projectId, input.batchId);
+    ? batchFiles.filter((file) => input.fileIds?.includes(file.id))
+    : batchFiles;
   const processor = input.processPhoto ?? defaultProcessPhoto;
 
   if (!project) throw new Error('Project not found');
   if (!batch) throw new Error('Chat batch not found');
   if (input.checklistNodeIds.length === 0) throw new Error('At least one checklist node is required');
+  if (batch.status === 'IMPORTED') throw new Error('Chat batch was already imported');
+  if (batch.status === 'REJECTED') throw new Error('Chat batch was already rejected');
+  if (batchFiles.length === 0) throw new Error('Chat batch has no remaining files');
+  if (files.length === 0) throw new Error('Selected chat batch files are no longer available');
 
   let importedPhotos = 0;
 

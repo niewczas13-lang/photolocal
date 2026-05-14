@@ -242,4 +242,66 @@ describe('acceptChatBatch', () => {
     });
     expect(remainingFiles).toEqual([]);
   });
+
+  it('rejects accepting a batch that was already imported', async () => {
+    const { db, projects, batches, projectId, dir } = createContext();
+    const batch = batches.importManifest({
+      projectId,
+      manifest: createManifest(join(dir, 'Maleniecka 5 i 7')),
+      status: 'IMPORTED',
+    });
+
+    await expect(
+      acceptChatBatch({
+        projectId,
+        batchId: batch.id,
+        checklistNodeIds: ['node-maleniecka-5'],
+        reserveLocation: 'W studni',
+        projectsRepository: projects,
+        batchesRepository: batches,
+        processPhoto: async () => ({
+          buffer: Buffer.from('processed-photo'),
+          thumbnail: Buffer.from('thumb'),
+          mimeType: 'image/jpeg',
+          fileSize: 15,
+          lat: null,
+          lng: null,
+          capturedAt: null,
+        }),
+      }),
+    ).rejects.toThrow('Chat batch was already imported');
+    db.close();
+  });
+
+  it('rejects selected files that are no longer in the active batch', async () => {
+    const { db, projects, batches, projectId, dir } = createContext();
+    const batch = batches.importManifest({
+      projectId,
+      manifest: createManifest(join(dir, 'Maleniecka 5 i 7')),
+      status: 'PENDING_REVIEW',
+      reviewReason: 'Wiadomosc wyglada na wiele adresow',
+    });
+
+    await expect(
+      acceptChatBatch({
+        projectId,
+        batchId: batch.id,
+        checklistNodeIds: ['node-maleniecka-5'],
+        fileIds: ['stale-file-id'],
+        reserveLocation: 'W studni',
+        projectsRepository: projects,
+        batchesRepository: batches,
+        processPhoto: async () => ({
+          buffer: Buffer.from('processed-photo'),
+          thumbnail: Buffer.from('thumb'),
+          mimeType: 'image/jpeg',
+          fileSize: 15,
+          lat: null,
+          lng: null,
+          capturedAt: null,
+        }),
+      }),
+    ).rejects.toThrow('Selected chat batch files are no longer available');
+    db.close();
+  });
 });

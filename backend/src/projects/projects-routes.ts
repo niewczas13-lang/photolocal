@@ -306,6 +306,26 @@ export async function registerProjectRoutes(app: FastifyInstance, db: Database.D
     if (selectedNodes.some((node) => !node)) {
       return reply.status(404).send({ error: 'Some checklist nodes were not found' });
     }
+    const batch = chatBatchesRepository.getBatch(projectId, batchId);
+    if (!batch) {
+      return reply.status(404).send({ error: 'Chat batch not found' });
+    }
+    if (batch.status === 'IMPORTED' || batch.status === 'REJECTED') {
+      return reply.status(409).send({
+        error: 'Ta paczka zostala juz obsluzona. Odswiez liste paczek.',
+      });
+    }
+    const currentFiles = chatBatchesRepository.listBatchFiles(projectId, batchId);
+    if (currentFiles.length === 0) {
+      return reply.status(409).send({
+        error: 'Ta paczka nie ma juz zdjec do importu. Odswiez liste paczek.',
+      });
+    }
+    if (fileIds && !fileIds.every((fileId) => currentFiles.some((file) => file.id === fileId))) {
+      return reply.status(409).send({
+        error: 'Wybrane zdjecia z paczki nie sa juz dostepne. Odswiez liste paczek.',
+      });
+    }
     const requiresReserveLocation = selectedNodes.some((node) => node?.nodeType === 'CABLE_RESERVE');
     if (requiresReserveLocation && !reserveLocation) {
       return reply.status(400).send({ error: 'reserveLocation is required for cable reserve nodes' });

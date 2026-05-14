@@ -104,6 +104,10 @@ function formatBytes(value: number): string {
   return `${(value / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : 'Nieznany blad';
+}
+
 export default function ProjectView({
   project,
   initialTab,
@@ -240,7 +244,7 @@ export default function ProjectView({
       await refreshChatBatches();
     } catch (err) {
       console.error(err);
-      alert('Blad podczas akceptacji paczki z czatu');
+      alert(`Blad podczas akceptacji paczki z czatu:\n${getErrorMessage(err)}`);
     }
   };
 
