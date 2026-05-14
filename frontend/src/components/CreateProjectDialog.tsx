@@ -74,18 +74,24 @@ export default function CreateProjectDialog({ open, onClose, onCreated }: Create
 
             <div className="grid gap-2">
               <label htmlFor="photoRootPath" className="text-sm font-medium leading-none">
-                Folder zadania
+                Folder zapisu zdjec
               </label>
               <Input
                 id="photoRootPath"
                 value={photoRootPath}
                 onChange={(event) => setPhotoRootPath(event.target.value)}
-                placeholder="C:\PhotoLocal\projekty\OPP0013"
+                placeholder="\\KOMPUTER\Udostepnione\OPP0013"
                 required
               />
-              <p className="text-xs text-muted-foreground">
-                Wpisz sciezke widoczna dla komputera, na ktorym dziala backend. Aplikacja utworzy w niej folder zdjecia.
-              </p>
+              <div className="rounded-md bg-muted/40 p-2 text-xs text-muted-foreground">
+                <p>
+                  Wpisz folder, do ktorego dostep ma komputer z backendem. Moze to byc folder na tym komputerze albo
+                  udzial sieciowy z innego komputera.
+                </p>
+                <p className="mt-1 font-mono text-[11px] text-foreground/80">
+                  Przyklady: C:\PhotoLocal\projekty\OPP0013 albo \\KOMPUTER-ANIA\PhotoLocal\OPP0013
+                </p>
+              </div>
             </div>
             
             <div className="grid gap-2">
