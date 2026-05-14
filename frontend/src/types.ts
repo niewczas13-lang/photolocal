@@ -217,6 +217,23 @@ export interface GoogleChatDownloadStatus {
   recentLines: string[];
 }
 
+export interface SharedFolderRoot {
+  path: string;
+  label: string;
+  providerName: string | null;
+}
+
+export interface SharedFolderEntry {
+  name: string;
+  path: string;
+}
+
+export interface SharedFolderListResult {
+  currentPath: string;
+  parentPath: string | null;
+  entries: SharedFolderEntry[];
+}
+
 export interface GoogleChatInvite {
   key: string;
   roomName: string | null;

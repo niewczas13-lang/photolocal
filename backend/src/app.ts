@@ -6,6 +6,7 @@ import { loadConfig } from './config.js';
 import { openDatabase } from './db/connection.js';
 import { runMigrations } from './db/migrations.js';
 import { pickWindowsFolder } from './filesystem/native-folder-picker.js';
+import { listSharedFolderChildren, listSharedFolderRoots } from './filesystem/shared-folder-browser.js';
 import { acceptChatInvite, listChatInvites, openChatInvitesSetup } from './google-chat/chat-invites.js';
 import { registerProjectRoutes } from './projects/projects-routes.js';
 
@@ -35,6 +36,29 @@ export async function buildApp() {
     } catch (error) {
       return reply.status(400).send({
         error: error instanceof Error ? error.message : 'Unable to pick folder',
+      });
+    }
+  });
+
+  app.get('/api/shared-folders/roots', async (_request, reply) => {
+    try {
+      return { roots: await listSharedFolderRoots() };
+    } catch (error) {
+      return reply.status(500).send({
+        error: error instanceof Error ? error.message : 'Unable to list shared folders',
+      });
+    }
+  });
+
+  app.post('/api/shared-folders/list', async (request, reply) => {
+    const body = (request.body ?? {}) as { path?: string };
+    if (!body.path) return reply.status(400).send({ error: 'path is required' });
+
+    try {
+      return await listSharedFolderChildren(body.path);
+    } catch (error) {
+      return reply.status(400).send({
+        error: error instanceof Error ? error.message : 'Unable to list folder',
       });
     }
   });

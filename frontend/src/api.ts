@@ -16,6 +16,8 @@ import type {
   GoogleChatSpace,
   ProjectSummary,
   ReserveLocation,
+  SharedFolderListResult,
+  SharedFolderRoot,
 } from './types';
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
@@ -29,6 +31,13 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   getConfig: () => request<AppConfig>('/api/config'),
+  listSharedFolderRoots: () => request<{ roots: SharedFolderRoot[] }>('/api/shared-folders/roots'),
+  listSharedFolderChildren: (path: string) =>
+    request<SharedFolderListResult>('/api/shared-folders/list', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path }),
+    }),
   listProjects: () => request<ProjectSummary[]>('/api/projects'),
   listGoogleChatSpaces: () => request<GoogleChatSpace[]>('/api/google-chat/spaces'),
   listGoogleChatInvites: () =>
