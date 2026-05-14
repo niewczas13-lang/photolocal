@@ -478,7 +478,7 @@ export default function ChatImportPanel({ projectId, batches, onChanged }: ChatI
               {lastResult.type === 'import' && (
                 <span>
                   Import: {lastResult.result.imported} paczek, do Qwena: {lastResult.result.waitingForClassification},
-                  review: {lastResult.result.pendingReview}.
+                  review: {lastResult.result.pendingReview}, wyczyszczono stara kolejke: {lastResult.result.cleared}.
                 </span>
               )}
               {lastResult.type === 'classify-started' && (

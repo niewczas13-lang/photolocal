@@ -67,7 +67,7 @@ describe('importChatFolders', () => {
     const batches = repository.listBatches(projectId);
     db.close();
 
-    expect(result).toEqual({ imported: 3, waitingForClassification: 1, pendingReview: 2 });
+    expect(result).toEqual({ imported: 3, waitingForClassification: 1, pendingReview: 2, cleared: 0 });
     expect(batches).toEqual([
       expect.objectContaining({ folderName: 'Maleniecka 5', status: 'WAITING_FOR_CLASSIFICATION' }),
       expect.objectContaining({
@@ -91,7 +91,7 @@ describe('importChatFolders', () => {
     const [batch] = repository.listBatches(projectId);
     db.close();
 
-    expect(result).toEqual({ imported: 1, waitingForClassification: 0, pendingReview: 1 });
+    expect(result).toEqual({ imported: 1, waitingForClassification: 0, pendingReview: 1, cleared: 0 });
     expect(batch).toMatchObject({
       folderName: 'Tu nie ma przejscia',
       status: 'PENDING_REVIEW',
@@ -107,7 +107,7 @@ describe('importChatFolders', () => {
     const [batch] = repository.listBatches(projectId);
     db.close();
 
-    expect(result).toEqual({ imported: 1, waitingForClassification: 0, pendingReview: 1 });
+    expect(result).toEqual({ imported: 1, waitingForClassification: 0, pendingReview: 1, cleared: 0 });
     expect(batch).toMatchObject({
       folderName: 'Maleniecka',
       status: 'PENDING_REVIEW',
@@ -127,7 +127,7 @@ describe('importChatFolders', () => {
     const [batch] = repository.listBatches(projectId);
     db.close();
 
-    expect(result).toEqual({ imported: 1, waitingForClassification: 0, pendingReview: 1 });
+    expect(result).toEqual({ imported: 1, waitingForClassification: 0, pendingReview: 1, cleared: 0 });
     expect(batch).toMatchObject({
       folderName: 'Zapas kabla w studni jutro koparka 3 osoby na miejscu',
       status: 'PENDING_REVIEW',
@@ -144,7 +144,7 @@ describe('importChatFolders', () => {
     const batches = repository.listBatches(projectId);
     db.close();
 
-    expect(result).toEqual({ imported: 2, waitingForClassification: 2, pendingReview: 0 });
+    expect(result).toEqual({ imported: 2, waitingForClassification: 2, pendingReview: 0, cleared: 0 });
     expect(batches).toEqual([
       expect.objectContaining({ folderName: '2025-10-20_Maleniecka 36B_', status: 'WAITING_FOR_CLASSIFICATION' }),
       expect.objectContaining({ folderName: '2025-10-27_Malenicka 48_', status: 'WAITING_FOR_CLASSIFICATION' }),
@@ -163,7 +163,7 @@ describe('importChatFolders', () => {
     const [batch] = repository.listBatches(projectId);
     db.close();
 
-    expect(result).toEqual({ imported: 1, waitingForClassification: 1, pendingReview: 0 });
+    expect(result).toEqual({ imported: 1, waitingForClassification: 1, pendingReview: 0, cleared: 0 });
     expect(batch).toMatchObject({
       folderName: '2025-10-20_Ul. Maleniecka 30A zapas w studni rurka drozna',
       status: 'WAITING_FOR_CLASSIFICATION',
@@ -178,7 +178,7 @@ describe('importChatFolders', () => {
     const [batch] = repository.listBatches(projectId);
     db.close();
 
-    expect(result).toEqual({ imported: 1, waitingForClassification: 1, pendingReview: 0 });
+    expect(result).toEqual({ imported: 1, waitingForClassification: 1, pendingReview: 0, cleared: 0 });
     expect(batch).toMatchObject({
       folderName: 'OSD 2766',
       status: 'WAITING_FOR_CLASSIFICATION',
@@ -195,8 +195,7 @@ describe('importChatFolders', () => {
     const initialBatches = repository.listBatches(projectId);
     const waiting = initialBatches.find((batch) => batch.folderName === 'Maleniecka 5');
     const reviewWithoutAddress = initialBatches.find((batch) => batch.folderName === 'Tu nie ma przejscia');
-    const reviewWithoutDescription = initialBatches.find((batch) => batch.folderName === 'brak_opisu');
-    if (!waiting || !reviewWithoutAddress || !reviewWithoutDescription) {
+    if (!waiting || !reviewWithoutAddress) {
       throw new Error('Expected test batches were not created');
     }
 
@@ -213,23 +212,49 @@ describe('importChatFolders', () => {
       status: 'REJECTED',
       reviewReason: 'Odrzucone recznie',
     });
-    repository.updateDecision({
-      projectId,
-      batchId: reviewWithoutDescription.id,
-      status: 'READY_FOR_IMPORT',
-    });
 
     const result = await importChatFolders({ projectId, rootPath: dir, repository });
     const batches = repository.listBatches(projectId);
     db.close();
 
-    expect(result).toEqual({ imported: 0, waitingForClassification: 0, pendingReview: 0 });
+    expect(result).toEqual({ imported: 1, waitingForClassification: 0, pendingReview: 1, cleared: 1 });
     expect(batches).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ folderName: 'Tu nie ma przejscia', status: 'REJECTED' }),
         expect.objectContaining({ folderName: 'Maleniecka 5', status: 'IMPORTED' }),
-        expect.objectContaining({ folderName: 'brak_opisu', status: 'READY_FOR_IMPORT' }),
+        expect.objectContaining({ folderName: 'brak_opisu', status: 'PENDING_REVIEW' }),
       ]),
     );
+  });
+
+  it('clears old working chat queue before importing another folder', async () => {
+    const { db, repository, projectId, dir } = createContext();
+    const wrongRoot = join(dir, 'wrong-room');
+    const rightRoot = join(dir, 'right-room');
+    mkdirSync(wrongRoot, { recursive: true });
+    mkdirSync(rightRoot, { recursive: true });
+    writeManifest(wrongRoot, 'Zly pokoj 1', '');
+    writeManifest(wrongRoot, 'Zly pokoj 2', 'Tu nie ma przejscia');
+    writeManifest(wrongRoot, 'Zly pokoj 3', 'Maleniecka 5');
+
+    await importChatFolders({ projectId, rootPath: wrongRoot, repository });
+    const oldBatches = repository.listBatches(projectId);
+    const oldWaiting = oldBatches.find((batch) => batch.folderName === 'Zly pokoj 3');
+    const oldReview = oldBatches.find((batch) => batch.folderName === 'Zly pokoj 2');
+    const oldReady = oldBatches.find((batch) => batch.folderName === 'Zly pokoj 1');
+    if (!oldWaiting || !oldReview || !oldReady) {
+      throw new Error('Expected wrong-room test batches were not created');
+    }
+    repository.updateDecision({ projectId, batchId: oldReady.id, status: 'READY_FOR_IMPORT' });
+    writeManifest(rightRoot, 'Maleniecka 7', 'Maleniecka 7');
+
+    const result = await importChatFolders({ projectId, rootPath: rightRoot, repository });
+    const batches = repository.listBatches(projectId);
+    db.close();
+
+    expect(result).toEqual({ imported: 1, waitingForClassification: 1, pendingReview: 0, cleared: 3 });
+    expect(batches).toEqual([
+      expect.objectContaining({ folderName: 'Maleniecka 7', status: 'WAITING_FOR_CLASSIFICATION' }),
+    ]);
   });
 });

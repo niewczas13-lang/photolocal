@@ -12,6 +12,7 @@ export interface ImportChatFoldersResult {
   imported: number;
   waitingForClassification: number;
   pendingReview: number;
+  cleared: number;
 }
 
 const MULTI_ADDRESS_PATTERN = /\b\d+[a-z]?\s*(?:i|oraz)\s*\d+[a-z]?\b/i;
@@ -56,6 +57,7 @@ export async function importChatFolders(input: ImportChatFoldersInput): Promise<
     imported: 0,
     waitingForClassification: 0,
     pendingReview: 0,
+    cleared: input.repository.clearWorkingBatches(input.projectId),
   };
 
   for (const manifest of manifests) {

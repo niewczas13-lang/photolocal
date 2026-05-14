@@ -283,6 +283,18 @@ export class ChatBatchesRepository {
     return batch ? this.getBatch(projectId, batch.id) : undefined;
   }
 
+  clearWorkingBatches(projectId: string): number {
+    const result = this.db
+      .prepare(
+        `DELETE FROM chat_photo_batches
+         WHERE project_id = ?
+           AND status IN ('WAITING_FOR_CLASSIFICATION', 'PENDING_REVIEW', 'READY_FOR_IMPORT')`,
+      )
+      .run(projectId);
+
+    return result.changes;
+  }
+
   getBatch(projectId: string, batchId: string): ChatBatchRecord | undefined {
     const row = this.db
       .prepare(

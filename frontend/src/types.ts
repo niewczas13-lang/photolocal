@@ -124,6 +124,7 @@ export interface ChatImportResult {
   imported: number;
   waitingForClassification: number;
   pendingReview: number;
+  cleared: number;
 }
 
 export interface ChatClassificationResult {

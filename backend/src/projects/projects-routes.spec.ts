@@ -549,7 +549,7 @@ describe('projects routes', () => {
     await app.close();
 
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toEqual({ imported: 2, waitingForClassification: 1, pendingReview: 1 });
+    expect(response.json()).toEqual({ imported: 2, waitingForClassification: 1, pendingReview: 1, cleared: 0 });
   });
 
   it('returns a clear error when Google Chat import folder does not exist', async () => {
