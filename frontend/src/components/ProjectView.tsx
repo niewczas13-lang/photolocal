@@ -359,7 +359,15 @@ export default function ProjectView({
           <Button variant="ghost" size="icon" onClick={onBack}>
             <ArrowLeft size={18} />
           </Button>
-          <div>
+          <div className="min-w-0">
+            {project.projectDefinition && (
+              <div className="mb-1 flex items-center gap-2">
+                <span className="text-xs font-medium text-muted-foreground">Definicja projektu</span>
+                <Badge variant="outline" className="font-mono text-xs">
+                  {project.projectDefinition}
+                </Badge>
+              </div>
+            )}
             {editingName ? (
               <div className="flex items-center gap-2">
                 <Input
@@ -387,7 +395,7 @@ export default function ProjectView({
               </div>
             ) : (
               <div className="flex items-center gap-2 group">
-                <h2 className="text-xl font-bold tracking-tight">{project.name}</h2>
+                <h2 className="text-xl font-bold tracking-tight truncate">{project.name}</h2>
                 <Button size="icon" variant="ghost" className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity" onClick={() => setEditingName(true)}>
                   <Pencil size={12} />
                 </Button>
