@@ -693,6 +693,7 @@ export default function ProjectView({
                 <div className="p-6 max-w-5xl mx-auto w-full">
                   <ChatImportPanel
                     projectId={projectId}
+                    project={project}
                     batches={chatBatches}
                     onChanged={async () => {
                       await refreshChecklist(selectedNodeId);

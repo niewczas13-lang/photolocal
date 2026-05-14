@@ -10,14 +10,17 @@ import type {
   GoogleChatInvite,
   GoogleChatInviteSessionStatus,
   GoogleChatSpace,
+  ProjectSummary,
 } from '../types';
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
 import { Card, CardContent } from './ui/card';
 import { Input } from './ui/input';
+import { getSuggestedGoogleChatSpaces } from './chat-space-suggestions';
 
 interface ChatImportPanelProps {
   projectId: string;
+  project: ProjectSummary;
   batches: ChatBatch[];
   onChanged: () => Promise<void>;
 }
@@ -46,7 +49,7 @@ function formatElapsed(ms: number | null | undefined): string {
   return minutes > 0 ? `${minutes}m ${rest}s` : `${rest}s`;
 }
 
-export default function ChatImportPanel({ projectId, batches, onChanged }: ChatImportPanelProps) {
+export default function ChatImportPanel({ projectId, project, batches, onChanged }: ChatImportPanelProps) {
   const [defaultChatRoot, setDefaultChatRoot] = useState('');
   const [rootPath, setRootPath] = useState('');
   const [busyAction, setBusyAction] = useState<
@@ -76,6 +79,7 @@ export default function ChatImportPanel({ projectId, batches, onChanged }: ChatI
     [batches],
   );
 
+  const suggestedSpaces = useMemo(() => getSuggestedGoogleChatSpaces(project, spaces), [project, spaces]);
   const selectedSpace = spaces.find((space) => space.name === selectedSpaceName);
 
   const loadSpaces = async () => {
@@ -83,7 +87,8 @@ export default function ChatImportPanel({ projectId, batches, onChanged }: ChatI
     try {
       const result = await api.listGoogleChatSpaces();
       setSpaces(result);
-      if (!selectedSpaceName && result[0]) setSelectedSpaceName(result[0].name);
+      const [firstSuggested] = getSuggestedGoogleChatSpaces(project, result);
+      if (firstSuggested?.space) setSelectedSpaceName(firstSuggested.space.name);
     } catch (error) {
       console.error(error);
       alert('Blad podczas pobierania listy pokojow Google Chat');
@@ -416,8 +421,9 @@ export default function ChatImportPanel({ projectId, batches, onChanged }: ChatI
                 className="h-8 rounded-lg border border-input bg-background px-2.5 text-sm"
               >
                 <option value="">Wybierz pokoj</option>
-                {spaces.map((space) => (
+                {suggestedSpaces.map(({ space, isSuggested }) => (
                   <option key={space.name} value={space.name}>
+                    {isSuggested ? '★ ' : ''}
                     {space.displayName} ({space.name})
                   </option>
                 ))}

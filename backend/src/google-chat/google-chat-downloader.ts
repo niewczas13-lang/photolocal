@@ -43,6 +43,11 @@ function runPython(args: string[], config: GoogleChatRunnerConfig): Promise<{ st
   return new Promise((resolve, reject) => {
     const child = spawn(config.pythonCommand, [config.scriptPath, ...args], {
       cwd: dirname(config.scriptPath),
+      env: {
+        ...process.env,
+        PYTHONIOENCODING: 'utf-8',
+        PYTHONUTF8: '1',
+      },
       windowsHide: true,
     });
     let stdout = '';

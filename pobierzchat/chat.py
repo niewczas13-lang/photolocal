@@ -34,7 +34,7 @@ def configure_console_output():
     """Nie przerywaj pobierania, gdy konsola Windows nie umie wypisac znaku."""
     for stream in (sys.stdout, sys.stderr):
         if hasattr(stream, 'reconfigure'):
-            stream.reconfigure(errors='replace')
+            stream.reconfigure(encoding='utf-8', errors='replace')
 
 
 configure_console_output()
