@@ -6,7 +6,11 @@ import { loadConfig } from './config.js';
 import { openDatabase } from './db/connection.js';
 import { runMigrations } from './db/migrations.js';
 import { pickWindowsFolder } from './filesystem/native-folder-picker.js';
-import { listSharedFolderChildren, listSharedFolderRoots } from './filesystem/shared-folder-browser.js';
+import {
+  createSharedFolder,
+  listSharedFolderChildren,
+  listSharedFolderRoots,
+} from './filesystem/shared-folder-browser.js';
 import { acceptChatInvite, listChatInvites, openChatInvitesSetup } from './google-chat/chat-invites.js';
 import { registerProjectRoutes } from './projects/projects-routes.js';
 
@@ -59,6 +63,20 @@ export async function buildApp() {
     } catch (error) {
       return reply.status(400).send({
         error: error instanceof Error ? error.message : 'Unable to list folder',
+      });
+    }
+  });
+
+  app.post('/api/shared-folders/create', async (request, reply) => {
+    const body = (request.body ?? {}) as { parentPath?: string; folderName?: string };
+    if (!body.parentPath) return reply.status(400).send({ error: 'parentPath is required' });
+    if (!body.folderName) return reply.status(400).send({ error: 'folderName is required' });
+
+    try {
+      return await createSharedFolder(body.parentPath, body.folderName);
+    } catch (error) {
+      return reply.status(400).send({
+        error: error instanceof Error ? error.message : 'Unable to create folder',
       });
     }
   });

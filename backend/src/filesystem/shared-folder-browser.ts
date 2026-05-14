@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { readdir } from 'node:fs/promises';
+import { mkdir, readdir } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, relative, resolve } from 'node:path';
 import { promisify } from 'node:util';
 
@@ -20,6 +20,10 @@ export interface SharedFolderListResult {
   currentPath: string;
   parentPath: string | null;
   entries: SharedFolderEntry[];
+}
+
+export interface SharedFolderCreateResult {
+  path: string;
 }
 
 interface LogicalDiskRow {
@@ -106,4 +110,32 @@ export async function listSharedFolderChildren(path: string): Promise<SharedFold
     parentPath,
     entries: folders,
   };
+}
+
+function validateFolderName(name: string): string {
+  const trimmed = name.trim();
+  if (!trimmed) {
+    throw new Error('Nazwa folderu jest wymagana');
+  }
+  if (trimmed === '.' || trimmed === '..' || /[<>:"/\\|?*\x00-\x1f]/.test(trimmed)) {
+    throw new Error('Nazwa folderu zawiera niedozwolone znaki');
+  }
+  return trimmed;
+}
+
+export async function createSharedFolder(parentPath: string, folderName: string): Promise<SharedFolderCreateResult> {
+  const roots = await listSharedFolderRoots();
+  const root = roots.find((entry) => isPathInside(parentPath, entry.path));
+  if (!root) {
+    throw new Error('Folder musi byc na zmapowanym dysku udostepnionym');
+  }
+
+  const safeName = validateFolderName(folderName);
+  const targetPath = resolve(parentPath, safeName);
+  if (!isPathInside(targetPath, root.path)) {
+    throw new Error('Nie mozna utworzyc folderu poza dyskiem udostepnionym');
+  }
+
+  await mkdir(targetPath, { recursive: false });
+  return { path: targetPath };
 }

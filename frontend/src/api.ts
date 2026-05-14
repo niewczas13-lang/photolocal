@@ -38,6 +38,12 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ path }),
     }),
+  createSharedFolder: (parentPath: string, folderName: string) =>
+    request<{ path: string }>('/api/shared-folders/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ parentPath, folderName }),
+    }),
   listProjects: () => request<ProjectSummary[]>('/api/projects'),
   listGoogleChatSpaces: () => request<GoogleChatSpace[]>('/api/google-chat/spaces'),
   listGoogleChatInvites: () =>

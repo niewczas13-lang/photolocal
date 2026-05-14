@@ -11,7 +11,7 @@ import {
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
-import { ArrowUp, FolderOpen, HardDrive, Loader2 } from 'lucide-react';
+import { ArrowUp, FolderOpen, HardDrive, Loader2, Plus } from 'lucide-react';
 
 interface CreateProjectDialogProps {
   open: boolean;
@@ -28,7 +28,9 @@ export default function CreateProjectDialog({ open, onClose, onCreated }: Create
   const [sharedEntries, setSharedEntries] = useState<SharedFolderEntry[]>([]);
   const [browserPath, setBrowserPath] = useState('');
   const [browserParentPath, setBrowserParentPath] = useState<string | null>(null);
+  const [newFolderName, setNewFolderName] = useState('');
   const [loadingSharedFolders, setLoadingSharedFolders] = useState(false);
+  const [creatingFolder, setCreatingFolder] = useState(false);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -75,6 +77,23 @@ export default function CreateProjectDialog({ open, onClose, onCreated }: Create
     }
   };
 
+  const createFolder = async () => {
+    if (!browserPath || !newFolderName.trim()) return;
+
+    setCreatingFolder(true);
+    try {
+      const result = await api.createSharedFolder(browserPath, newFolderName.trim());
+      setNewFolderName('');
+      await openSharedFolder(result.path);
+      setPhotoRootPath(result.path);
+    } catch (err) {
+      console.error(err);
+      alert('Nie udalo sie utworzyc folderu na dysku udostepnionym');
+    } finally {
+      setCreatingFolder(false);
+    }
+  };
+
   // Reset form when closed
   const handleOpenChange = (isOpen: boolean) => {
     if (!isOpen) {
@@ -83,6 +102,7 @@ export default function CreateProjectDialog({ open, onClose, onCreated }: Create
       setBrowserPath('');
       setBrowserParentPath(null);
       setSharedEntries([]);
+      setNewFolderName('');
       onClose();
     }
   };
@@ -164,6 +184,27 @@ export default function CreateProjectDialog({ open, onClose, onCreated }: Create
                       </Button>
                     </div>
                     <p className="break-all rounded bg-muted/50 px-2 py-1 font-mono text-xs">{browserPath}</p>
+                    <div className="grid grid-cols-[1fr_auto] gap-2">
+                      <Input
+                        value={newFolderName}
+                        onChange={(event) => setNewFolderName(event.target.value)}
+                        placeholder="Nazwa nowego folderu"
+                        disabled={creatingFolder}
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        disabled={!newFolderName.trim() || creatingFolder}
+                        onClick={() => void createFolder()}
+                      >
+                        {creatingFolder ? (
+                          <Loader2 size={14} className="mr-1 animate-spin" />
+                        ) : (
+                          <Plus size={14} className="mr-1" />
+                        )}
+                        Utworz
+                      </Button>
+                    </div>
                     <div className="max-h-40 overflow-auto rounded border">
                       {sharedEntries.length > 0 ? (
                         sharedEntries.map((entry) => (
