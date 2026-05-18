@@ -16,6 +16,7 @@ import {
   Settings,
   RefreshCw,
   FolderPlus,
+  Map,
 } from 'lucide-react';
 import { api } from '../api';
 import type { ChatBatch, ChecklistNode, ChecklistNodeDetail, ChecklistPhoto, ProjectSummary, ReserveLocation } from '../types';
@@ -24,7 +25,7 @@ import ChatReviewPanel from './ChatReviewPanel';
 import ChecklistTree from './ChecklistTree';
 import MissingPanel from './MissingPanel';
 import PhotoDropzone from './PhotoDropzone';
-import type { ProjectTab } from '../App';
+import type { ProjectTab } from '../app-routing';
 
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -37,6 +38,8 @@ interface ProjectViewProps {
   initialTab: ProjectTab;
   onBack: () => void;
   onTabChange: (tab: ProjectTab) => void;
+  onOpenMap: () => void;
+  onOpenSettings: () => void;
   onRename: (newName: string) => void;
   onProjectUpdated: (project: ProjectSummary) => void;
 }
@@ -121,6 +124,8 @@ export default function ProjectView({
   initialTab,
   onBack,
   onTabChange,
+  onOpenMap,
+  onOpenSettings,
   onRename,
   onProjectUpdated,
 }: ProjectViewProps) {
@@ -420,7 +425,7 @@ export default function ProjectView({
       {/* Header */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-4 px-6 border-b border-border bg-background/50 gap-4 shrink-0">
         <div className="flex items-center gap-4">
-          <Button variant="ghost" size="icon" onClick={onBack}>
+          <Button variant="ghost" size="icon" title="Lista zlecen" onClick={onBack}>
             <ArrowLeft size={18} />
           </Button>
           <div className="min-w-0">
@@ -470,6 +475,16 @@ export default function ProjectView({
               {missingCount === 0 ? 'Checklista gotowa' : `Brakuje jeszcze ${missingCount} punktów`}
             </p>
           </div>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <Button variant="outline" size="sm" onClick={onOpenMap}>
+            <Map size={15} />
+            Mapa + zadania
+          </Button>
+          <Button variant="outline" size="sm" onClick={onOpenSettings}>
+            <Settings size={15} />
+            Ustawienia
+          </Button>
         </div>
       </div>
 
@@ -623,13 +638,6 @@ export default function ProjectView({
                 >
                   <Inbox size={16} className="mr-2" />
                   Review {chatBatches.filter((batch) => batch.status === 'PENDING_REVIEW').length > 0 ? `(${chatBatches.filter((batch) => batch.status === 'PENDING_REVIEW').length})` : ''}
-                </TabsTrigger>
-                <TabsTrigger
-                  value="settings"
-                  className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-2 py-3 text-sm font-medium shadow-none"
-                >
-                  <Settings size={16} className="mr-2" />
-                  Ustawienia
                 </TabsTrigger>
               </TabsList>
             </div>

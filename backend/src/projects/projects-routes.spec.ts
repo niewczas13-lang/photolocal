@@ -75,6 +75,79 @@ describe('projects routes', () => {
     expect(existsSync(join(projectFolder, 'kept.txt'))).toBe(true);
   });
 
+  it('returns project map data and updates map work statuses', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'photo-local-map-route-'));
+    process.env.PHOTO_LOCAL_DB = join(dir, 'test.sqlite');
+    process.env.PHOTO_BASE_DIR = join(dir, 'photos');
+
+    const { app, db } = await buildApp();
+    const repository = new ProjectsRepository(db);
+    const project = repository.createProject({
+      name: 'MAPA',
+      projectDefinition: null,
+      projectType: 'SI',
+      splitterTopology: 'SINGLE',
+      splitterTopologySource: 'AUTO',
+      splitterCount: 1,
+      gpkgFileName: 'mapa.gpkg',
+      baseFolder: join(dir, 'photos', 'MAPA'),
+      addresses: [],
+      dacToAddressCableCount: 0,
+      adssToAddressCableCount: 0,
+      checklistNodes: [],
+      polygons: [],
+      trunkCables: [
+        {
+          cableType: 'MI-MKF 48J',
+          fromNode: 'ZS0001',
+          toNode: 'OSD0001',
+          osdName: 'OSD0001',
+          geojson: { type: 'LineString', coordinates: [[21.1, 51.4], [21.2, 51.5]] },
+          rawName: 'TK-1',
+          routingType: 'underground',
+        },
+      ],
+      infraNodes: [
+        {
+          nodeType: 'OSD',
+          name: 'OSD0001',
+          label: 'RADOM/OSD0001',
+          lat: 51.5,
+          lng: 21.2,
+        },
+      ],
+    });
+
+    const mapResponse = await app.inject({ method: 'GET', url: `/api/projects/${project.id}/map` });
+    const cableId = mapResponse.json().trunkCables[0].id as string;
+    const nodeId = mapResponse.json().infraNodes[0].id as string;
+    const cableStatusResponse = await app.inject({
+      method: 'PATCH',
+      url: `/api/projects/${project.id}/map/cables/${cableId}/status`,
+      headers: { 'content-type': 'application/json' },
+      payload: JSON.stringify({ status: 'SUSPENDED' }),
+    });
+    const nodeStatusResponse = await app.inject({
+      method: 'PATCH',
+      url: `/api/projects/${project.id}/map/nodes/${nodeId}/status`,
+      headers: { 'content-type': 'application/json' },
+      payload: JSON.stringify({ status: 'WELDED' }),
+    });
+    await app.close();
+
+    expect(mapResponse.statusCode).toBe(200);
+    expect(mapResponse.json().trunkCables[0]).toMatchObject({
+      fromNode: 'ZS0001',
+      toNode: 'OSD0001',
+      status: 'PENDING',
+      routingType: 'underground',
+    });
+    expect(cableStatusResponse.statusCode).toBe(200);
+    expect(cableStatusResponse.json().trunkCables[0]).toMatchObject({ id: cableId, status: 'SUSPENDED' });
+    expect(nodeStatusResponse.statusCode).toBe(200);
+    expect(nodeStatusResponse.json().infraNodes[0]).toMatchObject({ id: nodeId, status: 'WELDED' });
+  });
+
   it('stores an uploaded photo against a checklist node', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'photo-local-upload-'));
     process.env.PHOTO_LOCAL_DB = join(dir, 'test.sqlite');

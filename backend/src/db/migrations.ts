@@ -24,7 +24,68 @@ export function runMigrations(db: Database.Database): void {
   }
 
   migrateChatReserveLocationConstraint(db, schema);
+  migrateMapTrunkCableIdentity(db, schema);
   backfillSystemMetkiFolder(db);
+}
+
+function tableColumns(db: Database.Database, tableName: string): Set<string> {
+  const rows = db.prepare(`PRAGMA table_info(${tableName})`).all() as Array<{ name: string }>;
+  return new Set(rows.map((row) => row.name));
+}
+
+function migrateMapTrunkCableIdentity(db: Database.Database, schema: string): void {
+  const row = db
+    .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'map_trunk_cables'")
+    .get() as { sql: string } | undefined;
+
+  if (
+    !row?.sql ||
+    (row.sql.includes('cable_key') &&
+      row.sql.includes('route_type') &&
+      row.sql.includes('SUSPENDED') &&
+      row.sql.includes('UNIQUE(project_id, cable_key)'))
+  ) {
+    return;
+  }
+
+  const columns = tableColumns(db, 'map_trunk_cables');
+  const cableKeyExpression = columns.has('cable_key')
+    ? 'cable_key'
+    : "COALESCE(NULLIF(TRIM(raw_name), ''), from_node || '|' || to_node || '|' || cable_type)";
+  const statusExpression = columns.has('status')
+    ? "CASE WHEN status IN ('PENDING', 'DUCT_READY', 'PULLED', 'WELDED', 'SUSPENDED') THEN status ELSE 'PENDING' END"
+    : "'PENDING'";
+  const rawNameExpression = columns.has('raw_name') ? "COALESCE(raw_name, '')" : "''";
+  const routeTypeExpression = columns.has('route_type')
+    ? "CASE WHEN route_type IN ('underground', 'aerial') THEN route_type ELSE 'underground' END"
+    : `CASE WHEN cable_type LIKE '%ADSS%' OR ${rawNameExpression} LIKE '%ADSS%' THEN 'aerial' ELSE 'underground' END`;
+
+  db.exec(`
+    PRAGMA foreign_keys = OFF;
+    ALTER TABLE map_trunk_cables RENAME TO map_trunk_cables_old;
+  `);
+  db.exec(schema);
+  db.exec(`
+    INSERT OR IGNORE INTO map_trunk_cables (
+      id, project_id, cable_key, cable_type, route_type, from_node, to_node, osd_name, geojson, raw_name, status
+    )
+    SELECT
+      id,
+      project_id,
+      ${cableKeyExpression},
+      cable_type,
+      ${routeTypeExpression},
+      from_node,
+      to_node,
+      osd_name,
+      geojson,
+      raw_name,
+      ${statusExpression}
+    FROM map_trunk_cables_old;
+    DROP TABLE map_trunk_cables_old;
+    PRAGMA foreign_keys = ON;
+  `);
+  db.exec(schema);
 }
 
 function migrateChatReserveLocationConstraint(db: Database.Database, schema: string): void {
@@ -59,29 +120,72 @@ function migrateChatReserveLocationConstraint(db: Database.Database, schema: str
 }
 
 function backfillSystemMetkiFolder(db: Database.Database): void {
-  db.prepare(
+  const projects = db.prepare('SELECT id FROM projects').all() as Array<{ id: string }>;
+  const insertRoot = db.prepare(
     `INSERT OR IGNORE INTO checklist_nodes (
       id, project_id, parent_id, name, path, node_type, source, address_id,
       sort_order, min_photos, accepts_photos, status
-    )
-    SELECT
-      'system-metki-' || project.id,
-      project.id,
-      NULL,
-      'Metki',
-      'Metki',
-      'STATIC',
-      'SYSTEM',
-      NULL,
-      6,
-      0,
-      1,
-      'OPEN'
-    FROM projects project
-    WHERE NOT EXISTS (
-      SELECT 1
-      FROM checklist_nodes node
-      WHERE node.project_id = project.id AND node.path = 'Metki'
-    )`,
-  ).run();
+    ) VALUES (?, ?, NULL, 'Metki', 'Metki', 'STATIC', 'SYSTEM', NULL, 6, 0, 0, 'OPEN')`,
+  );
+  const updateRoot = db.prepare(
+    `UPDATE checklist_nodes
+     SET parent_id = NULL,
+         name = 'Metki',
+         node_type = 'STATIC',
+         source = 'SYSTEM',
+         address_id = NULL,
+         sort_order = 6,
+         min_photos = 0,
+         accepts_photos = 0,
+         updated_at = CURRENT_TIMESTAMP
+     WHERE id = ?`,
+  );
+  const insertChild = db.prepare(
+    `INSERT OR IGNORE INTO checklist_nodes (
+      id, project_id, parent_id, name, path, node_type, source, address_id,
+      sort_order, min_photos, accepts_photos, status
+    ) VALUES (?, ?, ?, 'Zdjecia', 'Metki/Zdjecia', 'STATIC', 'SYSTEM', NULL, 0, 0, 1, 'OPEN')`,
+  );
+  const updateChild = db.prepare(
+    `UPDATE checklist_nodes
+     SET parent_id = ?,
+         name = 'Zdjecia',
+         node_type = 'STATIC',
+         source = 'SYSTEM',
+         address_id = NULL,
+         sort_order = 0,
+         min_photos = 0,
+         accepts_photos = 1,
+         updated_at = CURRENT_TIMESTAMP
+     WHERE id = ?`,
+  );
+  const getNodeByPath = db.prepare(
+    `SELECT id
+     FROM checklist_nodes
+     WHERE project_id = ? AND path = ?`,
+  );
+  const moveRootPhotos = db.prepare(
+    `UPDATE photos
+     SET checklist_node_id = ?
+     WHERE project_id = ? AND checklist_node_id = ?`,
+  );
+
+  const tx = db.transaction(() => {
+    for (const project of projects) {
+      insertRoot.run(`system-metki-${project.id}`, project.id);
+
+      const root = getNodeByPath.get(project.id, 'Metki') as { id: string } | undefined;
+      if (!root) continue;
+      updateRoot.run(root.id);
+
+      insertChild.run(`system-metki-photos-${project.id}`, project.id, root.id);
+      const child = getNodeByPath.get(project.id, 'Metki/Zdjecia') as { id: string } | undefined;
+      if (!child) continue;
+
+      updateChild.run(root.id, child.id);
+      moveRootPhotos.run(child.id, project.id, root.id);
+    }
+  });
+
+  tx();
 }

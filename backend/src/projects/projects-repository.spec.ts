@@ -520,4 +520,330 @@ describe('ProjectsRepository', () => {
     });
     expect(checklist.some((node) => node.id === 'old-gpkg-node')).toBe(false);
   });
+
+  it('returns project map data and turns address markers green when reserve photos exist', () => {
+    const { db, repository } = createRepository();
+
+    const project = repository.createProject({
+      name: 'MAPA',
+      projectDefinition: null,
+      projectType: 'SI',
+      splitterTopology: 'SINGLE',
+      splitterTopologySource: 'AUTO',
+      splitterCount: 1,
+      gpkgFileName: 'mapa.gpkg',
+      baseFolder: 'C:/photos/MAPA',
+      addresses: [
+        {
+          id: 'address-1',
+          city: 'Radom',
+          street: 'Polna',
+          buildingNo: '15',
+          propertyId: 'pa-1',
+          parcelNumber: null,
+          distributionPoint: 'RADOM/OSD0001',
+          lat: 51.4,
+          lng: 21.1,
+          householdCount: 1,
+          businessUnitCount: 0,
+        },
+      ],
+      dacToAddressCableCount: 1,
+      adssToAddressCableCount: 0,
+      checklistNodes: [
+        {
+          id: 'reserve-address-1',
+          projectId: 'project-temp',
+          parentId: null,
+          name: 'Polna_15',
+          path: 'Zapasy_kabli_instalacyjnych/OSD0001/Polna_15',
+          nodeType: 'CABLE_RESERVE',
+          addressId: 'address-1',
+          sortOrder: 0,
+          minPhotos: 1,
+          acceptsPhotos: true,
+        },
+      ],
+      polygons: [
+        {
+          osdName: 'OSD0001',
+          label: 'RADOM/OSD0001',
+          geojson: { type: 'Polygon', coordinates: [] },
+          households: 1,
+          paCount: 1,
+          cableRef: 'K-1',
+        },
+      ],
+      trunkCables: [
+        {
+          cableType: 'MI-MKF 48J',
+          fromNode: 'ZS0001',
+          toNode: 'OSD0001',
+          osdName: 'OSD0001',
+          geojson: { type: 'LineString', coordinates: [[21.1, 51.4], [21.2, 51.5]] },
+          rawName: 'TK-1',
+          routingType: 'underground',
+        },
+      ],
+      infraNodes: [
+        {
+          nodeType: 'OSD',
+          name: 'OSD0001',
+          label: 'RADOM/OSD0001',
+          lat: 51.5,
+          lng: 21.2,
+        },
+      ],
+    });
+
+    let map = repository.getProjectMap(project.id);
+    expect(map.addresses).toHaveLength(1);
+    expect(map.addresses[0]).toMatchObject({
+      id: 'address-1',
+      label: 'Polna 15, Radom',
+      hasReservePhoto: false,
+      reservePhotoCount: 0,
+    });
+    expect(map.polygons[0]).toMatchObject({
+      osdName: 'OSD0001',
+      addressTotal: 1,
+      addressWithReservePhoto: 0,
+    });
+    expect(map.trunkCables[0]).toMatchObject({
+      fromNode: 'ZS0001',
+      toNode: 'OSD0001',
+      status: 'PENDING',
+      routingType: 'underground',
+    });
+    expect(map.infraNodes[0]).toMatchObject({
+      nodeType: 'OSD',
+      name: 'OSD0001',
+      status: 'PENDING',
+      hasPhoto: false,
+    });
+
+    repository.addPhoto({
+      id: 'photo-reserve',
+      projectId: project.id,
+      checklistNodeId: 'reserve-address-1',
+      sourceFileName: 'reserve.jpeg',
+      storedFileName: 'reserve.jpeg',
+      storagePath: 'C:/photos/MAPA/reserve.jpeg',
+      thumbnailPath: null,
+      mimeType: 'image/jpeg',
+      fileSize: 123,
+      lat: null,
+      lng: null,
+      capturedAt: null,
+      reserveLocation: 'Doziemny',
+    });
+
+    map = repository.getProjectMap(project.id);
+    db.close();
+
+    expect(map.addresses[0]).toMatchObject({
+      hasReservePhoto: true,
+      reservePhotoCount: 1,
+    });
+    expect(map.polygons[0]).toMatchObject({
+      addressWithReservePhoto: 1,
+    });
+  });
+
+  it('keeps different trunk cables between the same map nodes', () => {
+    const { db, repository } = createRepository();
+
+    const project = repository.createProject({
+      name: 'MAPA',
+      projectDefinition: null,
+      projectType: 'SI',
+      splitterTopology: 'SINGLE',
+      splitterTopologySource: 'AUTO',
+      splitterCount: 1,
+      gpkgFileName: 'mapa.gpkg',
+      baseFolder: 'C:/photos/MAPA',
+      addresses: [],
+      dacToAddressCableCount: 0,
+      adssToAddressCableCount: 2,
+      checklistNodes: [],
+      trunkCables: [
+        {
+          cableType: 'ADSS LTC 12J G.652D',
+          fromNode: 'ZS00003',
+          toNode: 'OPP0004',
+          osdName: 'OPP0004',
+          geojson: { type: 'LineString', coordinates: [[20.56, 53.76], [20.57, 53.77]] },
+          rawName: 'OKH0030737-BC/009',
+        },
+        {
+          cableType: 'ADSS LTC 12J G.652D',
+          fromNode: 'ZS00003',
+          toNode: 'OPP0004',
+          osdName: 'OPP0004',
+          geojson: { type: 'LineString', coordinates: [[20.58, 53.78], [20.59, 53.79]] },
+          rawName: 'OKH0030737-BC/010',
+        },
+      ],
+    });
+
+    const map = repository.getProjectMap(project.id);
+    db.close();
+
+    expect(map.trunkCables.map((cable) => cable.rawName).sort()).toEqual([
+      'OKH0030737-BC/009',
+      'OKH0030737-BC/010',
+    ]);
+  });
+
+  it('keeps map area counts separated for the same OPP number in different localities', () => {
+    const { db, repository } = createRepository();
+
+    const project = repository.createProject({
+      name: 'DUPLIKATY OPP',
+      projectDefinition: null,
+      projectType: 'KPO',
+      splitterTopology: 'SINGLE',
+      splitterTopologySource: 'AUTO',
+      splitterCount: 1,
+      gpkgFileName: 'duplikaty.gpkg',
+      baseFolder: 'C:/photos/DUPLIKATY',
+      addresses: [
+        {
+          id: 'address-ostrzeszewo',
+          city: 'Ostrzeszewo',
+          street: 'Ostrzeszewo',
+          buildingNo: '10B',
+          propertyId: null,
+          parcelNumber: null,
+          distributionPoint: 'OSTRZESZEWO/OPP0002',
+          lat: 53.74,
+          lng: 20.55,
+          householdCount: 1,
+          businessUnitCount: 0,
+        },
+        {
+          id: 'address-klebark',
+          city: 'Klebark Maly',
+          street: 'Klebark Maly',
+          buildingNo: '38D',
+          propertyId: null,
+          parcelNumber: null,
+          distributionPoint: 'KLEBARK MALY/OPP0002',
+          lat: 53.75,
+          lng: 20.57,
+          householdCount: 1,
+          businessUnitCount: 0,
+        },
+      ],
+      dacToAddressCableCount: 0,
+      adssToAddressCableCount: 0,
+      checklistNodes: [],
+      polygons: [
+        {
+          osdName: 'OSTRZESZEWO/OPP0002',
+          label: 'OSTRZESZEWO/OPP0002',
+          geojson: { type: 'Polygon', coordinates: [] },
+          households: 4,
+          paCount: 4,
+          cableRef: 'OKH0030737-BD/010',
+        },
+        {
+          osdName: 'KLEBARK MALY/OPP0002',
+          label: 'KLEBARK MALY/OPP0002',
+          geojson: { type: 'Polygon', coordinates: [] },
+          households: 1,
+          paCount: 1,
+          cableRef: 'OKH0030737-BA/007',
+        },
+      ],
+      trunkCables: [],
+      infraNodes: [],
+    });
+
+    const map = repository.getProjectMap(project.id);
+    db.close();
+
+    expect(map.polygons.map((polygon) => polygon.osdName).sort()).toEqual([
+      'KLEBARK MALY/OPP0002',
+      'OSTRZESZEWO/OPP0002',
+    ]);
+    expect(map.polygons).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          osdName: 'OSTRZESZEWO/OPP0002',
+          addressTotal: 1,
+          cableRef: 'OKH0030737-BD/010',
+        }),
+        expect.objectContaining({
+          osdName: 'KLEBARK MALY/OPP0002',
+          addressTotal: 1,
+          cableRef: 'OKH0030737-BA/007',
+        }),
+      ]),
+    );
+  });
+
+  it('carries infra node status from old short OPP keys to scoped node names', () => {
+    const { db, repository } = createRepository();
+
+    const project = repository.createProject({
+      name: 'STATUSY MAPY',
+      projectDefinition: null,
+      projectType: 'KPO',
+      splitterTopology: 'SINGLE',
+      splitterTopologySource: 'AUTO',
+      splitterCount: 1,
+      gpkgFileName: 'statusy.gpkg',
+      baseFolder: 'C:/photos/STATUSY',
+      addresses: [],
+      dacToAddressCableCount: 0,
+      adssToAddressCableCount: 0,
+      checklistNodes: [],
+      infraNodes: [
+        {
+          nodeType: 'OPP',
+          name: 'OPP0002',
+          label: 'O_KLEBARK MALY/OPP0002',
+          lat: 53.75,
+          lng: 20.57,
+        },
+      ],
+    });
+
+    const oldNode = repository.getProjectMap(project.id).infraNodes[0];
+    repository.updateInfraNodeStatus(project.id, oldNode.id, 'WELDED');
+
+    repository.recalculateChecklist({
+      projectId: project.id,
+      projectDefinition: null,
+      projectType: 'KPO',
+      splitterTopology: 'SINGLE',
+      splitterTopologySource: 'AUTO',
+      splitterCount: 1,
+      gpkgFileName: 'statusy.gpkg',
+      addresses: [],
+      dacToAddressCableCount: 0,
+      adssToAddressCableCount: 0,
+      checklistNodes: [],
+      infraNodes: [
+        {
+          nodeType: 'OPP',
+          name: 'KLEBARK MALY/OPP0002',
+          label: 'O_KLEBARK MALY/OPP0002',
+          lat: 53.75,
+          lng: 20.57,
+        },
+      ],
+    });
+
+    const map = repository.getProjectMap(project.id);
+    db.close();
+
+    expect(map.infraNodes).toHaveLength(1);
+    expect(map.infraNodes[0]).toMatchObject({
+      nodeType: 'OPP',
+      name: 'KLEBARK MALY/OPP0002',
+      status: 'WELDED',
+    });
+  });
 });

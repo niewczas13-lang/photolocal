@@ -3,7 +3,34 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
+import wkx from 'wkx';
 import { extractGpkg, inferSplitterTopology, normalizeCableAddressEntry } from './gpkg-extractor.js';
+
+function gpkgGeometry(wkb: Buffer): Buffer {
+  const header = Buffer.alloc(8);
+  header[0] = 0x47;
+  header[1] = 0x50;
+  header[2] = 0;
+  header[3] = 0;
+  header.writeInt32LE(2180, 4);
+  return Buffer.concat([header, wkb]);
+}
+
+function pointGeometry(x: number, y: number): Buffer {
+  return gpkgGeometry(new wkx.Point(x, y).toWkb());
+}
+
+function lineGeometry(points: Array<[number, number]>): Buffer {
+  return gpkgGeometry(
+    new wkx.LineString(points.map(([x, y]) => new wkx.Point(x, y))).toWkb(),
+  );
+}
+
+function polygonGeometry(points: Array<[number, number]>): Buffer {
+  return gpkgGeometry(
+    new wkx.Polygon(points.map(([x, y]) => new wkx.Point(x, y))).toWkb(),
+  );
+}
 
 describe('GPKG extractor helpers', () => {
   it('marks more than two splitters as cascade', () => {
@@ -85,5 +112,338 @@ describe('GPKG extractor helpers', () => {
     const result = extractGpkg(gpkgPath);
 
     expect(result.splices).toEqual([{ wezel: 'BARTAG/ZS00033', oznaczenie: 'O_BARTAG/ZS00033' }]);
+  });
+
+  it('extracts address coordinates and map geometry from GPKG layers', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'photo-local-gpkg-map-'));
+    const gpkgPath = join(dir, 'sample.gpkg');
+    const db = new Database(gpkgPath);
+
+    db.exec(`
+      CREATE TABLE PA (
+        id_posesja_opl TEXT,
+        nazwa_miejsc TEXT,
+        nazwa_ul TEXT,
+        nr_domu TEXT,
+        nr_dzialki TEXT,
+        geom BLOB
+      );
+      CREATE TABLE Lokale (
+        id_posesja_opl TEXT,
+        opp_osd TEXT,
+        nr_lokalu TEXT
+      );
+      CREATE TABLE Rejonizacja (
+        rejonizacja TEXT,
+        liczba_hh INTEGER,
+        liczba_pa INTEGER,
+        nr_kabla TEXT,
+        geom BLOB
+      );
+      CREATE TABLE "Kable Swiatlowodowe" (
+        model_kabla TEXT,
+        typ_elementu TEXT,
+        od TEXT,
+        do TEXT,
+        odcinek_kabla TEXT,
+        geom BLOB
+      );
+    `);
+
+    db.prepare('INSERT INTO PA VALUES (?, ?, ?, ?, ?, ?)').run(
+      'pa-1',
+      'Radom',
+      'Polna',
+      '15',
+      '12/3',
+      pointGeometry(574000, 424000),
+    );
+    db.prepare('INSERT INTO Lokale VALUES (?, ?, ?)').run('pa-1', 'RADOM/OSD0001', '1');
+    db.prepare('INSERT INTO Rejonizacja VALUES (?, ?, ?, ?, ?)').run(
+      'RADOM/OSD0001',
+      4,
+      1,
+      'K-1',
+      polygonGeometry([
+        [573900, 423900],
+        [574100, 423900],
+        [574100, 424100],
+        [573900, 423900],
+      ]),
+    );
+    db.prepare('INSERT INTO "Kable Swiatlowodowe" VALUES (?, ?, ?, ?, ?, ?)').run(
+      'MI-MKF 48J',
+      'Kabel doziemny',
+      'RADOM/ZS0001',
+      'RADOM/OSD0001',
+      'TK-1',
+      lineGeometry([
+        [574000, 424000],
+        [574500, 424500],
+      ]),
+    );
+    db.close();
+
+    const result = extractGpkg(gpkgPath);
+
+    expect(result.addresses[0]).toMatchObject({
+      city: 'Radom',
+      street: 'Polna',
+      buildingNo: '15',
+      distributionPoint: 'RADOM/OSD0001',
+    });
+    expect(result.addresses[0].lat).toBeGreaterThan(48);
+    expect(result.addresses[0].lng).toBeGreaterThan(13);
+    expect(result.polygons[0]).toMatchObject({
+      osdName: 'RADOM/OSD0001',
+      label: 'RADOM/OSD0001',
+      households: 4,
+      paCount: 1,
+      cableRef: 'K-1',
+    });
+    expect(result.trunkCables[0]).toMatchObject({
+      fromNode: 'RADOM/ZS0001',
+      toNode: 'RADOM/OSD0001',
+      osdName: 'RADOM/OSD0001',
+      rawName: 'TK-1',
+      routingType: 'underground',
+    });
+    expect(result.infraNodes.map((node) => node.nodeType).sort()).toEqual(['OSD', 'ZS']);
+  });
+
+  it('keeps split ADSS cable segments under one raw cable name', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'photo-local-gpkg-adss-map-'));
+    const gpkgPath = join(dir, 'sample.gpkg');
+    const db = new Database(gpkgPath);
+
+    db.exec(`
+      CREATE TABLE PA (
+        id_posesja_opl TEXT,
+        nazwa_miejsc TEXT,
+        nazwa_ul TEXT,
+        nr_domu TEXT,
+        nr_dzialki TEXT,
+        geom BLOB
+      );
+      CREATE TABLE "Kable Swiatlowodowe" (
+        model_kabla TEXT,
+        typ_elementu TEXT,
+        od TEXT,
+        do TEXT,
+        odcinek_kabla TEXT,
+        geom BLOB
+      );
+    `);
+
+    db.prepare('INSERT INTO PA VALUES (?, ?, ?, ?, ?, ?)').run(
+      'pa-1',
+      'Olsztyn',
+      'Testowa',
+      '1',
+      null,
+      pointGeometry(574000, 424000),
+    );
+    db.prepare('INSERT INTO "Kable Swiatlowodowe" VALUES (?, ?, ?, ?, ?, ?)').run(
+      'ADSS LTC 12J G.652D',
+      'Kabel napowietrzny',
+      'OLSZTYN/ZS00003',
+      'OLSZTYN/OPP0004',
+      'OKH0030737-BC/009',
+      lineGeometry([
+        [574000, 424000],
+        [574100, 424100],
+      ]),
+    );
+    db.prepare('INSERT INTO "Kable Swiatlowodowe" VALUES (?, ?, ?, ?, ?, ?)').run(
+      'ADSS LTC 12J G.652D',
+      'Kabel napowietrzny',
+      'OLSZTYN/ZS00003',
+      'OLSZTYN/OPP0004',
+      'OKH0030737-BC/009',
+      lineGeometry([
+        [574100, 424100],
+        [574250, 424250],
+      ]),
+    );
+    db.close();
+
+    const result = extractGpkg(gpkgPath);
+
+    expect(result.trunkCables).toHaveLength(1);
+    expect(result.trunkCables[0]).toMatchObject({
+      cableType: 'ADSS LTC 12J G.652D',
+      fromNode: 'OLSZTYN/ZS00003',
+      toNode: 'OLSZTYN/OPP0004',
+      rawName: 'OKH0030737-BC/009',
+      routingType: 'aerial',
+    });
+    expect(result.trunkCables[0].geojson).toMatchObject({
+      type: 'MultiLineString',
+      coordinates: expect.arrayContaining([expect.any(Array), expect.any(Array)]),
+    });
+  });
+
+  it('keeps map areas distinct when two localities use the same OPP number', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'photo-local-gpkg-duplicate-opp-map-'));
+    const gpkgPath = join(dir, 'sample.gpkg');
+    const db = new Database(gpkgPath);
+
+    db.exec(`
+      CREATE TABLE PA (
+        id_posesja_opl TEXT,
+        nazwa_miejsc TEXT,
+        nazwa_ul TEXT,
+        nr_domu TEXT,
+        nr_dzialki TEXT,
+        geom BLOB
+      );
+      CREATE TABLE Rejonizacja (
+        rejonizacja TEXT,
+        liczba_hh INTEGER,
+        liczba_pa INTEGER,
+        nr_kabla TEXT,
+        geom BLOB
+      );
+      CREATE TABLE "Kable Swiatlowodowe" (
+        model_kabla TEXT,
+        typ_elementu TEXT,
+        od TEXT,
+        do TEXT,
+        odcinek_kabla TEXT,
+        geom BLOB
+      );
+    `);
+
+    db.prepare('INSERT INTO PA VALUES (?, ?, ?, ?, ?, ?)').run(
+      'pa-1',
+      'Ostrzeszewo',
+      'Ostrzeszewo',
+      '10B',
+      null,
+      pointGeometry(574000, 424000),
+    );
+    db.prepare('INSERT INTO Rejonizacja VALUES (?, ?, ?, ?, ?)').run(
+      'OSTRZESZEWO/OPP0002',
+      4,
+      4,
+      'OKH0030737-BD/010',
+      polygonGeometry([
+        [574000, 424000],
+        [574100, 424000],
+        [574100, 424100],
+        [574000, 424000],
+      ]),
+    );
+    db.prepare('INSERT INTO Rejonizacja VALUES (?, ?, ?, ?, ?)').run(
+      'KLEBARK MALY/OPP0002',
+      1,
+      1,
+      'OKH0030737-BA/007',
+      polygonGeometry([
+        [575000, 425000],
+        [575100, 425000],
+        [575100, 425100],
+        [575000, 425000],
+      ]),
+    );
+    db.prepare('INSERT INTO "Kable Swiatlowodowe" VALUES (?, ?, ?, ?, ?, ?)').run(
+      'MI-MKF 12J G.655D',
+      'Kabel doziemny',
+      'OSTRZESZEWO/ZS00002',
+      'OSTRZESZEWO/OPP0002',
+      'OKH0030737-BD/010',
+      lineGeometry([
+        [574000, 424000],
+        [574100, 424100],
+      ]),
+    );
+    db.prepare('INSERT INTO "Kable Swiatlowodowe" VALUES (?, ?, ?, ?, ?, ?)').run(
+      'ADSS LTC 12J G.652D',
+      'Kabel napowietrzny',
+      'KLEBARK MALY/ZS00002',
+      'KLEBARK MALY/OPP0002',
+      'OKH0030737-BA/007',
+      lineGeometry([
+        [575000, 425000],
+        [575100, 425100],
+      ]),
+    );
+    db.close();
+
+    const result = extractGpkg(gpkgPath);
+
+    expect(result.polygons.map((polygon) => polygon.osdName).sort()).toEqual([
+      'KLEBARK MALY/OPP0002',
+      'OSTRZESZEWO/OPP0002',
+    ]);
+    expect(result.infraNodes.map((node) => node.name).sort()).toEqual([
+      'KLEBARK MALY/OPP0002',
+      'KLEBARK MALY/ZS00002',
+      'OSTRZESZEWO/OPP0002',
+      'OSTRZESZEWO/ZS00002',
+    ]);
+  });
+
+  it('extracts projected passive OSD nodes even when they have no address points', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'photo-local-gpkg-passive-osd-map-'));
+    const gpkgPath = join(dir, 'sample.gpkg');
+    const db = new Database(gpkgPath);
+
+    db.exec(`
+      CREATE TABLE PA (
+        id_posesja_opl TEXT,
+        nazwa_miejsc TEXT,
+        nazwa_ul TEXT,
+        nr_domu TEXT,
+        nr_dzialki TEXT,
+        geom BLOB
+      );
+      CREATE TABLE "Urzadzenia Pasywne" (
+        typ_elementu TEXT,
+        model_urzadzenia TEXT,
+        wezel TEXT,
+        oznaczenie TEXT,
+        modyfikacja TEXT,
+        geom BLOB
+      );
+    `);
+
+    db.prepare('INSERT INTO PA VALUES (?, ?, ?, ?, ?, ?)').run(
+      'pa-1',
+      'Radom',
+      'Testowa',
+      '1',
+      null,
+      pointGeometry(574000, 424000),
+    );
+    db.prepare('INSERT INTO "Urzadzenia Pasywne" VALUES (?, ?, ?, ?, ?, ?)').run(
+      'Przełącznica światłowodowa',
+      'PSP',
+      'RADOM/OSD9999',
+      'O_RADOM/OSD9999',
+      null,
+      pointGeometry(574250, 424250),
+    );
+    db.prepare('INSERT INTO "Urzadzenia Pasywne" VALUES (?, ?, ?, ?, ?, ?)').run(
+      'Przełącznica światłowodowa',
+      'PSP',
+      'RADOM/OSD0001',
+      'O_RADOM/OSD0001',
+      'Istniejący',
+      pointGeometry(574300, 424300),
+    );
+    db.close();
+
+    const result = extractGpkg(gpkgPath);
+
+    expect(result.infraNodes).toEqual([
+      expect.objectContaining({
+        nodeType: 'OSD',
+        name: 'RADOM/OSD9999',
+        label: 'O_RADOM/OSD9999',
+        lat: expect.any(Number),
+        lng: expect.any(Number),
+      }),
+    ]);
   });
 });

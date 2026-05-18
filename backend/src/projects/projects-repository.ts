@@ -4,6 +4,13 @@ import type {
   ChecklistNodeRecord,
   ChecklistNodeSource,
   ChecklistNodeType,
+  CableRoutingType,
+  MapCableStatus,
+  MapInfraNodeInput,
+  MapNodeStatus,
+  MapPolygonInput,
+  MapTrunkCableInput,
+  ProjectMapRecord,
   ProjectRecord,
   ProjectType,
   SplitterTopology,
@@ -58,6 +65,9 @@ export interface CreateProjectInput {
   dacToAddressCableCount: number;
   adssToAddressCableCount: number;
   checklistNodes: GeneratedChecklistNode[];
+  polygons?: MapPolygonInput[];
+  trunkCables?: MapTrunkCableInput[];
+  infraNodes?: MapInfraNodeInput[];
 }
 
 export interface RecalculateChecklistInput {
@@ -72,6 +82,9 @@ export interface RecalculateChecklistInput {
   dacToAddressCableCount: number;
   adssToAddressCableCount: number;
   checklistNodes: GeneratedChecklistNode[];
+  polygons?: MapPolygonInput[];
+  trunkCables?: MapTrunkCableInput[];
+  infraNodes?: MapInfraNodeInput[];
 }
 
 export interface RecalculateChecklistResult {
@@ -111,8 +124,178 @@ function getAddressMergeKey(address: {
   ].join('|');
 }
 
+function normalizeMapNodeKey(value: string | null): string {
+  const raw = (value ?? '').trim().toUpperCase();
+  if (!raw) return '';
+  return raw.replace(/^O_/, '').replace(/\s+/g, '');
+}
+
+function normalizeMapNodeTerminalKey(value: string | null): string {
+  const raw = normalizeMapNodeKey(value);
+  if (!raw) return '';
+  return raw.split(/[\\/]/).at(-1) ?? raw;
+}
+
+function normalizeSearchKey(value: string | null): string {
+  return (value ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+}
+
+function getMapCableKey(cable: Pick<MapTrunkCableInput, 'rawName' | 'fromNode' | 'toNode' | 'cableType'>): string {
+  const rawName = cable.rawName?.trim();
+  return rawName || `${cable.fromNode}|${cable.toNode}|${cable.cableType}`;
+}
+
+function getCableRoutingType(cable: Pick<MapTrunkCableInput, 'routingType' | 'cableType' | 'rawName'>): CableRoutingType {
+  if (cable.routingType === 'aerial' || cable.routingType === 'underground') return cable.routingType;
+  return /ADSS/i.test(`${cable.cableType} ${cable.rawName ?? ''}`) ? 'aerial' : 'underground';
+}
+
+function buildAddressLabel(address: {
+  city: string;
+  street: string;
+  buildingNo: string | null;
+}): string {
+  const street = [address.street, address.buildingNo].filter(Boolean).join(' ').trim();
+  return [street, address.city].filter(Boolean).join(', ');
+}
+
+function parseGeojson(value: string): Record<string, unknown> {
+  const parsed = JSON.parse(value) as unknown;
+  return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : {};
+}
+
 export class ProjectsRepository {
   constructor(private readonly db: Database.Database) {}
+
+  private replaceMapFeatures(
+    projectId: string,
+    polygons: MapPolygonInput[],
+    trunkCables: MapTrunkCableInput[],
+    infraNodes: MapInfraNodeInput[],
+  ): void {
+    const polygonKeys = new Set(polygons.map((polygon) => polygon.osdName));
+    const existingPolygonRows = this.db
+      .prepare(`SELECT osd_name AS osdName FROM map_polygons WHERE project_id = ?`)
+      .all(projectId) as Array<{ osdName: string }>;
+    const deletePolygon = this.db.prepare(`DELETE FROM map_polygons WHERE project_id = ? AND osd_name = ?`);
+    for (const row of existingPolygonRows) {
+      if (!polygonKeys.has(row.osdName)) deletePolygon.run(projectId, row.osdName);
+    }
+
+    const insertPolygon = this.db.prepare(
+      `INSERT INTO map_polygons (
+        id, project_id, osd_name, label, geojson, households, pa_count, cable_ref
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(project_id, osd_name) DO UPDATE SET
+        label = excluded.label,
+        geojson = excluded.geojson,
+        households = excluded.households,
+        pa_count = excluded.pa_count,
+        cable_ref = excluded.cable_ref`,
+    );
+    for (const polygon of polygons) {
+      insertPolygon.run(
+        randomUUID(),
+        projectId,
+        polygon.osdName,
+        polygon.label,
+        JSON.stringify(polygon.geojson),
+        polygon.households,
+        polygon.paCount,
+        polygon.cableRef,
+      );
+    }
+
+    const cableKeys = new Set(trunkCables.map(getMapCableKey));
+    const existingCableRows = this.db
+      .prepare(`SELECT cable_key AS cableKey FROM map_trunk_cables WHERE project_id = ?`)
+      .all(projectId) as Array<{ cableKey: string }>;
+    const deleteCable = this.db.prepare(
+      `DELETE FROM map_trunk_cables WHERE project_id = ? AND cable_key = ?`,
+    );
+    for (const row of existingCableRows) {
+      if (!cableKeys.has(row.cableKey)) deleteCable.run(projectId, row.cableKey);
+    }
+
+    const insertCable = this.db.prepare(
+      `INSERT INTO map_trunk_cables (
+        id, project_id, cable_key, cable_type, route_type, from_node, to_node, osd_name, geojson, raw_name
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(project_id, cable_key) DO UPDATE SET
+        cable_type = excluded.cable_type,
+        route_type = excluded.route_type,
+        from_node = excluded.from_node,
+        to_node = excluded.to_node,
+        osd_name = excluded.osd_name,
+        geojson = excluded.geojson,
+        raw_name = excluded.raw_name`,
+    );
+    for (const cable of trunkCables) {
+      insertCable.run(
+        randomUUID(),
+        projectId,
+        getMapCableKey(cable),
+        cable.cableType,
+        getCableRoutingType(cable),
+        cable.fromNode,
+        cable.toNode,
+        cable.osdName,
+        JSON.stringify(cable.geojson),
+        cable.rawName,
+      );
+    }
+
+    const nodeKeys = new Set(infraNodes.map((node) => `${node.nodeType}|${node.name}`));
+    const existingNodeRows = this.db
+      .prepare(
+        `SELECT node_type AS nodeType, name, label, status FROM map_infra_nodes WHERE project_id = ?`,
+      )
+      .all(projectId) as Array<{
+      nodeType: MapInfraNodeInput['nodeType'];
+      name: string;
+      label: string | null;
+      status: MapNodeStatus;
+    }>;
+    const nodeStatusByName = new Map<string, MapNodeStatus>();
+    const nodeStatusByLabel = new Map<string, MapNodeStatus>();
+    for (const row of existingNodeRows) {
+      nodeStatusByName.set(`${row.nodeType}|${normalizeMapNodeKey(row.name)}`, row.status);
+      const labelKey = normalizeMapNodeKey(row.label);
+      if (labelKey) nodeStatusByLabel.set(`${row.nodeType}|${labelKey}`, row.status);
+    }
+    const deleteNode = this.db.prepare(
+      `DELETE FROM map_infra_nodes WHERE project_id = ? AND node_type = ? AND name = ?`,
+    );
+    for (const row of existingNodeRows) {
+      if (!nodeKeys.has(`${row.nodeType}|${row.name}`)) deleteNode.run(projectId, row.nodeType, row.name);
+    }
+
+    const insertNode = this.db.prepare(
+      `INSERT INTO map_infra_nodes (
+        id, project_id, node_type, name, label, lat, lng, status
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(project_id, node_type, name) DO UPDATE SET
+        label = excluded.label,
+        lat = excluded.lat,
+        lng = excluded.lng`,
+    );
+    for (const node of infraNodes) {
+      const status =
+        nodeStatusByName.get(`${node.nodeType}|${normalizeMapNodeKey(node.name)}`) ??
+        nodeStatusByLabel.get(`${node.nodeType}|${normalizeMapNodeKey(node.label)}`) ??
+        'PENDING';
+      insertNode.run(
+        randomUUID(),
+        projectId,
+        node.nodeType,
+        node.name,
+        node.label,
+        node.lat,
+        node.lng,
+        status,
+      );
+    }
+  }
 
   listProjects(): ProjectRecord[] {
     const rows = this.db
@@ -248,6 +431,8 @@ export class ProjectsRepository {
           node.source ?? 'GPKG',
         );
       }
+
+      this.replaceMapFeatures(id, input.polygons ?? [], input.trunkCables ?? [], input.infraNodes ?? []);
     });
 
     tx();
@@ -286,6 +471,240 @@ export class ProjectsRepository {
 
   getProject(projectId: string): ProjectRecord | null {
     return this.listProjects().find((project) => project.id === projectId) ?? null;
+  }
+
+  getProjectMap(projectId: string): ProjectMapRecord {
+    const addressRows = this.db
+      .prepare(
+        `SELECT
+          address.id,
+          address.city,
+          address.street,
+          address.building_no AS buildingNo,
+          address.distribution_point AS distributionPoint,
+          address.lat,
+          address.lng,
+          COUNT(photo.id) AS reservePhotoCount
+        FROM addresses address
+        LEFT JOIN checklist_nodes node
+          ON node.address_id = address.id
+          AND node.node_type = 'CABLE_RESERVE'
+        LEFT JOIN photos photo ON photo.checklist_node_id = node.id
+        WHERE address.project_id = ?
+          AND address.lat IS NOT NULL
+          AND address.lng IS NOT NULL
+        GROUP BY address.id
+        ORDER BY address.city COLLATE NOCASE ASC,
+          address.street COLLATE NOCASE ASC,
+          address.building_no COLLATE NOCASE ASC`,
+      )
+      .all(projectId) as Array<{
+      id: string;
+      city: string;
+      street: string;
+      buildingNo: string | null;
+      distributionPoint: string | null;
+      lat: number;
+      lng: number;
+      reservePhotoCount: number;
+    }>;
+
+    const addresses = addressRows.map((address) => {
+      const reservePhotoCount = Number(address.reservePhotoCount);
+      return {
+        id: address.id,
+        label: buildAddressLabel(address),
+        city: address.city,
+        street: address.street,
+        buildingNo: address.buildingNo,
+        distributionPoint: address.distributionPoint,
+        lat: Number(address.lat),
+        lng: Number(address.lng),
+        reservePhotoCount,
+        hasReservePhoto: reservePhotoCount > 0,
+      };
+    });
+
+    const addressCountsByNode = new Map<string, { total: number; withReservePhoto: number }>();
+    const addressCountsByTerminalNode = new Map<string, { total: number; withReservePhoto: number }>();
+    for (const address of addresses) {
+      const nodeKey = normalizeMapNodeKey(address.distributionPoint);
+      if (!nodeKey) continue;
+      const counts = addressCountsByNode.get(nodeKey) ?? { total: 0, withReservePhoto: 0 };
+      counts.total += 1;
+      if (address.hasReservePhoto) counts.withReservePhoto += 1;
+      addressCountsByNode.set(nodeKey, counts);
+
+      const terminalNodeKey = normalizeMapNodeTerminalKey(address.distributionPoint);
+      const terminalCounts = addressCountsByTerminalNode.get(terminalNodeKey) ?? {
+        total: 0,
+        withReservePhoto: 0,
+      };
+      terminalCounts.total += 1;
+      if (address.hasReservePhoto) terminalCounts.withReservePhoto += 1;
+      addressCountsByTerminalNode.set(terminalNodeKey, terminalCounts);
+    }
+
+    const polygonRows = this.db
+      .prepare(
+        `SELECT
+          id,
+          osd_name AS osdName,
+          label,
+          geojson,
+          households,
+          pa_count AS paCount,
+          cable_ref AS cableRef
+        FROM map_polygons
+        WHERE project_id = ?
+        ORDER BY osd_name COLLATE NOCASE ASC`,
+      )
+      .all(projectId) as Array<{
+      id: string;
+      osdName: string;
+      label: string | null;
+      geojson: string;
+      households: number | null;
+      paCount: number | null;
+      cableRef: string | null;
+    }>;
+
+    const polygons = polygonRows.map((polygon) => {
+      const counts =
+        addressCountsByNode.get(normalizeMapNodeKey(polygon.osdName)) ??
+        addressCountsByTerminalNode.get(normalizeMapNodeTerminalKey(polygon.osdName)) ??
+        {
+          total: 0,
+          withReservePhoto: 0,
+        };
+      return {
+        id: polygon.id,
+        osdName: polygon.osdName,
+        label: polygon.label,
+        geojson: parseGeojson(polygon.geojson),
+        households: polygon.households,
+        paCount: polygon.paCount,
+        cableRef: polygon.cableRef,
+        addressTotal: counts.total,
+        addressWithReservePhoto: counts.withReservePhoto,
+      };
+    });
+
+    const cableRows = this.db
+      .prepare(
+        `SELECT
+          id,
+          cable_type AS cableType,
+          route_type AS routingType,
+          from_node AS fromNode,
+          to_node AS toNode,
+          osd_name AS osdName,
+          geojson,
+          raw_name AS rawName,
+          status
+        FROM map_trunk_cables
+        WHERE project_id = ?
+        ORDER BY from_node COLLATE NOCASE ASC, to_node COLLATE NOCASE ASC`,
+      )
+      .all(projectId) as Array<{
+      id: string;
+      cableType: string;
+      routingType: CableRoutingType;
+      fromNode: string;
+      toNode: string;
+      osdName: string;
+      geojson: string;
+      rawName: string | null;
+      status: MapCableStatus;
+    }>;
+
+    const trunkCables = cableRows.map((cable) => ({
+      id: cable.id,
+      cableType: cable.cableType,
+      routingType: cable.routingType,
+      fromNode: cable.fromNode,
+      toNode: cable.toNode,
+      osdName: cable.osdName,
+      geojson: parseGeojson(cable.geojson),
+      rawName: cable.rawName,
+      status: cable.status,
+    }));
+
+    const photoNodeRows = this.db
+      .prepare(
+        `SELECT
+          node.name,
+          node.path,
+          COUNT(photo.id) AS photoCount
+        FROM checklist_nodes node
+        LEFT JOIN photos photo ON photo.checklist_node_id = node.id
+        WHERE node.project_id = ?
+          AND node.node_type != 'CABLE_RESERVE'
+        GROUP BY node.id
+        HAVING COUNT(photo.id) > 0`,
+      )
+      .all(projectId) as Array<{ name: string; path: string; photoCount: number }>;
+
+    const infraRows = this.db
+      .prepare(
+        `SELECT
+          id,
+          node_type AS nodeType,
+          name,
+          label,
+          lat,
+          lng,
+          status
+        FROM map_infra_nodes
+        WHERE project_id = ?
+        ORDER BY node_type ASC, name COLLATE NOCASE ASC`,
+      )
+      .all(projectId) as Array<{
+      id: string;
+      nodeType: 'OSD' | 'OPP' | 'ZS';
+      name: string;
+      label: string | null;
+      lat: number;
+      lng: number;
+      status: MapNodeStatus;
+    }>;
+
+    const infraNodes = infraRows.map((node) => {
+      const nodeKey = normalizeSearchKey(node.name);
+      const hasPhoto = photoNodeRows.some((photoNode) => {
+        const nameKey = normalizeSearchKey(photoNode.name);
+        const pathKey = normalizeSearchKey(photoNode.path);
+        return nameKey === nodeKey || pathKey.includes(nodeKey);
+      });
+      return {
+        id: node.id,
+        nodeType: node.nodeType,
+        name: node.name,
+        label: node.label,
+        lat: Number(node.lat),
+        lng: Number(node.lng),
+        status: node.status,
+        hasPhoto,
+      };
+    });
+
+    return { addresses, polygons, trunkCables, infraNodes };
+  }
+
+  updateCableStatus(projectId: string, cableId: string, status: MapCableStatus): void {
+    const result = this.db
+      .prepare(`UPDATE map_trunk_cables SET status = ? WHERE project_id = ? AND id = ?`)
+      .run(status, projectId, cableId);
+    if (result.changes === 0) throw new Error('Map cable not found');
+    this.db.prepare(`UPDATE projects SET updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(projectId);
+  }
+
+  updateInfraNodeStatus(projectId: string, nodeId: string, status: MapNodeStatus): void {
+    const result = this.db
+      .prepare(`UPDATE map_infra_nodes SET status = ? WHERE project_id = ? AND id = ?`)
+      .run(status, projectId, nodeId);
+    if (result.changes === 0) throw new Error('Map node not found');
+    this.db.prepare(`UPDATE projects SET updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(projectId);
   }
 
   renameProject(projectId: string, newName: string): void {
@@ -532,6 +951,13 @@ export class ProjectsRepository {
           input.adssToAddressCableCount,
           input.projectId,
         );
+
+      this.replaceMapFeatures(
+        input.projectId,
+        input.polygons ?? [],
+        input.trunkCables ?? [],
+        input.infraNodes ?? [],
+      );
     });
 
     tx();

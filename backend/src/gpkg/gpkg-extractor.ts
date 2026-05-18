@@ -1,6 +1,22 @@
 import Database from 'better-sqlite3';
 import fs from 'node:fs';
-import type { AddressInput, GpkgExtractionResult, MufaEntry, SplitterTopology } from '../types.js';
+import proj4 from 'proj4';
+import wkx from 'wkx';
+import type {
+  AddressInput,
+  CableRoutingType,
+  GpkgExtractionResult,
+  MapInfraNodeInput,
+  MapPolygonInput,
+  MapTrunkCableInput,
+  MufaEntry,
+  SplitterTopology,
+} from '../types.js';
+
+proj4.defs(
+  'EPSG:2180',
+  '+proj=tmerc +lat_0=0 +lon_0=19 +k=0.9993 +x_0=500000 +y_0=-5300000 +ellps=GRS80 +units=m +no_defs',
+);
 
 function q(tableName: string): string {
   return `"${tableName.replace(/"/g, '""')}"`;
@@ -22,6 +38,139 @@ function tableHasColumns(db: Database.Database, tableName: string, columns: stri
   if (!tableExists(db, tableName)) return false;
   const tableColumns = getTableColumns(db, tableName);
   return columns.every((column) => tableColumns.has(column));
+}
+
+function gpkgWkbOffset(buf: Buffer): number | null {
+  if (!buf || buf.length < 8 || buf[0] !== 0x47 || buf[1] !== 0x50) {
+    return null;
+  }
+
+  const flags = buf[3];
+  const envelopeType = (flags >> 1) & 7;
+  let offset = 8;
+  if (envelopeType === 1) offset += 32;
+  else if (envelopeType === 2 || envelopeType === 3) offset += 48;
+  else if (envelopeType === 4) offset += 64;
+
+  return offset < buf.length ? offset : null;
+}
+
+function parseGpkgPoint(buf: Buffer): { x: number; y: number } | null {
+  const offset = gpkgWkbOffset(buf);
+  if (offset == null) return null;
+
+  const geometry = wkx.Geometry.parse(buf.subarray(offset));
+  if (geometry instanceof wkx.Point) {
+    return { x: geometry.x, y: geometry.y };
+  }
+  return null;
+}
+
+function parseGpkgGeoJSON(buf: Buffer): Record<string, unknown> | null {
+  const offset = gpkgWkbOffset(buf);
+  if (offset == null) return null;
+
+  const geometry = wkx.Geometry.parse(buf.subarray(offset));
+  return geometry.toGeoJSON() as Record<string, unknown>;
+}
+
+function reprojectGeometry(geometry: Record<string, unknown>): void {
+  const transformCoords = (coords: unknown): void => {
+    if (!Array.isArray(coords) || coords.length === 0) return;
+    if (typeof coords[0] === 'number' && typeof coords[1] === 'number') {
+      const [lng, lat] = proj4('EPSG:2180', 'WGS84', [coords[0], coords[1]]);
+      coords[0] = lng;
+      coords[1] = lat;
+      return;
+    }
+
+    for (const child of coords) {
+      transformCoords(child);
+    }
+  };
+
+  transformCoords(geometry.coordinates);
+}
+
+function toNodeName(value: string): string {
+  return value.includes('/') ? value.split('/').pop()!.trim() : value.trim();
+}
+
+function toScopedNodeName(value: string): string {
+  return value.trim().replace(/^O_/, '');
+}
+
+function getNodeType(name: string): MapInfraNodeInput['nodeType'] | null {
+  const nodeName = toNodeName(name);
+  if (/^ZS/i.test(nodeName)) return 'ZS';
+  if (/^OPP/i.test(nodeName)) return 'OPP';
+  if (/^OSD/i.test(nodeName)) return 'OSD';
+  return null;
+}
+
+function isInfraNode(name: string): boolean {
+  return getNodeType(name) != null;
+}
+
+function isCoordinatePair(value: unknown): value is number[] {
+  return (
+    Array.isArray(value) &&
+    typeof value[0] === 'number' &&
+    typeof value[1] === 'number' &&
+    Number.isFinite(value[0]) &&
+    Number.isFinite(value[1])
+  );
+}
+
+function lineSegmentsFromGeojson(geojson: Record<string, unknown>): number[][][] {
+  const { type, coordinates } = geojson;
+  if (type === 'LineString' && Array.isArray(coordinates)) {
+    const line = coordinates.filter(isCoordinatePair);
+    return line.length >= 2 ? [line] : [];
+  }
+
+  if (type === 'MultiLineString' && Array.isArray(coordinates)) {
+    return coordinates
+      .filter(Array.isArray)
+      .map((line) => line.filter(isCoordinatePair))
+      .filter((line) => line.length >= 2);
+  }
+
+  return [];
+}
+
+function geojsonFromLineSegments(segments: number[][][]): Record<string, unknown> {
+  return segments.length === 1
+    ? { type: 'LineString', coordinates: segments[0] }
+    : { type: 'MultiLineString', coordinates: segments };
+}
+
+function getTrunkCableKey(input: {
+  rawName: string | null;
+  fromNode: string;
+  toNode: string;
+  cableType: string;
+}): string {
+  return input.rawName?.trim() || `${input.fromNode}|${input.toNode}|${input.cableType}`;
+}
+
+function getCableRoutingType(
+  row: Record<string, unknown>,
+  cableType: string,
+  rawName: string | null,
+): CableRoutingType {
+  const elementType = row.typ_elementu == null ? '' : String(row.typ_elementu);
+  if (/Kabel napowietrzny/i.test(elementType)) return 'aerial';
+  if (/Kabel doziemny|Kabel w kanalizacji/i.test(elementType)) return 'underground';
+  return /ADSS/i.test(`${cableType} ${rawName ?? ''}`) ? 'aerial' : 'underground';
+}
+
+function isExistingPassiveDevice(value: unknown): boolean {
+  return typeof value === 'string' && value.trim().toLowerCase().startsWith('istniej');
+}
+
+function findExistingTables(db: Database.Database, candidates: string[]): string[] {
+  return candidates.filter((tableName) => tableExists(db, tableName));
 }
 
 export function inferSplitterTopology(splitterCount: number): SplitterTopology {
@@ -107,6 +256,31 @@ function extractAddresses(db: Database.Database): {
 
   for (const row of paRows) {
     const propertyId = row.id_posesja_opl == null ? '' : String(row.id_posesja_opl).trim();
+    let lat: number | null = null;
+    let lng: number | null = null;
+    if (row.geom instanceof Buffer) {
+      try {
+        const point = parseGpkgPoint(row.geom);
+        if (point) {
+          const [nextLng, nextLat] = proj4('EPSG:2180', 'WGS84', [point.x, point.y]);
+          if (
+            Number.isFinite(nextLat) &&
+            Number.isFinite(nextLng) &&
+            nextLat >= 48 &&
+            nextLat <= 56 &&
+            nextLng >= 13 &&
+            nextLng <= 25
+          ) {
+            lat = nextLat;
+            lng = nextLng;
+          }
+        }
+      } catch {
+        lat = null;
+        lng = null;
+      }
+    }
+
     addresses.push({
       city: row.nazwa_miejsc == null ? '' : String(row.nazwa_miejsc).trim(),
       street: row.nazwa_ul == null ? '' : String(row.nazwa_ul).trim(),
@@ -114,8 +288,8 @@ function extractAddresses(db: Database.Database): {
       propertyId: propertyId || null,
       parcelNumber: row.nr_dzialki == null ? null : String(row.nr_dzialki).trim(),
       distributionPoint: osdByProperty.get(propertyId) ?? null,
-      lat: null,
-      lng: null,
+      lat,
+      lng,
       householdCount: 0,
       businessUnitCount: 0,
     });
@@ -127,6 +301,199 @@ function extractAddresses(db: Database.Database): {
     totalLokaleRows,
     skippedNoGeom: 0,
     skippedBadGeom: 0,
+  };
+}
+
+function extractMapGeometry(db: Database.Database): {
+  polygons: MapPolygonInput[];
+  trunkCables: MapTrunkCableInput[];
+  infraNodes: MapInfraNodeInput[];
+} {
+  const polygons: MapPolygonInput[] = [];
+  const polygonTables = ['Rejonizacja', 'rejonizacja', 'REJONIZACJA'];
+  for (const tableName of polygonTables) {
+    if (!tableExists(db, tableName)) continue;
+    const rows = db.prepare(`SELECT * FROM ${q(tableName)}`).all() as Array<Record<string, unknown>>;
+    for (const row of rows) {
+      const label = row.rejonizacja == null ? '' : String(row.rejonizacja).trim();
+      const terminalName = toNodeName(label);
+      const osdName = toScopedNodeName(label);
+      if (!/^(OSD|OPP)/i.test(terminalName)) continue;
+      if (!(row.geom instanceof Buffer)) continue;
+
+      const geojson = parseGpkgGeoJSON(row.geom);
+      if (!geojson) continue;
+      reprojectGeometry(geojson);
+
+      polygons.push({
+        osdName,
+        label: label || null,
+        geojson,
+        households: typeof row.liczba_hh === 'number' ? row.liczba_hh : null,
+        paCount: typeof row.liczba_pa === 'number' ? row.liczba_pa : null,
+        cableRef: row.nr_kabla == null ? null : String(row.nr_kabla).trim() || null,
+      });
+    }
+    if (rows.length > 0) break;
+  }
+
+  const trunkCableMap = new Map<
+    string,
+    { cable: Omit<MapTrunkCableInput, 'geojson'>; segments: number[][][] }
+  >();
+  const infraNodeMap = new Map<string, MapInfraNodeInput>();
+  const setInfraNode = (node: MapInfraNodeInput): void => {
+    infraNodeMap.set(`${node.nodeType}:${node.name}`, node);
+  };
+  const cableTable = [
+    'Kable Swiatlowodowe',
+    'Kable Światłowodowe',
+    'Kable ĹšwiatĹ‚owodowe',
+  ].find((tableName) => tableExists(db, tableName));
+
+  if (cableTable) {
+    const rows = db.prepare(`SELECT * FROM ${q(cableTable)}`).all() as Array<Record<string, unknown>>;
+    for (const row of rows) {
+      const cableType = row.model_kabla == null ? '' : String(row.model_kabla).trim();
+      const fromLabel = row.od == null ? '' : String(row.od).trim();
+      const toLabel = row.do == null ? '' : String(row.do).trim();
+      const fromNode = toScopedNodeName(fromLabel);
+      const toNode = toScopedNodeName(toLabel);
+      if (!cableType || !fromNode || !toNode || !isInfraNode(fromNode) || !isInfraNode(toNode)) {
+        continue;
+      }
+      if (!(row.geom instanceof Buffer)) continue;
+
+      const geojson = parseGpkgGeoJSON(row.geom);
+      if (!geojson) continue;
+      reprojectGeometry(geojson);
+      const segments = lineSegmentsFromGeojson(geojson);
+      if (segments.length === 0) continue;
+
+      const fromNodeType = getNodeType(fromNode);
+      const toNodeType = getNodeType(toNode);
+      const osdName = toNodeType === 'OSD'
+        ? toNode
+        : fromNodeType === 'OSD'
+          ? fromNode
+          : toNode;
+      const rawName = row.odcinek_kabla == null ? null : String(row.odcinek_kabla).trim() || null;
+      const routingType = getCableRoutingType(row, cableType, rawName);
+      const cableKey = getTrunkCableKey({ rawName, fromNode, toNode, cableType });
+      const existingCable = trunkCableMap.get(cableKey);
+
+      if (existingCable) {
+        existingCable.segments.push(...segments);
+        if (routingType === 'aerial') existingCable.cable.routingType = routingType;
+      } else {
+        trunkCableMap.set(cableKey, {
+          cable: {
+            cableType,
+            fromNode,
+            toNode,
+            osdName,
+            rawName,
+            routingType,
+          },
+          segments: [...segments],
+        });
+      }
+
+      const firstSegment = segments[0];
+      const lastSegment = segments[segments.length - 1];
+      const first = firstSegment[0];
+      const last = lastSegment[lastSegment.length - 1];
+      const firstType = getNodeType(fromNode);
+      const lastType = getNodeType(toNode);
+      if (
+        firstType &&
+        Array.isArray(first) &&
+        typeof first[0] === 'number' &&
+        typeof first[1] === 'number' &&
+        !infraNodeMap.has(`${firstType}:${fromNode}`)
+      ) {
+        setInfraNode({
+          nodeType: firstType,
+          name: fromNode,
+          label: fromLabel || null,
+          lat: first[1],
+          lng: first[0],
+        });
+      }
+      if (
+        lastType &&
+        Array.isArray(last) &&
+        typeof last[0] === 'number' &&
+        typeof last[1] === 'number' &&
+        !infraNodeMap.has(`${lastType}:${toNode}`)
+      ) {
+        setInfraNode({
+          nodeType: lastType,
+          name: toNode,
+          label: toLabel || null,
+          lat: last[1],
+          lng: last[0],
+        });
+      }
+    }
+  }
+
+  const passiveDeviceTables = findExistingTables(db, [
+    'Urzadzenia Pasywne',
+    'UrzÄ…dzenia Pasywne',
+    'Urządzenia Pasywne',
+    '_Urzadzenia Pasywne',
+    '_UrzÄ…dzenia Pasywne',
+    '_Urządzenia Pasywne',
+    'Plan_Urzadzenia Pasywne',
+    'Plan_UrzÄ…dzenia Pasywne',
+    'Plan_Urządzenia Pasywne',
+  ]);
+
+  for (const tableName of passiveDeviceTables) {
+    if (!tableHasColumns(db, tableName, ['wezel', 'geom'])) continue;
+
+    const rows = db.prepare(`SELECT * FROM ${q(tableName)}`).all() as Array<Record<string, unknown>>;
+    for (const row of rows) {
+      if (isExistingPassiveDevice(row.modyfikacja)) continue;
+      const rawNode = typeof row.wezel === 'string' ? row.wezel.trim() : '';
+      const nodeName = toScopedNodeName(rawNode);
+      const nodeType = getNodeType(rawNode);
+      if (!nodeType || !(row.geom instanceof Buffer)) continue;
+
+      let point: { x: number; y: number } | null = null;
+      try {
+        point = parseGpkgPoint(row.geom);
+      } catch {
+        point = null;
+      }
+      if (!point) continue;
+
+      const [lng, lat] = proj4('EPSG:2180', 'WGS84', [point.x, point.y]);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+      const label =
+        (typeof row.oznaczenie === 'string' && row.oznaczenie.trim()) ||
+        (typeof row.oznaczenie_urzadzenia === 'string' && row.oznaczenie_urzadzenia.trim()) ||
+        rawNode ||
+        null;
+
+      setInfraNode({
+        nodeType,
+        name: nodeName,
+        label,
+        lat,
+        lng,
+      });
+    }
+  }
+
+  return {
+    polygons,
+    trunkCables: [...trunkCableMap.values()].map(({ cable, segments }) => ({
+      ...cable,
+      geojson: geojsonFromLineSegments(segments),
+    })),
+    infraNodes: [...infraNodeMap.values()],
   };
 }
 
@@ -358,12 +725,16 @@ export function extractGpkg(filePath: string): GpkgExtractionResult {
     const suggestedProjectName = extractProjectName(db);
     const suggestedProjectDefinition = extractProjectDefinition(db);
     const splices = extractSplices(db);
+    const mapGeometry = extractMapGeometry(db);
 
     return {
       suggestedProjectName,
       suggestedProjectDefinition,
       splices,
       addresses: addresses.addresses,
+      polygons: mapGeometry.polygons,
+      trunkCables: mapGeometry.trunkCables,
+      infraNodes: mapGeometry.infraNodes,
       dacToAddressCableEntries: cables.dacToAddressCableEntries,
       adssToAddressCableEntries: cables.adssToAddressCableEntries,
       splitterCount,

@@ -68,6 +68,45 @@ CREATE TABLE IF NOT EXISTS photos (
   error_message TEXT
 );
 
+CREATE TABLE IF NOT EXISTS map_polygons (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  osd_name TEXT NOT NULL,
+  label TEXT,
+  geojson TEXT NOT NULL,
+  households INTEGER,
+  pa_count INTEGER,
+  cable_ref TEXT,
+  UNIQUE(project_id, osd_name)
+);
+
+CREATE TABLE IF NOT EXISTS map_trunk_cables (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  cable_key TEXT NOT NULL,
+  cable_type TEXT NOT NULL,
+  route_type TEXT NOT NULL DEFAULT 'underground' CHECK (route_type IN ('underground', 'aerial')),
+  from_node TEXT NOT NULL,
+  to_node TEXT NOT NULL,
+  osd_name TEXT NOT NULL,
+  geojson TEXT NOT NULL,
+  raw_name TEXT,
+  status TEXT NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'DUCT_READY', 'PULLED', 'WELDED', 'SUSPENDED')),
+  UNIQUE(project_id, cable_key)
+);
+
+CREATE TABLE IF NOT EXISTS map_infra_nodes (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  node_type TEXT NOT NULL CHECK (node_type IN ('OSD', 'OPP', 'ZS')),
+  name TEXT NOT NULL,
+  label TEXT,
+  lat REAL NOT NULL,
+  lng REAL NOT NULL,
+  status TEXT NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'WELDED')),
+  UNIQUE(project_id, node_type, name)
+);
+
 CREATE TABLE IF NOT EXISTS chat_photo_batches (
   id TEXT PRIMARY KEY,
   project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -124,6 +163,9 @@ CREATE INDEX IF NOT EXISTS idx_checklist_nodes_project_id ON checklist_nodes(pro
 CREATE INDEX IF NOT EXISTS idx_checklist_nodes_parent_id ON checklist_nodes(parent_id);
 CREATE INDEX IF NOT EXISTS idx_photos_project_id ON photos(project_id);
 CREATE INDEX IF NOT EXISTS idx_photos_checklist_node_id ON photos(checklist_node_id);
+CREATE INDEX IF NOT EXISTS idx_map_polygons_project_id ON map_polygons(project_id);
+CREATE INDEX IF NOT EXISTS idx_map_trunk_cables_project_id ON map_trunk_cables(project_id);
+CREATE INDEX IF NOT EXISTS idx_map_infra_nodes_project_id ON map_infra_nodes(project_id);
 CREATE INDEX IF NOT EXISTS idx_chat_photo_batches_project_id ON chat_photo_batches(project_id);
 CREATE INDEX IF NOT EXISTS idx_chat_photo_batches_status ON chat_photo_batches(status);
 CREATE INDEX IF NOT EXISTS idx_chat_photo_files_batch_id ON chat_photo_files(batch_id);

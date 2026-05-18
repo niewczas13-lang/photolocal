@@ -1,0 +1,192 @@
+import { describe, expect, it } from 'vitest';
+import { filterMapTasks, getMapTaskGroups, getMapTaskRows } from './map-task-list';
+import type { ProjectMapData } from './types';
+
+function mapData(overrides: Partial<ProjectMapData> = {}): ProjectMapData {
+  return {
+    addresses: [
+      {
+        id: 'address-1',
+        label: 'Ostrzeszewo 10',
+        city: 'Ostrzeszewo',
+        street: 'Ostrzeszewo',
+        buildingNo: '10',
+        distributionPoint: 'OSTRZESZEWO/OPP0002',
+        lat: 53.75,
+        lng: 20.55,
+        reservePhotoCount: 0,
+        hasReservePhoto: false,
+      },
+      {
+        id: 'address-2',
+        label: 'Klebark Maly 38',
+        city: 'Klebark Maly',
+        street: 'Klebark Maly',
+        buildingNo: '38',
+        distributionPoint: 'KLEBARK MALY/OPP0002',
+        lat: 53.74,
+        lng: 20.57,
+        reservePhotoCount: 1,
+        hasReservePhoto: true,
+      },
+    ],
+    polygons: [],
+    trunkCables: [
+      {
+        id: 'cable-1',
+        cableType: 'DAC 8J',
+        fromNode: 'OSTRZESZEWO/ZS0001',
+        toNode: 'OSTRZESZEWO/OPP0002',
+        osdName: 'OSTRZESZEWO/OPP0002',
+        geojson: { type: 'LineString', coordinates: [] },
+        rawName: 'OKH0030737-BD/010',
+        routingType: 'underground',
+        status: 'DUCT_READY',
+      },
+      {
+        id: 'cable-2',
+        cableType: 'ADSS 12J',
+        fromNode: 'KLEBARK MALY/ZS0002',
+        toNode: 'KLEBARK MALY/OPP0002',
+        osdName: 'KLEBARK MALY/OPP0002',
+        geojson: { type: 'LineString', coordinates: [] },
+        rawName: 'OKH0030737-BA/007',
+        routingType: 'aerial',
+        status: 'SUSPENDED',
+      },
+    ],
+    infraNodes: [
+      {
+        id: 'node-1',
+        nodeType: 'OPP',
+        name: 'OSTRZESZEWO/OPP0002',
+        label: 'O_OSTRZESZEWO/OPP0002',
+        lat: 53.75,
+        lng: 20.55,
+        status: 'WELDED',
+        hasPhoto: false,
+      },
+      {
+        id: 'node-2',
+        nodeType: 'OSD',
+        name: 'KLEBARK MALY/OSD0001',
+        label: 'O_KLEBARK MALY/OSD0001',
+        lat: 53.74,
+        lng: 20.57,
+        status: 'PENDING',
+        hasPhoto: false,
+      },
+    ],
+    ...overrides,
+  };
+}
+
+describe('map task list', () => {
+  it('builds task rows from current cable, node, and address statuses', () => {
+    const rows = getMapTaskRows(mapData());
+
+    expect(rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'cable-cable-1',
+          kind: 'cable',
+          title: 'OKH0030737-BD/010',
+          statusLabel: 'Rurociag gotowy',
+          stage: 'progress',
+          summary: 'Rurociag wybudowany, kabel do zaciagniecia',
+        }),
+        expect.objectContaining({
+          id: 'cable-cable-2',
+          kind: 'cable',
+          statusLabel: 'Podwieszony',
+          stage: 'done',
+          summary: 'Kabel podwieszony',
+        }),
+        expect.objectContaining({
+          id: 'node-node-1',
+          kind: 'node',
+          title: 'O_OSTRZESZEWO/OPP0002',
+          statusLabel: 'Wyspawane',
+          stage: 'done',
+          summary: 'Punkt wyspawany',
+        }),
+        expect.objectContaining({
+          id: 'address-address-1',
+          kind: 'address',
+          title: 'Ostrzeszewo 10',
+          statusLabel: 'Brak zapasu',
+          stage: 'todo',
+          summary: 'Zapas do uzupelnienia',
+        }),
+      ]),
+    );
+  });
+
+  it('filters task rows by visible work stage', () => {
+    const rows = getMapTaskRows(mapData());
+
+    expect(filterMapTasks(rows, 'all')).toHaveLength(rows.length);
+    expect(filterMapTasks(rows, 'todo').map((row) => row.id)).toEqual([
+      'node-node-2',
+      'address-address-1',
+    ]);
+    expect(filterMapTasks(rows, 'progress').map((row) => row.id)).toEqual(['cable-cable-1']);
+    expect(filterMapTasks(rows, 'done').map((row) => row.id)).toEqual([
+      'cable-cable-2',
+      'node-node-1',
+      'address-address-2',
+    ]);
+  });
+
+  it('sorts tasks into collapsible stage and kind folders', () => {
+    const rows = getMapTaskRows(
+      mapData({
+        trunkCables: [
+          {
+            id: 'cable-b',
+            cableType: 'DAC 8J',
+            fromNode: 'B/ZS0001',
+            toNode: 'B/OPP0002',
+            osdName: 'B/OPP0002',
+            geojson: { type: 'LineString', coordinates: [] },
+            rawName: 'OKH-010',
+            routingType: 'underground',
+            status: 'PENDING',
+          },
+          {
+            id: 'cable-a',
+            cableType: 'DAC 8J',
+            fromNode: 'A/ZS0001',
+            toNode: 'A/OPP0002',
+            osdName: 'A/OPP0002',
+            geojson: { type: 'LineString', coordinates: [] },
+            rawName: 'OKH-002',
+            routingType: 'underground',
+            status: 'PENDING',
+          },
+        ],
+      }),
+    );
+
+    expect(rows.map((row) => row.id).slice(0, 4)).toEqual([
+      'cable-cable-a',
+      'cable-cable-b',
+      'node-node-2',
+      'address-address-1',
+    ]);
+
+    const groups = getMapTaskGroups(rows, 'all');
+
+    expect(groups.map((group) => [group.stage, group.count])).toEqual([
+      ['todo', 4],
+      ['progress', 0],
+      ['done', 2],
+    ]);
+    expect(groups[0].folders.map((folder) => [folder.kind, folder.count])).toEqual([
+      ['cable', 2],
+      ['node', 1],
+      ['address', 1],
+    ]);
+    expect(groups[0].folders[0].rows.map((row) => row.title)).toEqual(['OKH-002', 'OKH-010']);
+  });
+});

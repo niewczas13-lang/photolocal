@@ -31,7 +31,16 @@ import {
 import { generateChecklistNodes } from '../checklist/checklist-generator.js';
 import type { ChecklistAddress, GeneratedChecklistNode } from '../checklist/checklist-generator.js';
 import { loadConfig } from '../config.js';
-import type { ChecklistNodeType, ProjectType, SplitterTopology } from '../types.js';
+import type {
+  ChecklistNodeType,
+  MapCableStatus,
+  MapInfraNodeInput,
+  MapNodeStatus,
+  MapPolygonInput,
+  MapTrunkCableInput,
+  ProjectType,
+  SplitterTopology,
+} from '../types.js';
 import { isReserveLocation, processPhoto, resolvePhotoTarget, type ReserveLocation } from '../photos/photo-processor.js';
 import { runProjectOperation } from '../utils/project-operation-queue.js';
 
@@ -45,6 +54,9 @@ interface PreparedChecklistFromGpkg {
   checklistNodes: GeneratedChecklistNode[];
   dacToAddressCableCount: number;
   adssToAddressCableCount: number;
+  polygons: MapPolygonInput[];
+  trunkCables: MapTrunkCableInput[];
+  infraNodes: MapInfraNodeInput[];
 }
 
 function toTree(rows: any[]) {
@@ -117,7 +129,24 @@ function prepareChecklistFromGpkg(input: {
     }),
     dacToAddressCableCount: extracted.dacToAddressCableEntries.length,
     adssToAddressCableCount: extracted.adssToAddressCableEntries.length,
+    polygons: extracted.polygons,
+    trunkCables: extracted.trunkCables,
+    infraNodes: extracted.infraNodes,
   };
+}
+
+function isMapCableStatus(value: unknown): value is MapCableStatus {
+  return (
+    value === 'PENDING' ||
+    value === 'DUCT_READY' ||
+    value === 'PULLED' ||
+    value === 'WELDED' ||
+    value === 'SUSPENDED'
+  );
+}
+
+function isMapNodeStatus(value: unknown): value is MapNodeStatus {
+  return value === 'PENDING' || value === 'WELDED';
 }
 
 export async function registerProjectRoutes(app: FastifyInstance, db: Database.Database): Promise<void> {
@@ -397,6 +426,45 @@ export async function registerProjectRoutes(app: FastifyInstance, db: Database.D
     return toTree(repository.getChecklist(projectId));
   });
 
+  app.get('/api/projects/:projectId/map', async (request, reply) => {
+    const { projectId } = request.params as { projectId: string };
+    const project = repository.getProject(projectId);
+    if (!project) return reply.status(404).send({ error: 'Project not found' });
+    return repository.getProjectMap(projectId);
+  });
+
+  app.patch('/api/projects/:projectId/map/cables/:cableId/status', async (request, reply) => {
+    const { projectId, cableId } = request.params as { projectId: string; cableId: string };
+    const body = request.body as { status?: unknown };
+    const project = repository.getProject(projectId);
+
+    if (!project) return reply.status(404).send({ error: 'Project not found' });
+    if (!isMapCableStatus(body.status)) return reply.status(400).send({ error: 'Invalid cable status' });
+
+    try {
+      repository.updateCableStatus(projectId, cableId, body.status);
+      return repository.getProjectMap(projectId);
+    } catch (error) {
+      return reply.status(404).send({ error: error instanceof Error ? error.message : 'Map cable not found' });
+    }
+  });
+
+  app.patch('/api/projects/:projectId/map/nodes/:nodeId/status', async (request, reply) => {
+    const { projectId, nodeId } = request.params as { projectId: string; nodeId: string };
+    const body = request.body as { status?: unknown };
+    const project = repository.getProject(projectId);
+
+    if (!project) return reply.status(404).send({ error: 'Project not found' });
+    if (!isMapNodeStatus(body.status)) return reply.status(400).send({ error: 'Invalid node status' });
+
+    try {
+      repository.updateInfraNodeStatus(projectId, nodeId, body.status);
+      return repository.getProjectMap(projectId);
+    } catch (error) {
+      return reply.status(404).send({ error: error instanceof Error ? error.message : 'Map node not found' });
+    }
+  });
+
   app.post('/api/projects/:projectId/checklist/nodes', async (request, reply) => {
     const { projectId } = request.params as { projectId: string };
     const body = request.body as {
@@ -537,6 +605,9 @@ export async function registerProjectRoutes(app: FastifyInstance, db: Database.D
         dacToAddressCableCount: prepared.dacToAddressCableCount,
         adssToAddressCableCount: prepared.adssToAddressCableCount,
         checklistNodes: prepared.checklistNodes,
+        polygons: prepared.polygons,
+        trunkCables: prepared.trunkCables,
+        infraNodes: prepared.infraNodes,
       });
 
       return {
@@ -751,6 +822,9 @@ export async function registerProjectRoutes(app: FastifyInstance, db: Database.D
         dacToAddressCableCount: extracted.dacToAddressCableEntries.length,
         adssToAddressCableCount: extracted.adssToAddressCableEntries.length,
         checklistNodes,
+        polygons: extracted.polygons,
+        trunkCables: extracted.trunkCables,
+        infraNodes: extracted.infraNodes,
       });
 
       return project;

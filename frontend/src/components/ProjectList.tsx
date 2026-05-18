@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react';
-import { CheckCheck, FolderPlus, ChevronRight, Trash2, Search } from 'lucide-react';
+import { Camera, CheckCheck, FolderPlus, Map as MapIcon, Search, Settings, Trash2 } from 'lucide-react';
 import { api } from '../api';
+import { getProjectEntryActions, type ProjectEntryActionKey } from '../project-entry-actions';
 import type { ProjectSummary } from '../types';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from './ui/tabs';
 import { Button } from './ui/button';
@@ -10,11 +11,20 @@ import { Progress } from './ui/progress';
 interface ProjectListProps {
   projects: ProjectSummary[];
   onCreate: () => void;
-  onOpen: (projectId: string) => void;
+  onOpenPhotos: (projectId: string) => void;
+  onOpenMap: (projectId: string) => void;
+  onOpenSettings: (projectId: string) => void;
   onDeleted: (projectId: string) => void;
 }
 
-export default function ProjectList({ projects, onCreate, onOpen, onDeleted }: ProjectListProps) {
+export default function ProjectList({
+  projects,
+  onCreate,
+  onOpenPhotos,
+  onOpenMap,
+  onOpenSettings,
+  onDeleted,
+}: ProjectListProps) {
   const [tab, setTab] = useState<'IN_PROGRESS' | 'COMPLETED'>('IN_PROGRESS');
   const [deletingProjectId, setDeletingProjectId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -50,12 +60,30 @@ export default function ProjectList({ projects, onCreate, onOpen, onDeleted }: P
     }
   };
 
+  const handleProjectAction = (projectId: string, action: ProjectEntryActionKey) => {
+    if (action === 'map') {
+      onOpenMap(projectId);
+      return;
+    }
+    if (action === 'settings') {
+      onOpenSettings(projectId);
+      return;
+    }
+    onOpenPhotos(projectId);
+  };
+
+  const getActionIcon = (action: ProjectEntryActionKey) => {
+    if (action === 'map') return <MapIcon size={15} />;
+    if (action === 'settings') return <Settings size={15} />;
+    return <Camera size={15} />;
+  };
+
   return (
     <section className="container mx-auto p-6 max-w-6xl">
       <div className="flex flex-col md:flex-row items-start md:items-center justify-between mb-8 gap-4">
         <div>
-          <h2 className="text-3xl font-bold text-foreground tracking-tight">Projekty</h2>
-          <p className="text-muted-foreground mt-1">Wybierz projekt do zarządzania zdjęciami</p>
+          <h2 className="text-3xl font-bold text-foreground tracking-tight">Lista zlecen</h2>
+          <p className="text-muted-foreground mt-1">Wybierz tryb pracy dla projektu</p>
         </div>
         <Button onClick={onCreate} className="gap-2 font-semibold">
           <FolderPlus size={18} />
@@ -95,7 +123,7 @@ export default function ProjectList({ projects, onCreate, onOpen, onDeleted }: P
           ) : (
             <div className="rounded-xl border border-border overflow-hidden">
               {/* Table Header */}
-              <div className="grid grid-cols-[160px_1fr_220px_86px] bg-muted/50 border-b border-border">
+              <div className="grid grid-cols-[150px_1fr_190px_330px_52px] bg-muted/50 border-b border-border">
                 <div className="px-4 py-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                   Definicja
                 </div>
@@ -103,7 +131,10 @@ export default function ProjectList({ projects, onCreate, onOpen, onDeleted }: P
                   Nazwa projektu
                 </div>
                 <div className="px-4 py-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                  Stan uzupełnienia zdjęć
+                  Postep
+                </div>
+                <div className="px-4 py-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  Wejscie
                 </div>
                 <div />
               </div>
@@ -119,8 +150,7 @@ export default function ProjectList({ projects, onCreate, onOpen, onDeleted }: P
                 return (
                   <div
                     key={project.id}
-                    onClick={() => onOpen(project.id)}
-                    className={`grid grid-cols-[160px_1fr_220px_86px] items-center cursor-pointer transition-colors hover:bg-primary/5 group ${
+                    className={`grid grid-cols-[150px_1fr_190px_330px_52px] items-center transition-colors hover:bg-primary/5 ${
                       !isLast ? 'border-b border-border' : ''
                     } ${isComplete ? 'bg-green-500/5' : ''}`}
                   >
@@ -160,6 +190,21 @@ export default function ProjectList({ projects, onCreate, onOpen, onDeleted }: P
                       </Badge>
                     </div>
 
+                    <div className="flex items-center gap-2 px-4 py-4">
+                      {getProjectEntryActions(project.id).map((action) => (
+                        <Button
+                          key={action.key}
+                          variant={action.key === 'map' ? 'default' : 'outline'}
+                          size="sm"
+                          title={action.label}
+                          onClick={() => handleProjectAction(project.id, action.key)}
+                        >
+                          {getActionIcon(action.key)}
+                          {action.label}
+                        </Button>
+                      ))}
+                    </div>
+
                     <div className="flex items-center justify-end gap-1 pr-2">
                       <Button
                         variant="ghost"
@@ -174,7 +219,6 @@ export default function ProjectList({ projects, onCreate, onOpen, onDeleted }: P
                       >
                         <Trash2 size={15} />
                       </Button>
-                      <ChevronRight size={16} className="text-muted-foreground group-hover:text-primary transition-colors" />
                     </div>
                   </div>
                 );

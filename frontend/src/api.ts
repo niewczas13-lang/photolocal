@@ -14,6 +14,9 @@ import type {
   GoogleChatInviteListResult,
   GoogleChatInviteSetupResult,
   GoogleChatSpace,
+  ProjectMapCable,
+  ProjectMapData,
+  ProjectMapInfraNode,
   ProjectSummary,
   ReserveLocation,
   SharedFolderListResult,
@@ -90,6 +93,19 @@ export const api = {
       method: 'DELETE',
     }),
   getChecklist: (projectId: string) => request<ChecklistNode[]>(`/api/projects/${projectId}/checklist`),
+  getProjectMap: (projectId: string) => request<ProjectMapData>(`/api/projects/${projectId}/map`),
+  updateMapCableStatus: (projectId: string, cableId: string, status: ProjectMapCable['status']) =>
+    request<ProjectMapData>(`/api/projects/${projectId}/map/cables/${cableId}/status`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status }),
+    }),
+  updateMapNodeStatus: (projectId: string, nodeId: string, status: ProjectMapInfraNode['status']) =>
+    request<ProjectMapData>(`/api/projects/${projectId}/map/nodes/${nodeId}/status`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status }),
+    }),
   createChecklistNode: (
     projectId: string,
     input: {

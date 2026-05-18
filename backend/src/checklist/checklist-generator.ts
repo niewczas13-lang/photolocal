@@ -40,7 +40,13 @@ export interface GeneratedChecklistNode {
 
 function normalizeDistributionPointName(value: string | null): string {
   if (!value) return 'Bez_DP';
-  return value.trim();
+  const cleaned = value.trim().replace(/^O_/, '');
+  return cleaned || 'Bez_DP';
+}
+
+function getDistributionPointTerminalName(value: string): string {
+  const parts = value.split(/[\\/]/).filter(Boolean);
+  return parts.at(-1)?.trim() || value.trim();
 }
 
 function isOpp(name: string): boolean {
@@ -57,6 +63,32 @@ function getAddressKey(address: ChecklistAddress): string {
     parts.push(address.city);
   }
   return parts.join(' ').replace(/^UL\.\s*/i, '').replace(/\s+/g, ' ').trim().toUpperCase();
+}
+
+function normalizeCableEntry(value: string): string {
+  return value.replace(/[^A-Z0-9]+/gi, ' ').replace(/\s+/g, ' ').trim().toUpperCase();
+}
+
+function cableEntryMatchesAddress(
+  entry: string,
+  address: ChecklistAddress,
+  allowTerminalDistributionPointMatch: boolean,
+): boolean {
+  const normalizedEntry = normalizeCableEntry(entry);
+  const addressKey = normalizeCableEntry(getAddressKey(address));
+  const distributionPoint = normalizeDistributionPointName(address.distributionPoint);
+  const distributionPointKey = normalizeCableEntry(distributionPoint);
+  const terminalPointKey = normalizeCableEntry(getDistributionPointTerminalName(distributionPoint));
+
+  if (addressKey.length > 0 && normalizedEntry.includes(addressKey)) return true;
+  if (distributionPointKey.length > 0 && normalizedEntry.includes(distributionPointKey)) return true;
+
+  return (
+    allowTerminalDistributionPointMatch &&
+    terminalPointKey.length > 0 &&
+    terminalPointKey !== distributionPointKey &&
+    normalizedEntry.includes(terminalPointKey)
+  );
 }
 
 export function generateChecklistNodes(input: GenerateChecklistInput): GeneratedChecklistNode[] {
@@ -116,7 +148,8 @@ export function generateChecklistNodes(input: GenerateChecklistInput): Generated
   const notatkiId = addNode(null, 'Notatki_z_budowy', 'Notatki_z_budowy', 'STATIC', null, 5, 0, false);
   addNode(notatkiId, 'Zdjecia', 'Notatki_z_budowy/Zdjecia', 'STATIC', null, 0, 1, true);
 
-  addNode(null, 'Metki', 'Metki', 'STATIC', null, 6, 0, true, 'SYSTEM');
+  const metkiId = addNode(null, 'Metki', 'Metki', 'STATIC', null, 6, 0, false, 'SYSTEM');
+  addNode(metkiId, 'Zdjecia', 'Metki/Zdjecia', 'STATIC', null, 0, 0, true, 'SYSTEM');
 
   const dpGroups = new Map<string, ChecklistAddress[]>();
   for (const address of input.addresses) {
@@ -125,6 +158,16 @@ export function generateChecklistNodes(input: GenerateChecklistInput): Generated
     group.push(address);
     dpGroups.set(dp, group);
   }
+  const terminalPointCounts = new Map<string, number>();
+  for (const dp of dpGroups.keys()) {
+    const terminalKey = normalizeCableEntry(getDistributionPointTerminalName(dp));
+    if (!terminalKey) continue;
+    terminalPointCounts.set(terminalKey, (terminalPointCounts.get(terminalKey) ?? 0) + 1);
+  }
+  const canUseTerminalDistributionPoint = (dp: string): boolean => {
+    const terminalKey = normalizeCableEntry(getDistributionPointTerminalName(dp));
+    return terminalKey.length > 0 && (terminalPointCounts.get(terminalKey) ?? 0) === 1;
+  };
 
   let dpSort = 100;
   for (const dp of dpGroups.keys()) {
@@ -163,9 +206,11 @@ export function generateChecklistNodes(input: GenerateChecklistInput): Generated
     const safeDp = safeFolderName(dp);
     let dpId: string | null = null;
     let addrSort = 0;
+    const allowTerminalDistributionPointMatch = canUseTerminalDistributionPoint(dp);
     for (const address of addresses) {
-      const addrKey = getAddressKey(address);
-      const isDac = input.dacToAddressCableEntries.some((entry) => entry.includes(addrKey));
+      const isDac = input.dacToAddressCableEntries.some((entry) =>
+        cableEntryMatchesAddress(entry, address, allowTerminalDistributionPointMatch),
+      );
       if (!isDac) continue;
 
       const addressName = toAddressFolderName(address.street, address.buildingNo);
@@ -190,9 +235,11 @@ export function generateChecklistNodes(input: GenerateChecklistInput): Generated
       const safeDp = safeFolderName(dp);
       let dpId: string | null = null;
       let addrSort = 0;
+      const allowTerminalDistributionPointMatch = canUseTerminalDistributionPoint(dp);
       for (const address of addresses) {
-        const addrKey = getAddressKey(address);
-        const isAdss = input.adssToAddressCableEntries.some((entry) => entry.includes(addrKey));
+        const isAdss = input.adssToAddressCableEntries.some((entry) =>
+          cableEntryMatchesAddress(entry, address, allowTerminalDistributionPointMatch),
+        );
         if (!isAdss) continue;
 
         const addressName = toAddressFolderName(address.street, address.buildingNo);

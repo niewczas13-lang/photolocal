@@ -1,0 +1,65 @@
+import Database from 'better-sqlite3';
+import { describe, expect, it } from 'vitest';
+import { runMigrations } from './migrations.js';
+
+function insertProject(db: Database.Database, id: string): void {
+  db.prepare(
+    `INSERT INTO projects (
+      id, name, project_type, splitter_topology, splitter_topology_source,
+      gpkg_file_name, base_folder
+    ) VALUES (?, ?, 'SI', 'SINGLE', 'AUTO', 'projekt.gpkg', 'C:/photos')`,
+  ).run(id, id);
+}
+
+describe('runMigrations', () => {
+  it('migrates legacy Metki checklist nodes into a folder with a photo child', () => {
+    const db = new Database(':memory:');
+    runMigrations(db);
+
+    insertProject(db, 'project-1');
+    db.prepare(
+      `INSERT INTO checklist_nodes (
+        id, project_id, parent_id, name, path, node_type, source,
+        address_id, sort_order, min_photos, accepts_photos, status
+      ) VALUES (
+        'legacy-metki', 'project-1', NULL, 'Metki', 'Metki', 'STATIC', 'SYSTEM',
+        NULL, 6, 0, 1, 'OPEN'
+      )`,
+    ).run();
+    db.prepare(
+      `INSERT INTO photos (
+        id, project_id, checklist_node_id, source_file_name, stored_file_name,
+        storage_path, mime_type, file_size
+      ) VALUES (
+        'photo-1', 'project-1', 'legacy-metki', 'metka.jpg', 'metka.jpg',
+        'Metki/metka.jpg', 'image/jpeg', 10
+      )`,
+    ).run();
+
+    runMigrations(db);
+
+    const metki = db
+      .prepare(
+        `SELECT id, parent_id AS parentId, accepts_photos AS acceptsPhotos
+         FROM checklist_nodes
+         WHERE project_id = 'project-1' AND path = 'Metki'`,
+      )
+      .get() as { id: string; parentId: string | null; acceptsPhotos: number };
+    const metkiPhotos = db
+      .prepare(
+        `SELECT id, parent_id AS parentId, accepts_photos AS acceptsPhotos
+         FROM checklist_nodes
+         WHERE project_id = 'project-1' AND path = 'Metki/Zdjecia'`,
+      )
+      .get() as { id: string; parentId: string; acceptsPhotos: number };
+    const photo = db
+      .prepare("SELECT checklist_node_id AS checklistNodeId FROM photos WHERE id = 'photo-1'")
+      .get() as { checklistNodeId: string };
+
+    expect(metki).toMatchObject({ id: 'legacy-metki', parentId: null, acceptsPhotos: 0 });
+    expect(metkiPhotos).toMatchObject({ parentId: 'legacy-metki', acceptsPhotos: 1 });
+    expect(photo.checklistNodeId).toBe(metkiPhotos.id);
+
+    db.close();
+  });
+});

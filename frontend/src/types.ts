@@ -79,6 +79,65 @@ export interface ChecklistNodeDetail {
   photos: ChecklistPhoto[];
 }
 
+export type ProjectMapCableStatus = 'PENDING' | 'DUCT_READY' | 'PULLED' | 'WELDED' | 'SUSPENDED';
+export type ProjectMapNodeStatus = 'PENDING' | 'WELDED';
+export type ProjectMapCableRoutingType = 'underground' | 'aerial';
+
+export interface ProjectMapAddress {
+  id: string;
+  label: string;
+  city: string;
+  street: string;
+  buildingNo: string | null;
+  distributionPoint: string | null;
+  lat: number;
+  lng: number;
+  reservePhotoCount: number;
+  hasReservePhoto: boolean;
+}
+
+export interface ProjectMapPolygon {
+  id: string;
+  osdName: string;
+  label: string | null;
+  geojson: GeoJSON.Feature | GeoJSON.Geometry | Record<string, unknown>;
+  households: number | null;
+  paCount: number | null;
+  cableRef: string | null;
+  addressTotal: number;
+  addressWithReservePhoto: number;
+}
+
+export interface ProjectMapCable {
+  id: string;
+  cableType: string;
+  fromNode: string;
+  toNode: string;
+  osdName: string;
+  geojson: GeoJSON.LineString | GeoJSON.MultiLineString | Record<string, unknown>;
+  rawName: string | null;
+  routingType: ProjectMapCableRoutingType;
+  status: ProjectMapCableStatus;
+}
+
+export interface ProjectMapInfraNode {
+  id: string;
+  nodeType: 'OSD' | 'OPP' | 'ZS';
+  name: string;
+  label: string | null;
+  lat: number;
+  lng: number;
+  status: ProjectMapNodeStatus;
+  hasPhoto: boolean;
+}
+
+export interface ProjectMapData {
+  addresses: ProjectMapAddress[];
+  polygons: ProjectMapPolygon[];
+  trunkCables: ProjectMapCable[];
+  infraNodes: ProjectMapInfraNode[];
+}
+
 export type ChatBatchStatus =
   | 'WAITING_FOR_CLASSIFICATION'
   | 'PENDING_REVIEW'
