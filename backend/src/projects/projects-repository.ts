@@ -761,11 +761,40 @@ export class ProjectsRepository {
           distribution_point, lat, lng, household_count, business_unit_count
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       );
+      const updateAddress = this.db.prepare(
+        `UPDATE addresses
+         SET city = ?,
+           street = ?,
+           building_no = ?,
+           property_id = ?,
+           parcel_number = ?,
+           distribution_point = ?,
+           lat = ?,
+           lng = ?,
+           household_count = ?,
+           business_unit_count = ?
+         WHERE id = ?
+           AND project_id = ?`,
+      );
 
       for (const address of input.addresses) {
         const key = getAddressMergeKey(address);
         const existingId = addressKeyToId.get(key);
         if (existingId) {
+          updateAddress.run(
+            address.city,
+            address.street,
+            address.buildingNo,
+            address.propertyId,
+            address.parcelNumber,
+            address.distributionPoint,
+            address.lat,
+            address.lng,
+            address.householdCount,
+            address.businessUnitCount,
+            existingId,
+            input.projectId,
+          );
           generatedAddressIdToActualId.set(address.id, existingId);
           result.reusedAddresses += 1;
           continue;

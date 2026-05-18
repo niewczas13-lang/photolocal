@@ -308,6 +308,79 @@ describe('ProjectsRepository', () => {
     });
   });
 
+  it('updates reused addresses with coordinates during GPKG recalculation', () => {
+    const { db, repository } = createRepository();
+
+    const project = repository.createProject({
+      name: 'MAPA',
+      projectDefinition: null,
+      projectType: 'SI',
+      splitterTopology: 'SINGLE',
+      splitterTopologySource: 'AUTO',
+      splitterCount: 1,
+      gpkgFileName: 'old.gpkg',
+      baseFolder: 'C:/photos/MAPA',
+      addresses: [
+        {
+          id: 'address-old',
+          city: 'Radom',
+          street: 'Polna',
+          buildingNo: '15',
+          propertyId: null,
+          parcelNumber: null,
+          distributionPoint: 'RADOM/OSD0001',
+          lat: null,
+          lng: null,
+          householdCount: 0,
+          businessUnitCount: 0,
+        },
+      ],
+      dacToAddressCableCount: 0,
+      adssToAddressCableCount: 0,
+      checklistNodes: [],
+    });
+
+    expect(repository.getProjectMap(project.id).addresses).toHaveLength(0);
+
+    repository.recalculateChecklist({
+      projectId: project.id,
+      projectDefinition: null,
+      projectType: 'SI',
+      splitterTopology: 'SINGLE',
+      splitterTopologySource: 'AUTO',
+      splitterCount: 1,
+      gpkgFileName: 'new.gpkg',
+      addresses: [
+        {
+          id: 'address-new',
+          city: 'Radom',
+          street: 'Polna',
+          buildingNo: '15',
+          propertyId: 'pa-1',
+          parcelNumber: '12/3',
+          distributionPoint: 'RADOM/OSD0001',
+          lat: 51.4,
+          lng: 21.1,
+          householdCount: 1,
+          businessUnitCount: 0,
+        },
+      ],
+      dacToAddressCableCount: 0,
+      adssToAddressCableCount: 0,
+      checklistNodes: [],
+    });
+
+    const map = repository.getProjectMap(project.id);
+    db.close();
+
+    expect(map.addresses).toHaveLength(1);
+    expect(map.addresses[0]).toMatchObject({
+      id: 'address-old',
+      lat: 51.4,
+      lng: 21.1,
+    });
+  });
+
   it('removes stale recalculated nodes only when they have no assigned photos', () => {
     const { db, repository } = createRepository();
 
