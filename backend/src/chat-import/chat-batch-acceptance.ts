@@ -27,6 +27,16 @@ export interface AcceptChatBatchResult {
   sourceFileCount: number;
 }
 
+function assertReserveLocationMatchesNodePath(nodePath: string, reserveLocation: ReserveLocation | null): void {
+  if (!reserveLocation) return;
+  if (nodePath.startsWith('Zapasy_kabli_napowietrznych') && reserveLocation !== 'Napowietrzny') {
+    throw new Error('Aerial cable reserve nodes require Napowietrzny reserve location');
+  }
+  if (nodePath.startsWith('Zapasy_kabli_instalacyjnych') && reserveLocation === 'Napowietrzny') {
+    throw new Error('Underground cable reserve nodes cannot use Napowietrzny reserve location');
+  }
+}
+
 export async function acceptChatBatch(input: AcceptChatBatchInput): Promise<AcceptChatBatchResult> {
   const project = input.projectsRepository.getProject(input.projectId);
   const batch = input.batchesRepository.getBatch(input.projectId, input.batchId);
@@ -54,6 +64,7 @@ export async function acceptChatBatch(input: AcceptChatBatchInput): Promise<Acce
       throw new Error(`Reserve location is required for checklist node ${nodeId}`);
     }
     const nodeReserveLocation = node.nodeType === 'CABLE_RESERVE' ? input.reserveLocation : null;
+    assertReserveLocationMatchesNodePath(node.path, nodeReserveLocation);
 
     let existingCount = input.projectsRepository.countPhotosForNode(nodeId, nodeReserveLocation);
 

@@ -98,7 +98,12 @@ export default function ChatReviewPanel({
 
     setAcceptingBatchId(batchId);
     try {
-      await onAccept(batchId, selected, requiresReserveLocation ? locationByBatch[batchId] ?? 'Doziemny' : null, fileIds);
+      await onAccept(
+        batchId,
+        selected,
+        requiresReserveLocation ? locationByBatch[batchId] ?? batch.reserveLocation ?? 'Doziemny' : null,
+        fileIds,
+      );
     } finally {
       setAcceptingBatchId(null);
     }

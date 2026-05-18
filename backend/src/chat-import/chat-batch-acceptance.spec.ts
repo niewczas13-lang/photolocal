@@ -54,6 +54,18 @@ function createContext() {
         minPhotos: 1,
         acceptsPhotos: true,
       },
+      {
+        id: 'node-aerial-maleniecka-9',
+        projectId: 'project-temp',
+        parentId: null,
+        name: 'Maleniecka_9',
+        path: 'Zapasy_kabli_napowietrznych/OPP0013/Maleniecka_9',
+        nodeType: 'CABLE_RESERVE',
+        addressId: null,
+        sortOrder: 2,
+        minPhotos: 1,
+        acceptsPhotos: true,
+      },
     ],
   });
 
@@ -176,6 +188,37 @@ describe('acceptChatBatch', () => {
     expect(remainingFiles.map((file) => file.fileName)).toEqual(['skip.jpeg']);
     expect(nodePhotos).toHaveLength(1);
     expect(nodePhotos[0].sourceFileName).toBe('photo.jpeg');
+  });
+
+  it('rejects aerial reserve imports when the selected reserve location is underground', async () => {
+    const { db, projects, batches, projectId, dir } = createContext();
+    const batch = batches.importManifest({
+      projectId,
+      manifest: createManifest(join(dir, 'Maleniecka 9')),
+      status: 'PENDING_REVIEW',
+      reviewReason: 'Wymaga sprawdzenia',
+    });
+
+    await expect(
+      acceptChatBatch({
+        projectId,
+        batchId: batch.id,
+        checklistNodeIds: ['node-aerial-maleniecka-9'],
+        reserveLocation: 'Doziemny',
+        projectsRepository: projects,
+        batchesRepository: batches,
+        processPhoto: async () => ({
+          buffer: Buffer.from('processed-photo'),
+          thumbnail: Buffer.from('thumb'),
+          mimeType: 'image/jpeg',
+          fileSize: 15,
+          lat: null,
+          lng: null,
+          capturedAt: null,
+        }),
+      }),
+    ).rejects.toThrow('Aerial cable reserve nodes require Napowietrzny reserve location');
+    db.close();
   });
 
   it('marks the batch as imported when the last remaining files are imported', async () => {
