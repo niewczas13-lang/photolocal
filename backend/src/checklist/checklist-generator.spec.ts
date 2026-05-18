@@ -164,4 +164,47 @@ describe('generateChecklistNodes', () => {
     expect(nodes.some((node) => node.path === 'Pomiary_mocy/OPP1394')).toBe(true);
     expect(nodes.some((node) => node.path === 'Pomiary_mocy/OSD2640')).toBe(true);
   });
+
+  it('creates photo folders for projected passive OPP and OSD nodes without address points', () => {
+    const nodes = generateChecklistNodes({
+      projectId: 'project-1',
+      projectName: 'Projekt',
+      projectType: 'KPO',
+      splitterTopology: 'CASCADE',
+      addresses: [],
+      splices: [{ wezel: 'RADOM/ZS0002', oznaczenie: 'O_RADOM/ZS0002' }],
+      passiveInfraNodes: [
+        {
+          nodeType: 'OPP',
+          name: 'RADOM/OPP0002',
+          label: 'O_RADOM/OPP0002',
+          lat: 52,
+          lng: 21,
+        },
+        {
+          nodeType: 'OSD',
+          name: 'RADOM/OSD0002',
+          label: 'O_RADOM/OSD0002',
+          lat: 52,
+          lng: 21,
+        },
+        {
+          nodeType: 'ZS',
+          name: 'RADOM/ZS0002',
+          label: 'O_RADOM/ZS0002',
+          lat: 52,
+          lng: 21,
+        },
+      ],
+      dacToAddressCableEntries: [],
+      adssToAddressCableEntries: [],
+    });
+
+    expect(nodes.some((node) => node.path === 'RADOM_OPP0002/Szczegoly_skrzynki')).toBe(true);
+    expect(nodes.some((node) => node.path === 'RADOM_OSD0002/Szczegoly_skrzynki')).toBe(true);
+    expect(nodes.some((node) => node.path === 'Pomiary_mocy/RADOM_OPP0002')).toBe(true);
+    expect(nodes.some((node) => node.path === 'Pomiary_mocy/RADOM_OSD0002')).toBe(true);
+    expect(nodes.some((node) => node.path === '01_RADOM_ZS0002/Zdjecia')).toBe(true);
+    expect(nodes.some((node) => node.path === 'RADOM_ZS0002/Szczegoly_skrzynki')).toBe(false);
+  });
 });

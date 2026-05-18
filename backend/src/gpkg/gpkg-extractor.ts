@@ -169,6 +169,10 @@ function isExistingPassiveDevice(value: unknown): boolean {
   return typeof value === 'string' && value.trim().toLowerCase().startsWith('istniej');
 }
 
+function isExistingLayerTable(tableName: string): boolean {
+  return tableName.trim().startsWith('_');
+}
+
 function findExistingTables(db: Database.Database, candidates: string[]): string[] {
   return candidates.filter((tableName) => tableExists(db, tableName));
 }
@@ -308,6 +312,7 @@ function extractMapGeometry(db: Database.Database): {
   polygons: MapPolygonInput[];
   trunkCables: MapTrunkCableInput[];
   infraNodes: MapInfraNodeInput[];
+  passiveInfraNodes: MapInfraNodeInput[];
 } {
   const polygons: MapPolygonInput[] = [];
   const polygonTables = ['Rejonizacja', 'rejonizacja', 'REJONIZACJA'];
@@ -342,8 +347,13 @@ function extractMapGeometry(db: Database.Database): {
     { cable: Omit<MapTrunkCableInput, 'geojson'>; segments: number[][][] }
   >();
   const infraNodeMap = new Map<string, MapInfraNodeInput>();
+  const passiveInfraNodeMap = new Map<string, MapInfraNodeInput>();
   const setInfraNode = (node: MapInfraNodeInput): void => {
     infraNodeMap.set(`${node.nodeType}:${node.name}`, node);
+  };
+  const setPassiveInfraNode = (node: MapInfraNodeInput): void => {
+    passiveInfraNodeMap.set(`${node.nodeType}:${node.name}`, node);
+    setInfraNode(node);
   };
   const cableTable = [
     'Kable Swiatlowodowe',
@@ -450,16 +460,24 @@ function extractMapGeometry(db: Database.Database): {
     'Plan_Urządzenia Pasywne',
   ]);
 
+  const projectedSpliceNodes = extractProjectedSpliceNodes(db);
+
   for (const tableName of passiveDeviceTables) {
     if (!tableHasColumns(db, tableName, ['wezel', 'geom'])) continue;
 
     const rows = db.prepare(`SELECT * FROM ${q(tableName)}`).all() as Array<Record<string, unknown>>;
+    const requiresProjectedSplice = isExistingLayerTable(tableName);
     for (const row of rows) {
-      if (isExistingPassiveDevice(row.modyfikacja)) continue;
       const rawNode = typeof row.wezel === 'string' ? row.wezel.trim() : '';
       const nodeName = toScopedNodeName(rawNode);
       const nodeType = getNodeType(rawNode);
       if (!nodeType || !(row.geom instanceof Buffer)) continue;
+      const canonicalNode = canonicalInfraNodeName(nodeName);
+      if (requiresProjectedSplice) {
+        if (!canonicalNode || !projectedSpliceNodes.has(canonicalNode)) continue;
+      } else if (isExistingPassiveDevice(row.modyfikacja)) {
+        continue;
+      }
 
       let point: { x: number; y: number } | null = null;
       try {
@@ -477,7 +495,7 @@ function extractMapGeometry(db: Database.Database): {
         rawNode ||
         null;
 
-      setInfraNode({
+      setPassiveInfraNode({
         nodeType,
         name: nodeName,
         label,
@@ -494,6 +512,7 @@ function extractMapGeometry(db: Database.Database): {
       geojson: geojsonFromLineSegments(segments),
     })),
     infraNodes: [...infraNodeMap.values()],
+    passiveInfraNodes: [...passiveInfraNodeMap.values()],
   };
 }
 
@@ -595,9 +614,10 @@ function extractSplices(db: Database.Database): MufaEntry[] {
     try {
       // Wyciągamy wszystko, co może mieć nazwę z ZS
       const rows = db.prepare(`SELECT * FROM ${q(tableName)}`).all() as Array<Record<string, unknown>>;
+      const requiresProjectedSplice = isExistingLayerTable(tableName);
       for (const row of rows) {
         const modyfikacja = typeof row.modyfikacja === 'string' ? row.modyfikacja.trim() : null;
-        if (modyfikacja === 'Istniejący' || modyfikacja === 'Istniejacy') {
+        if (!requiresProjectedSplice && isExistingPassiveDevice(modyfikacja)) {
           continue; // Pomiń mufy istniejące
         }
 
@@ -611,6 +631,7 @@ function extractSplices(db: Database.Database): MufaEntry[] {
         const hasProjectedSplice =
           (canonicalWezel && projectedSpliceNodes.has(canonicalWezel)) ||
           (canonicalOznaczenie && projectedSpliceNodes.has(canonicalOznaczenie));
+        if (requiresProjectedSplice && !hasProjectedSplice) continue;
         
         // Według uwag: ma być to ZS (np. po nazwie wezła ZS00004), a nie OSD.
         if (wezel && hasZS && !hasOSD && hasProjectedSplice) {
@@ -647,8 +668,8 @@ function extractProjectedSpliceNodes(db: Database.Database): Set<string> {
 
       for (const field of ['wezel_pocz', 'oznaczenie_urzadzenia_pocz', 'wezel_kon', 'oznaczenie_urzadzenia_kon']) {
         const value = typeof row[field] === 'string' ? row[field] : '';
-        const zsName = canonicalZsName(value);
-        if (zsName) nodes.add(zsName);
+        const nodeName = canonicalInfraNodeName(value);
+        if (nodeName) nodes.add(nodeName);
       }
     }
   }
@@ -664,9 +685,15 @@ function hasProjectedSpliceMarker(row: Record<string, unknown>): boolean {
 }
 
 function canonicalZsName(value: string | null): string | null {
+  const nodeName = canonicalInfraNodeName(value);
+  return nodeName && /\/ZS\d+$/i.test(nodeName) ? nodeName : null;
+}
+
+function canonicalInfraNodeName(value: string | null): string | null {
   if (!value) return null;
-  const match = /(?:O_)?([A-Z0-9_-]+\/ZS\d+)/i.exec(value);
-  return match ? match[1].toUpperCase() : null;
+  const normalized = value.trim().replace(/^O_/, '');
+  const match = /([^,;|\r\n]+\/(?:OPP|OSD|ZS)\d+)/i.exec(normalized);
+  return match ? match[1].trim().replace(/^O_/, '').toUpperCase() : null;
 }
 
 export function extractSplicePlaceholder(): void {} // keep lint happy
@@ -735,6 +762,7 @@ export function extractGpkg(filePath: string): GpkgExtractionResult {
       polygons: mapGeometry.polygons,
       trunkCables: mapGeometry.trunkCables,
       infraNodes: mapGeometry.infraNodes,
+      passiveInfraNodes: mapGeometry.passiveInfraNodes,
       dacToAddressCableEntries: cables.dacToAddressCableEntries,
       adssToAddressCableEntries: cables.adssToAddressCableEntries,
       splitterCount,

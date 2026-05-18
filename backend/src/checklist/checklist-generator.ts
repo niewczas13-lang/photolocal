@@ -3,6 +3,7 @@ import type {
   AddressInput,
   ChecklistNodeSource,
   ChecklistNodeType,
+  MapInfraNodeInput,
   MufaEntry,
   ProjectType,
   SplitterTopology,
@@ -20,6 +21,7 @@ export interface GenerateChecklistInput {
   splitterTopology: SplitterTopology;
   addresses: ChecklistAddress[];
   splices?: MufaEntry[];
+  passiveInfraNodes?: MapInfraNodeInput[];
   dacToAddressCableEntries: string[];
   adssToAddressCableEntries: string[];
 }
@@ -157,6 +159,11 @@ export function generateChecklistNodes(input: GenerateChecklistInput): Generated
     const group = dpGroups.get(dp) ?? [];
     group.push(address);
     dpGroups.set(dp, group);
+  }
+  for (const node of input.passiveInfraNodes ?? []) {
+    if (node.nodeType !== 'OPP' && node.nodeType !== 'OSD') continue;
+    const dp = normalizeDistributionPointName(node.name);
+    if (!dpGroups.has(dp)) dpGroups.set(dp, []);
   }
   const terminalPointCounts = new Map<string, number>();
   for (const dp of dpGroups.keys()) {

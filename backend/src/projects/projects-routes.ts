@@ -124,6 +124,7 @@ function prepareChecklistFromGpkg(input: {
       splitterTopology,
       addresses,
       splices: extracted.splices,
+      passiveInfraNodes: extracted.passiveInfraNodes,
       dacToAddressCableEntries: extracted.dacToAddressCableEntries,
       adssToAddressCableEntries: extracted.adssToAddressCableEntries,
     }),
@@ -805,6 +806,7 @@ export async function registerProjectRoutes(app: FastifyInstance, db: Database.D
         splitterTopology,
         addresses: checklistAddresses,
         splices: extracted.splices,
+        passiveInfraNodes: extracted.passiveInfraNodes,
         dacToAddressCableEntries: extracted.dacToAddressCableEntries,
         adssToAddressCableEntries: extracted.adssToAddressCableEntries,
       });

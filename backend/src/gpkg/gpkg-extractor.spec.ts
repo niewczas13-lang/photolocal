@@ -446,4 +446,92 @@ describe('GPKG extractor helpers', () => {
       }),
     ]);
   });
+
+  it('keeps only existing passive nodes that participate in projected splices', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'photo-local-gpkg-existing-passive-splices-'));
+    const gpkgPath = join(dir, 'sample.gpkg');
+    const db = new Database(gpkgPath);
+
+    db.exec(`
+      CREATE TABLE PA (
+        id_posesja_opl TEXT,
+        nazwa_miejsc TEXT,
+        nazwa_ul TEXT,
+        nr_domu TEXT,
+        nr_dzialki TEXT,
+        geom BLOB
+      );
+      CREATE TABLE "_Urzadzenia Pasywne" (
+        typ_elementu TEXT,
+        model_urzadzenia TEXT,
+        wezel TEXT,
+        oznaczenie TEXT,
+        modyfikacja TEXT,
+        geom BLOB
+      );
+      CREATE TABLE Wlokna (
+        wezel_pocz TEXT,
+        oznaczenie_urzadzenia_pocz TEXT,
+        typ_polaczenia_pocz TEXT,
+        pigtail_pocz_spaw TEXT,
+        wezel_kon TEXT,
+        oznaczenie_urzadzenia_kon TEXT,
+        typ_polaczenia_kon TEXT,
+        pigtail_kon_spaw TEXT
+      );
+    `);
+
+    db.prepare('INSERT INTO PA VALUES (?, ?, ?, ?, ?, ?)').run(
+      'pa-1',
+      'Radom',
+      'Testowa',
+      '1',
+      null,
+      pointGeometry(574000, 424000),
+    );
+    const insertPassive = db.prepare('INSERT INTO "_Urzadzenia Pasywne" VALUES (?, ?, ?, ?, ?, ?)');
+    insertPassive.run('Przelacznica', 'PSP', 'RADOM/OPP0001', 'O_RADOM/OPP0001', null, pointGeometry(574100, 424100));
+    insertPassive.run('Przelacznica', 'PSP', 'RADOM/OSD0001', 'O_RADOM/OSD0001', null, pointGeometry(574110, 424110));
+    insertPassive.run('Mufa', 'FIST', 'RADOM/ZS0001', 'O_RADOM/ZS0001', null, pointGeometry(574120, 424120));
+    insertPassive.run('Przelacznica', 'PSP', 'RADOM/OPP0002', 'O_RADOM/OPP0002', 'Istniejacy', pointGeometry(574200, 424200));
+    insertPassive.run('Przelacznica', 'PSP', 'RADOM/OSD0002', 'O_RADOM/OSD0002', 'Istniejacy', pointGeometry(574210, 424210));
+    insertPassive.run('Mufa', 'FIST', 'RADOM/ZS0002', 'O_RADOM/ZS0002', 'Istniejacy', pointGeometry(574220, 424220));
+
+    const insertFiber = db.prepare('INSERT INTO Wlokna VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+    insertFiber.run(
+      'RADOM/ZS0002',
+      'O_RADOM/ZS0002',
+      'Spaw termiczny projektowany',
+      '',
+      'RADOM/OPP0002',
+      'O_RADOM/OPP0002',
+      'Zlaczka projektowana',
+      'Spaw termiczny projektowany',
+    );
+    insertFiber.run(
+      'RADOM/OSD0002',
+      'O_RADOM/OSD0002',
+      'Spaw termiczny projektowany',
+      '',
+      'RADOM/OPP0002',
+      'O_RADOM/OPP0002',
+      'Zlaczka projektowana',
+      '',
+    );
+    db.close();
+
+    const result = extractGpkg(gpkgPath);
+
+    expect(result.infraNodes.map((node) => node.name).sort()).toEqual([
+      'RADOM/OPP0002',
+      'RADOM/OSD0002',
+      'RADOM/ZS0002',
+    ]);
+    expect(result.passiveInfraNodes.map((node) => node.name).sort()).toEqual([
+      'RADOM/OPP0002',
+      'RADOM/OSD0002',
+      'RADOM/ZS0002',
+    ]);
+    expect(result.splices).toEqual([{ wezel: 'RADOM/ZS0002', oznaczenie: 'O_RADOM/ZS0002' }]);
+  });
 });

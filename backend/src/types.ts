@@ -122,6 +122,7 @@ export interface GpkgExtractionResult {
   polygons: MapPolygonInput[];
   trunkCables: MapTrunkCableInput[];
   infraNodes: MapInfraNodeInput[];
+  passiveInfraNodes: MapInfraNodeInput[];
   dacToAddressCableEntries: string[];
   adssToAddressCableEntries: string[];
   splitterCount: number;
