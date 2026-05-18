@@ -90,6 +90,21 @@ export const api = {
       method: 'DELETE',
     }),
   getChecklist: (projectId: string) => request<ChecklistNode[]>(`/api/projects/${projectId}/checklist`),
+  createChecklistNode: (
+    projectId: string,
+    input: {
+      name: string;
+      parentId: string | null;
+      nodeType: ChecklistNode['nodeType'];
+      minPhotos: number;
+      acceptsPhotos: boolean;
+    },
+  ) =>
+    request<ChecklistNode>(`/api/projects/${projectId}/checklist/nodes`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
+    }),
   recalculateChecklist: (
     projectId: string,
     gpkgFile: File,

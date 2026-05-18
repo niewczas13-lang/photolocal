@@ -15,6 +15,7 @@ import {
   ClipboardCheck,
   Settings,
   RefreshCw,
+  FolderPlus,
 } from 'lucide-react';
 import { api } from '../api';
 import type { ChatBatch, ChecklistNode, ChecklistNodeDetail, ChecklistPhoto, ProjectSummary, ReserveLocation } from '../types';
@@ -61,6 +62,13 @@ function collectMissingNodes(nodes: ChecklistNode[]): ChecklistNode[] {
     const self = node.acceptsPhotos && node.status === 'OPEN' && node.photoCount < node.minPhotos ? [node] : [];
     return [...self, ...collectMissingNodes(node.children)];
   });
+}
+
+function collectContainerNodes(nodes: ChecklistNode[]): ChecklistNode[] {
+  return nodes.flatMap((node) => [
+    ...(!node.acceptsPhotos ? [node] : []),
+    ...collectContainerNodes(node.children),
+  ]);
 }
 
 function collectAncestorIds(nodes: ChecklistNode[], targetId: string, trail: string[] = []): string[] | null {
@@ -137,6 +145,11 @@ export default function ProjectView({
   );
   const [recalculating, setRecalculating] = useState(false);
   const [recalculateResult, setRecalculateResult] = useState<string | null>(null);
+  const [isAddingFolder, setIsAddingFolder] = useState(false);
+  const [addFolderName, setAddFolderName] = useState('');
+  const [addFolderParentId, setAddFolderParentId] = useState('');
+  const [addFolderKind, setAddFolderKind] = useState<'photo' | 'reserve' | 'container'>('photo');
+  const [savingFolder, setSavingFolder] = useState(false);
 
   const handleRename = async () => {
     if (!draftName.trim() || draftName.trim() === project.name) {
@@ -219,6 +232,7 @@ export default function ProjectView({
     [expandedIds, autoExpandedIds],
   );
   const missingCount = useMemo(() => collectMissingNodes(nodes).length, [nodes]);
+  const containerNodes = useMemo(() => collectContainerNodes(nodes), [nodes]);
 
   const handleNodeSelect = (node: ChecklistNode) => {
     setSelectedNodeId(node.id);
@@ -229,6 +243,56 @@ export default function ProjectView({
     }
     setActiveTab('photos');
     onTabChange('photos');
+  };
+
+  const openAddFolderForm = () => {
+    setIsAddingFolder(true);
+    setAddFolderName('');
+    setAddFolderKind('photo');
+    setAddFolderParentId(selectedNode && !selectedNode.acceptsPhotos ? selectedNode.id : '');
+  };
+
+  const handleCreateChecklistNode = async () => {
+    if (!addFolderName.trim()) return;
+
+    const input =
+      addFolderKind === 'container'
+        ? {
+            name: addFolderName.trim(),
+            parentId: addFolderParentId || null,
+            nodeType: 'STATIC' as const,
+            minPhotos: 0,
+            acceptsPhotos: false,
+          }
+        : addFolderKind === 'reserve'
+          ? {
+              name: addFolderName.trim(),
+              parentId: addFolderParentId || null,
+              nodeType: 'CABLE_RESERVE' as const,
+              minPhotos: 1,
+              acceptsPhotos: true,
+            }
+          : {
+              name: addFolderName.trim(),
+              parentId: addFolderParentId || null,
+              nodeType: 'STATIC' as const,
+              minPhotos: 1,
+              acceptsPhotos: true,
+            };
+
+    setSavingFolder(true);
+    try {
+      const created = await api.createChecklistNode(projectId, input);
+      await refreshChecklist(created.id);
+      await refreshNodeDetail(created.id);
+      setIsAddingFolder(false);
+      setAddFolderName('');
+    } catch (err) {
+      console.error(err);
+      alert(`Blad podczas dodawania folderu:\n${getErrorMessage(err)}`);
+    } finally {
+      setSavingFolder(false);
+    }
   };
 
   const handleAcceptChatBatch = async (
@@ -415,6 +479,16 @@ export default function ProjectView({
         {/* Left Column - Checklist */}
         <div className="w-80 md:w-96 border-r border-border flex flex-col bg-muted/10 shrink-0">
           <div className="p-4 flex flex-col gap-3 shrink-0">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <p className="text-sm font-semibold leading-none">Checklista</p>
+                <p className="text-xs text-muted-foreground mt-1">{nodes.length} folderow glownych</p>
+              </div>
+              <Button variant="outline" size="sm" onClick={openAddFolderForm}>
+                <FolderPlus size={14} className="mr-1.5" />
+                Dodaj
+              </Button>
+            </div>
             <div className="relative">
               <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
               <Input 
@@ -434,6 +508,59 @@ export default function ProjectView({
                 Zwiń wszystko
               </Button>
             </div>
+            {isAddingFolder && (
+              <div className="rounded-lg border border-border bg-background p-3 flex flex-col gap-2">
+                <Input
+                  value={addFolderName}
+                  onChange={(event) => setAddFolderName(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') void handleCreateChecklistNode();
+                    if (event.key === 'Escape') setIsAddingFolder(false);
+                  }}
+                  placeholder="Nazwa nowego folderu"
+                  className="h-8"
+                />
+                <select
+                  value={addFolderParentId}
+                  onChange={(event) => setAddFolderParentId(event.target.value)}
+                  className="h-8 rounded-md border border-input bg-background px-2 text-xs"
+                >
+                  <option value="">Poziom glowny</option>
+                  {containerNodes.map((node) => (
+                    <option key={node.id} value={node.id}>
+                      {node.path}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  value={addFolderKind}
+                  onChange={(event) => setAddFolderKind(event.target.value as 'photo' | 'reserve' | 'container')}
+                  className="h-8 rounded-md border border-input bg-background px-2 text-xs"
+                >
+                  <option value="photo">Folder ze zdjeciami</option>
+                  <option value="reserve">Zapas kabla</option>
+                  <option value="container">Folder nadrzedny</option>
+                </select>
+                <div className="flex items-center gap-2">
+                  <Button
+                    size="sm"
+                    className="flex-1"
+                    disabled={savingFolder || !addFolderName.trim()}
+                    onClick={handleCreateChecklistNode}
+                  >
+                    {savingFolder ? 'Dodaje...' : 'Zapisz'}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    disabled={savingFolder}
+                    onClick={() => setIsAddingFolder(false)}
+                  >
+                    Anuluj
+                  </Button>
+                </div>
+              </div>
+            )}
           </div>
           
           <div className="flex-1 overflow-y-auto min-h-0">

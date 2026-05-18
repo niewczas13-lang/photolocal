@@ -16,6 +16,25 @@ const baseAddress = {
 };
 
 describe('generateChecklistNodes', () => {
+  it('adds the system Metki folder to every project checklist', () => {
+    const nodes = generateChecklistNodes({
+      projectId: 'project-1',
+      projectName: 'Projekt',
+      projectType: 'SI',
+      splitterTopology: 'SINGLE',
+      addresses: [],
+      dacToAddressCableEntries: [],
+      adssToAddressCableEntries: [],
+    });
+
+    expect(nodes.find((node) => node.path === 'Metki')).toMatchObject({
+      name: 'Metki',
+      source: 'SYSTEM',
+      acceptsPhotos: true,
+      minPhotos: 0,
+    });
+  });
+
   it('creates top-level OSD folder with details child', () => {
     const nodes = generateChecklistNodes({
       projectId: 'project-1',

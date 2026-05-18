@@ -1,7 +1,16 @@
 import type Database from 'better-sqlite3';
 import { randomUUID } from 'node:crypto';
-import type { ProjectRecord, ProjectType, SplitterTopology, SplitterTopologySource } from '../types.js';
+import type {
+  ChecklistNodeRecord,
+  ChecklistNodeSource,
+  ChecklistNodeType,
+  ProjectRecord,
+  ProjectType,
+  SplitterTopology,
+  SplitterTopologySource,
+} from '../types.js';
 import type { GeneratedChecklistNode, ChecklistAddress } from '../checklist/checklist-generator.js';
+import { safeFolderName } from '../utils/path-names.js';
 
 export interface AddPhotoInput {
   id: string;
@@ -73,6 +82,15 @@ export interface RecalculateChecklistResult {
   reusedAddresses: number;
   removedStaleNodes: number;
   preservedAssignedStaleNodes: number;
+}
+
+export interface AddManualChecklistNodeInput {
+  projectId: string;
+  parentId: string | null;
+  name: string;
+  nodeType: ChecklistNodeType;
+  minPhotos: number;
+  acceptsPhotos: boolean;
 }
 
 function normalizeAddressKeyPart(value: string | null): string {
@@ -211,8 +229,8 @@ export class ProjectsRepository {
       const insertNode = this.db.prepare(
         `INSERT INTO checklist_nodes (
           id, project_id, parent_id, name, path, node_type, address_id,
-          sort_order, min_photos, accepts_photos, status
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'OPEN')`,
+          sort_order, min_photos, accepts_photos, source, status
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'OPEN')`,
       );
 
       for (const node of input.checklistNodes) {
@@ -227,6 +245,7 @@ export class ProjectsRepository {
           node.sortOrder,
           node.minPhotos,
           node.acceptsPhotos ? 1 : 0,
+          node.source ?? 'GPKG',
         );
       }
     });
@@ -248,6 +267,7 @@ export class ProjectsRepository {
           node.name,
           node.path,
           node.node_type AS nodeType,
+          node.source,
           node.address_id AS addressId,
           node.sort_order AS sortOrder,
           node.min_photos AS minPhotos,
@@ -353,11 +373,16 @@ export class ProjectsRepository {
 
       const existingNodeRows = this.db
         .prepare(
-          `SELECT id, parent_id AS parentId, path
+          `SELECT id, parent_id AS parentId, path, source
            FROM checklist_nodes
            WHERE project_id = ?`,
         )
-        .all(input.projectId) as Array<{ id: string; parentId: string | null; path: string }>;
+        .all(input.projectId) as Array<{
+          id: string;
+          parentId: string | null;
+          path: string;
+          source: ChecklistNodeSource;
+        }>;
 
       const pathToExistingNodeId = new Map(existingNodeRows.map((node) => [node.path, node.id]));
       const generatedPaths = new Set(input.checklistNodes.map((node) => node.path));
@@ -365,14 +390,15 @@ export class ProjectsRepository {
       const insertNode = this.db.prepare(
         `INSERT INTO checklist_nodes (
           id, project_id, parent_id, name, path, node_type, address_id,
-          sort_order, min_photos, accepts_photos, status
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'OPEN')`,
+          sort_order, min_photos, accepts_photos, source, status
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'OPEN')`,
       );
       const updateNode = this.db.prepare(
         `UPDATE checklist_nodes
          SET parent_id = ?,
              name = ?,
              node_type = ?,
+             source = ?,
              address_id = ?,
              sort_order = ?,
              min_photos = ?,
@@ -395,6 +421,7 @@ export class ProjectsRepository {
             actualParentId,
             node.name,
             node.nodeType,
+            node.source ?? 'GPKG',
             actualAddressId,
             node.sortOrder,
             node.minPhotos,
@@ -415,6 +442,7 @@ export class ProjectsRepository {
             node.sortOrder,
             node.minPhotos,
             node.acceptsPhotos ? 1 : 0,
+            node.source ?? 'GPKG',
           );
           pathToExistingNodeId.set(node.path, node.id);
           result.addedNodes += 1;
@@ -448,7 +476,7 @@ export class ProjectsRepository {
         return (childIdsByParentId.get(nodeId) ?? []).some((childId) => hasPhotoInSubtree(childId));
       };
 
-      const staleNodes = existingNodeRows.filter((node) => !generatedPaths.has(node.path));
+      const staleNodes = existingNodeRows.filter((node) => node.source === 'GPKG' && !generatedPaths.has(node.path));
       const staleNodeIds = new Set(staleNodes.map((node) => node.id));
       const staleNodeIdsWithPhotos = new Set(
         staleNodes.filter((node) => hasPhotoInSubtree(node.id)).map((node) => node.id),
@@ -520,6 +548,7 @@ export class ProjectsRepository {
           name,
           path,
           node_type AS nodeType,
+          source,
           address_id AS addressId,
           sort_order AS sortOrder,
           min_photos AS minPhotos,
@@ -537,6 +566,7 @@ export class ProjectsRepository {
           name: string;
           path: string;
           nodeType: string;
+          source: ChecklistNodeSource;
           addressId: string | null;
           sortOrder: number;
           minPhotos: number;
@@ -545,6 +575,56 @@ export class ProjectsRepository {
           notApplicableReason: string | null;
         }
       | undefined;
+  }
+
+  addManualChecklistNode(input: AddManualChecklistNodeInput): ChecklistNodeRecord {
+    const name = input.name.trim();
+    if (!name) throw new Error('Checklist node name is required');
+
+    const parent = input.parentId ? this.getChecklistNode(input.projectId, input.parentId) : null;
+    if (input.parentId && !parent) throw new Error('Parent checklist node not found');
+    if (parent && Boolean(parent.acceptsPhotos)) {
+      throw new Error('Cannot add a child folder under a photo folder');
+    }
+
+    const id = randomUUID();
+    const pathPart = safeFolderName(name);
+    const path = parent ? `${parent.path}/${pathPart}` : pathPart;
+    const existing = this.db
+      .prepare(`SELECT id FROM checklist_nodes WHERE project_id = ? AND path = ?`)
+      .get(input.projectId, path);
+    if (existing) throw new Error('Checklist folder already exists');
+
+    const row = this.db
+      .prepare(
+        `SELECT COALESCE(MAX(sort_order), -1) + 1 AS sortOrder
+         FROM checklist_nodes
+         WHERE project_id = ? AND parent_id IS ?`,
+      )
+      .get(input.projectId, parent?.id ?? null) as { sortOrder: number } | undefined;
+
+    this.db
+      .prepare(
+        `INSERT INTO checklist_nodes (
+          id, project_id, parent_id, name, path, node_type, source, address_id,
+          sort_order, min_photos, accepts_photos, status
+        ) VALUES (?, ?, ?, ?, ?, ?, 'MANUAL', NULL, ?, ?, ?, 'OPEN')`,
+      )
+      .run(
+        id,
+        input.projectId,
+        parent?.id ?? null,
+        name,
+        path,
+        input.nodeType,
+        Number(row?.sortOrder ?? 0),
+        input.minPhotos,
+        input.acceptsPhotos ? 1 : 0,
+      );
+
+    const created = (this.getChecklist(input.projectId) as ChecklistNodeRecord[]).find((node) => node.id === id);
+    if (!created) throw new Error(`Created checklist node ${id} not found`);
+    return created;
   }
 
   countPhotosForNode(nodeId: string, reserveLocation: string | null): number {

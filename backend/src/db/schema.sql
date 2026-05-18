@@ -37,6 +37,7 @@ CREATE TABLE IF NOT EXISTS checklist_nodes (
   name TEXT NOT NULL,
   path TEXT NOT NULL,
   node_type TEXT NOT NULL CHECK (node_type IN ('STATIC', 'DISTRIBUTION', 'ADDRESS', 'CABLE_RESERVE')),
+  source TEXT NOT NULL DEFAULT 'GPKG' CHECK (source IN ('GPKG', 'MANUAL', 'SYSTEM')),
   address_id TEXT REFERENCES addresses(id),
   sort_order INTEGER NOT NULL DEFAULT 0,
   min_photos INTEGER NOT NULL DEFAULT 0,

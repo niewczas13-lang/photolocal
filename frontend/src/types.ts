@@ -37,6 +37,7 @@ export interface ChecklistNode {
   name: string;
   path: string;
   nodeType: 'STATIC' | 'DISTRIBUTION' | 'ADDRESS' | 'CABLE_RESERVE';
+  source?: 'GPKG' | 'MANUAL' | 'SYSTEM';
   acceptsPhotos: boolean;
   minPhotos: number;
   photoCount: number;
@@ -68,6 +69,7 @@ export interface ChecklistNodeDetail {
   name: string;
   path: string;
   nodeType: 'STATIC' | 'DISTRIBUTION' | 'ADDRESS' | 'CABLE_RESERVE';
+  source?: 'GPKG' | 'MANUAL' | 'SYSTEM';
   addressId: string | null;
   sortOrder: number;
   minPhotos: number;

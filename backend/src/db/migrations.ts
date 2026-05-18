@@ -15,7 +15,16 @@ export function runMigrations(db: Database.Database): void {
     // Ignore error if column already exists
   }
 
+  try {
+    db.exec(
+      "ALTER TABLE checklist_nodes ADD COLUMN source TEXT NOT NULL DEFAULT 'GPKG' CHECK (source IN ('GPKG', 'MANUAL', 'SYSTEM'));",
+    );
+  } catch (e) {
+    // Ignore error if column already exists
+  }
+
   migrateChatReserveLocationConstraint(db, schema);
+  backfillSystemMetkiFolder(db);
 }
 
 function migrateChatReserveLocationConstraint(db: Database.Database, schema: string): void {
@@ -47,4 +56,32 @@ function migrateChatReserveLocationConstraint(db: Database.Database, schema: str
     PRAGMA foreign_keys = ON;
   `);
   db.exec(schema);
+}
+
+function backfillSystemMetkiFolder(db: Database.Database): void {
+  db.prepare(
+    `INSERT OR IGNORE INTO checklist_nodes (
+      id, project_id, parent_id, name, path, node_type, source, address_id,
+      sort_order, min_photos, accepts_photos, status
+    )
+    SELECT
+      'system-metki-' || project.id,
+      project.id,
+      NULL,
+      'Metki',
+      'Metki',
+      'STATIC',
+      'SYSTEM',
+      NULL,
+      6,
+      0,
+      1,
+      'OPEN'
+    FROM projects project
+    WHERE NOT EXISTS (
+      SELECT 1
+      FROM checklist_nodes node
+      WHERE node.project_id = project.id AND node.path = 'Metki'
+    )`,
+  ).run();
 }

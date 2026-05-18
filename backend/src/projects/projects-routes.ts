@@ -31,7 +31,7 @@ import {
 import { generateChecklistNodes } from '../checklist/checklist-generator.js';
 import type { ChecklistAddress, GeneratedChecklistNode } from '../checklist/checklist-generator.js';
 import { loadConfig } from '../config.js';
-import type { ProjectType, SplitterTopology } from '../types.js';
+import type { ChecklistNodeType, ProjectType, SplitterTopology } from '../types.js';
 import { isReserveLocation, processPhoto, resolvePhotoTarget, type ReserveLocation } from '../photos/photo-processor.js';
 import { runProjectOperation } from '../utils/project-operation-queue.js';
 
@@ -395,6 +395,42 @@ export async function registerProjectRoutes(app: FastifyInstance, db: Database.D
   app.get('/api/projects/:projectId/checklist', async (request) => {
     const { projectId } = request.params as { projectId: string };
     return toTree(repository.getChecklist(projectId));
+  });
+
+  app.post('/api/projects/:projectId/checklist/nodes', async (request, reply) => {
+    const { projectId } = request.params as { projectId: string };
+    const body = request.body as {
+      name?: string;
+      parentId?: string | null;
+      nodeType?: ChecklistNodeType;
+      minPhotos?: number;
+      acceptsPhotos?: boolean;
+    };
+    const project = repository.getProject(projectId);
+    const nodeType =
+      body.nodeType === 'STATIC' ||
+      body.nodeType === 'DISTRIBUTION' ||
+      body.nodeType === 'ADDRESS' ||
+      body.nodeType === 'CABLE_RESERVE'
+        ? body.nodeType
+        : 'STATIC';
+
+    if (!project) return reply.status(404).send({ error: 'Project not found' });
+    if (!body.name?.trim()) return reply.status(400).send({ error: 'Checklist folder name is required' });
+
+    try {
+      return repository.addManualChecklistNode({
+        projectId,
+        parentId: body.parentId ?? null,
+        name: body.name,
+        nodeType,
+        minPhotos: Math.max(0, Number(body.minPhotos ?? 1)),
+        acceptsPhotos: body.acceptsPhotos !== false,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return reply.status(message.includes('already exists') ? 409 : 400).send({ error: message });
+    }
   });
 
   app.get('/api/projects/:projectId/checklist/:nodeId', async (request, reply) => {

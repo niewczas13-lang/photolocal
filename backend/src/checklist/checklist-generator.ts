@@ -1,5 +1,12 @@
 import { randomUUID } from 'node:crypto';
-import type { AddressInput, ChecklistNodeType, MufaEntry, ProjectType, SplitterTopology } from '../types.js';
+import type {
+  AddressInput,
+  ChecklistNodeSource,
+  ChecklistNodeType,
+  MufaEntry,
+  ProjectType,
+  SplitterTopology,
+} from '../types.js';
 import { safeFolderName, toAddressFolderName } from '../utils/path-names.js';
 
 export interface ChecklistAddress extends AddressInput {
@@ -24,6 +31,7 @@ export interface GeneratedChecklistNode {
   name: string;
   path: string;
   nodeType: ChecklistNodeType;
+  source?: ChecklistNodeSource;
   addressId: string | null;
   sortOrder: number;
   minPhotos: number;
@@ -64,6 +72,7 @@ export function generateChecklistNodes(input: GenerateChecklistInput): Generated
     sortOrder: number,
     minPhotos: number,
     acceptsPhotos: boolean,
+    source: ChecklistNodeSource = 'GPKG',
   ): string => {
     const existing = pathToId.get(path);
     if (existing) return existing;
@@ -76,6 +85,7 @@ export function generateChecklistNodes(input: GenerateChecklistInput): Generated
       name,
       path,
       nodeType,
+      source,
       addressId,
       sortOrder,
       minPhotos,
@@ -105,6 +115,8 @@ export function generateChecklistNodes(input: GenerateChecklistInput): Generated
 
   const notatkiId = addNode(null, 'Notatki_z_budowy', 'Notatki_z_budowy', 'STATIC', null, 5, 0, false);
   addNode(notatkiId, 'Zdjecia', 'Notatki_z_budowy/Zdjecia', 'STATIC', null, 0, 1, true);
+
+  addNode(null, 'Metki', 'Metki', 'STATIC', null, 6, 0, true, 'SYSTEM');
 
   const dpGroups = new Map<string, ChecklistAddress[]>();
   for (const address of input.addresses) {
@@ -141,7 +153,7 @@ export function generateChecklistNodes(input: GenerateChecklistInput): Generated
     'Zapasy_kabli_instalacyjnych',
     'STATIC',
     null,
-    6,
+    7,
     0,
     false,
   );
@@ -169,7 +181,7 @@ export function generateChecklistNodes(input: GenerateChecklistInput): Generated
       'Zapasy_kabli_napowietrznych',
       'STATIC',
       null,
-      7,
+      8,
       0,
       false,
     );

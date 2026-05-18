@@ -3,6 +3,7 @@ export type SplitterTopology = 'SINGLE' | 'CASCADE';
 export type SplitterTopologySource = 'AUTO' | 'MANUAL';
 export type ChecklistNodeStatus = 'OPEN' | 'COMPLETE' | 'NOT_APPLICABLE';
 export type ChecklistNodeType = 'STATIC' | 'DISTRIBUTION' | 'ADDRESS' | 'CABLE_RESERVE';
+export type ChecklistNodeSource = 'GPKG' | 'MANUAL' | 'SYSTEM';
 
 export interface MufaEntry {
   wezel: string;
@@ -70,6 +71,7 @@ export interface ChecklistNodeRecord {
   name: string;
   path: string;
   nodeType: ChecklistNodeType;
+  source: ChecklistNodeSource;
   addressId: string | null;
   sortOrder: number;
   minPhotos: number;

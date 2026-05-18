@@ -451,4 +451,73 @@ describe('ProjectsRepository', () => {
       id: 'current-photo-node',
     });
   });
+
+  it('keeps manually added folders during GPKG recalculation even without photos', () => {
+    const { db, repository } = createRepository();
+
+    const project = repository.createProject({
+      name: 'OPP0013',
+      projectDefinition: null,
+      projectType: 'SI',
+      splitterTopology: 'SINGLE',
+      splitterTopologySource: 'AUTO',
+      splitterCount: 1,
+      gpkgFileName: 'old.gpkg',
+      baseFolder: 'C:/photos/OPP0013',
+      addresses: [],
+      dacToAddressCableCount: 0,
+      adssToAddressCableCount: 0,
+      checklistNodes: [
+        {
+          id: 'old-gpkg-node',
+          projectId: 'project-temp',
+          parentId: null,
+          name: 'Old GPKG',
+          path: 'Old_GPKG',
+          nodeType: 'STATIC',
+          addressId: null,
+          sortOrder: 0,
+          minPhotos: 1,
+          acceptsPhotos: true,
+        },
+      ],
+    });
+
+    const manual = repository.addManualChecklistNode({
+      projectId: project.id,
+      parentId: null,
+      name: 'Nowe OSD',
+      nodeType: 'STATIC',
+      minPhotos: 1,
+      acceptsPhotos: true,
+    });
+
+    const result = repository.recalculateChecklist({
+      projectId: project.id,
+      projectDefinition: 'OPP0013',
+      projectType: 'SI',
+      splitterTopology: 'SINGLE',
+      splitterTopologySource: 'AUTO',
+      splitterCount: 1,
+      gpkgFileName: 'new.gpkg',
+      addresses: [],
+      dacToAddressCableCount: 0,
+      adssToAddressCableCount: 0,
+      checklistNodes: [],
+    });
+
+    const checklist = repository.getChecklist(project.id) as Array<{
+      id: string;
+      path: string;
+      source: string;
+    }>;
+    db.close();
+
+    expect(result.removedStaleNodes).toBe(1);
+    expect(checklist.find((node) => node.id === manual.id)).toMatchObject({
+      path: 'NOWE_OSD',
+      source: 'MANUAL',
+    });
+    expect(checklist.some((node) => node.id === 'old-gpkg-node')).toBe(false);
+  });
 });
