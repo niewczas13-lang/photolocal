@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import L, { type LatLngExpression, type PathOptions } from 'leaflet';
-import { CircleMarker, GeoJSON, MapContainer, Marker, Polyline, Popup, TileLayer, useMap, useMapEvents } from 'react-leaflet';
+import { GeoJSON, MapContainer, Marker, Polyline, Popup, TileLayer, useMap, useMapEvents } from 'react-leaflet';
 import {
   Cable,
   Circle,
@@ -25,6 +25,10 @@ import { photoProjectRoute, type MapView } from '../app-routing';
 import { cn } from '../lib/utils';
 import { getMapBoundsPositions } from '../map-bounds';
 import { formatCableLength } from '../map-format';
+import {
+  getInfrastructureLineStyle,
+  getInfrastructurePointIconSpec,
+} from '../map-infrastructure-style';
 import {
   getCableStatusActions,
   getCableStatusLabel,
@@ -177,6 +181,10 @@ function infrastructurePointPosition(feature: ProjectMapInfrastructureFeature): 
   return null;
 }
 
+function infrastructurePointIcon(featureType: ProjectMapInfrastructureFeature['featureType']): L.DivIcon {
+  return L.divIcon(getInfrastructurePointIconSpec(featureType));
+}
+
 function addressCandidateIcon(): L.DivIcon {
   return L.divIcon({
     className: 'project-map-candidate-marker',
@@ -264,25 +272,6 @@ function polygonStyle(polygon: ProjectMapPolygon): PathOptions {
     fillOpacity: 0.12,
     opacity: 0.8,
     weight: 2,
-  };
-}
-
-function infrastructureLineStyle(): PathOptions {
-  return {
-    color: '#64748b',
-    dashArray: '4 7',
-    opacity: 0.45,
-    weight: 2,
-  };
-}
-
-function infrastructurePointStyle(featureType: ProjectMapInfrastructureFeature['featureType']): PathOptions {
-  return {
-    color: featureType === 'pole' ? '#334155' : '#475569',
-    fillColor: featureType === 'pole' ? '#0f172a' : '#e2e8f0',
-    fillOpacity: featureType === 'pole' ? 0.75 : 0.9,
-    opacity: 0.75,
-    weight: 1.5,
   };
 }
 
@@ -1167,7 +1156,7 @@ export default function ProjectMap({ projectId, view, onViewChange }: ProjectMap
                       <Polyline
                         key={`infra-${feature.id}-${index}`}
                         positions={positions}
-                        pathOptions={infrastructureLineStyle()}
+                        pathOptions={getInfrastructureLineStyle()}
                       >
                         <Popup>
                           <InfrastructurePopup feature={feature} />
@@ -1179,16 +1168,15 @@ export default function ProjectMap({ projectId, view, onViewChange }: ProjectMap
                   const position = infrastructurePointPosition(feature);
                   if (!position) return null;
                   return (
-                    <CircleMarker
+                    <Marker
                       key={`infra-${feature.id}`}
-                      center={position}
-                      radius={feature.featureType === 'pole' ? 4 : 5}
-                      pathOptions={infrastructurePointStyle(feature.featureType)}
+                      position={position}
+                      icon={infrastructurePointIcon(feature.featureType)}
                     >
                       <Popup>
                         <InfrastructurePopup feature={feature} />
                       </Popup>
-                    </CircleMarker>
+                    </Marker>
                   );
                 })}
 
@@ -1338,7 +1326,14 @@ export default function ProjectMap({ projectId, view, onViewChange }: ProjectMap
             {showInfrastructure && (
               <>
                 <span><span className="project-map-line project-map-line--infra" /> kanalizacja / rurociag</span>
-                <span><span className="project-map-dot project-map-dot--infra" /> slup / studnia</span>
+                <span>
+                  <span className="project-map-infra-pole project-map-infra-pole--legend">
+                    <span className="project-map-infra-pole__label">E</span>
+                    <span className="project-map-infra-pole__stem"></span>
+                  </span>
+                  <span className="project-map-infra-manhole project-map-infra-manhole--legend"></span>
+                  slup / studnia
+                </span>
               </>
             )}
             <span><Triangle size={13} className="project-map-legend-icon project-map-legend-icon--osd" /> OSD</span>

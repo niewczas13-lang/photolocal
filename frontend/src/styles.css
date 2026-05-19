@@ -1310,7 +1310,78 @@
 
 .project-map-line--infra {
   height: 2px;
-  background: repeating-linear-gradient(90deg, #64748b 0 4px, transparent 4px 11px);
+  background: repeating-linear-gradient(90deg, #334155 0 4px, transparent 4px 11px);
+}
+
+.project-map-infra-point-icon {
+  background: transparent;
+  border: 0;
+}
+
+.project-map-infra-pole {
+  display: block;
+  position: relative;
+  width: 18px;
+  height: 26px;
+}
+
+.project-map-infra-pole__label {
+  position: absolute;
+  top: 0;
+  left: 0;
+  color: #1f2937;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.project-map-infra-pole__stem {
+  position: absolute;
+  top: 5px;
+  left: 10px;
+  width: 2px;
+  height: 19px;
+  border-radius: 999px;
+  background: #111827;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.55);
+}
+
+.project-map-infra-pole__stem::before,
+.project-map-infra-pole__stem::after {
+  content: '';
+  position: absolute;
+  left: -2px;
+  width: 6px;
+  height: 2px;
+  border-radius: 999px;
+  background: #111827;
+}
+
+.project-map-infra-pole__stem::before {
+  top: 1px;
+}
+
+.project-map-infra-pole__stem::after {
+  bottom: 1px;
+}
+
+.project-map-infra-manhole {
+  display: block;
+  width: 10px;
+  height: 10px;
+  border: 2px solid #334155;
+  border-radius: 2px;
+  background: rgba(248, 250, 252, 0.86);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.55);
+}
+
+.project-map-infra-pole--legend,
+.project-map-infra-manhole--legend {
+  display: inline-block;
+  margin-right: 5px;
+  vertical-align: middle;
+  transform: scale(0.8);
+  transform-origin: center;
 }
 
 .project-map-dot {

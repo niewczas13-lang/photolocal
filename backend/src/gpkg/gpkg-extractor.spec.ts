@@ -467,6 +467,121 @@ describe('GPKG extractor helpers', () => {
     });
   });
 
+  it('marks underground cable rows with existing duct modification as existing duct work', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'photo-local-gpkg-existing-duct-modification-'));
+    const gpkgPath = join(dir, 'sample.gpkg');
+    const db = new Database(gpkgPath);
+
+    db.exec(`
+      CREATE TABLE PA (
+        id_posesja_opl TEXT,
+        nazwa_miejsc TEXT,
+        nazwa_ul TEXT,
+        nr_domu TEXT,
+        nr_dzialki TEXT,
+        geom BLOB
+      );
+      CREATE TABLE "Kable Swiatlowodowe" (
+        model_kabla TEXT,
+        typ_elementu TEXT,
+        modyfikacja TEXT,
+        od TEXT,
+        do TEXT,
+        odcinek_kabla TEXT,
+        geom BLOB
+      );
+    `);
+
+    db.prepare('INSERT INTO PA VALUES (?, ?, ?, ?, ?, ?)').run(
+      'pa-1',
+      'Bartag',
+      'Testowa',
+      '1',
+      null,
+      pointGeometry(574000, 424000),
+    );
+    db.prepare('INSERT INTO "Kable Swiatlowodowe" VALUES (?, ?, ?, ?, ?, ?, ?)').run(
+      'MI-MKF 12J G.652D',
+      'Kabel doziemny',
+      'Kabel prowadzony w istniejacej kanalizacji',
+      'BARTAG/OPP0002',
+      'BARTAG/OSD0026',
+      'OKH0030735-DBA/026',
+      lineGeometry([
+        [574000, 424000],
+        [574100, 424100],
+      ]),
+    );
+    db.close();
+
+    const result = extractGpkg(gpkgPath);
+
+    expect(result.trunkCables[0]).toMatchObject({
+      rawName: 'OKH0030735-DBA/026',
+      routingType: 'existing_duct',
+    });
+  });
+
+  it('extracts pole infrastructure from _Obiekty instead of conceptual pole layers', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'photo-local-gpkg-obiekty-poles-'));
+    const gpkgPath = join(dir, 'sample.gpkg');
+    const db = new Database(gpkgPath);
+
+    db.exec(`
+      CREATE TABLE PA (
+        id_posesja_opl TEXT,
+        nazwa_miejsc TEXT,
+        nazwa_ul TEXT,
+        nr_domu TEXT,
+        nr_dzialki TEXT,
+        geom BLOB
+      );
+      CREATE TABLE "K Slupy" (
+        nazwa_slupa TEXT,
+        wlasciciel TEXT,
+        geom BLOB
+      );
+      CREATE TABLE "_Obiekty" (
+        oznaczenie TEXT,
+        typ_elementu TEXT,
+        wlasciciel TEXT,
+        geom BLOB
+      );
+    `);
+
+    db.prepare('INSERT INTO PA VALUES (?, ?, ?, ?, ?, ?)').run(
+      'pa-1',
+      'Bartag',
+      'Testowa',
+      '1',
+      null,
+      pointGeometry(574000, 424000),
+    );
+    db.prepare('INSERT INTO "K Slupy" VALUES (?, ?, ?)').run(
+      'KONCEPCYJNY/SLP0001',
+      'ORANGE POLSKA S.A.',
+      pointGeometry(574050, 424050),
+    );
+    db.prepare('INSERT INTO "_Obiekty" VALUES (?, ?, ?, ?)').run(
+      'BARTAG/SLP0042',
+      'Słup elektroenergetyczny',
+      'ENERGA-OPERATOR S.A.',
+      pointGeometry(574070, 424070),
+    );
+    db.close();
+
+    const result = extractGpkg(gpkgPath);
+    const poles = result.infrastructureFeatures.filter((feature) => feature.featureType === 'pole');
+
+    expect(poles).toEqual([
+      expect.objectContaining({
+        sourceLayer: '_Obiekty',
+        label: 'BARTAG/SLP0042',
+        elementType: 'Słup elektroenergetyczny',
+      }),
+    ]);
+  });
+
   it('extracts duct, pole, and manhole infrastructure as background map features', () => {
     const dir = mkdtempSync(join(tmpdir(), 'photo-local-gpkg-background-infra-map-'));
     const gpkgPath = join(dir, 'sample.gpkg');
@@ -487,8 +602,9 @@ describe('GPKG extractor helpers', () => {
         wlasciciel TEXT,
         geom BLOB
       );
-      CREATE TABLE "Słup" (
-        nazwa_slupa TEXT,
+      CREATE TABLE "_Obiekty" (
+        oznaczenie TEXT,
+        typ_elementu TEXT,
         wlasciciel TEXT,
         geom BLOB
       );
@@ -517,8 +633,9 @@ describe('GPKG extractor helpers', () => {
         [574100, 424100],
       ]),
     );
-    db.prepare('INSERT INTO "Słup" VALUES (?, ?, ?)').run(
+    db.prepare('INSERT INTO "_Obiekty" VALUES (?, ?, ?, ?)').run(
       'OSTRZESZEWO/SLP0001',
+      'Słup elektroenergetyczny',
       'ORANGE POLSKA S.A.',
       pointGeometry(574050, 424050),
     );
@@ -544,8 +661,9 @@ describe('GPKG extractor helpers', () => {
         }),
         expect.objectContaining({
           featureType: 'pole',
-          sourceLayer: 'Słup',
+          sourceLayer: '_Obiekty',
           label: 'OSTRZESZEWO/SLP0001',
+          elementType: 'Słup elektroenergetyczny',
           owner: 'ORANGE POLSKA S.A.',
           geojson: expect.objectContaining({ type: 'Point' }),
         }),

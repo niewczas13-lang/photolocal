@@ -233,6 +233,7 @@ function getTrunkCableKey(input: {
 
 function normalizeCableRoutingText(value: string): string {
   return value
+    .replace(/[Łł]/g, (char) => (char === 'Ł' ? 'L' : 'l'))
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase();
@@ -248,19 +249,25 @@ function getCableRoutingType(
     .join(' ');
   const normalizedDescription = normalizeCableRoutingText(routeDescription);
   const hasExistingMarker = normalizedDescription.includes('istniej');
+  const hasProjectedMarker =
+    normalizedDescription.includes('projekt') ||
+    normalizedDescription.includes('nowobud') ||
+    normalizedDescription.includes('budowan');
+  const hasDuctMarker = normalizedDescription.includes('kanalizacj');
   const hasConduitMarker =
     normalizedDescription.includes('rurociag') ||
     normalizedDescription.includes('mikrokanalizacj');
 
   if (normalizedDescription.includes('kabel napowietrzny')) return 'aerial';
-  if (normalizedDescription.includes('kabel doziemny')) return 'underground';
-  if (hasExistingMarker && (normalizedDescription.includes('kanalizacj') || hasConduitMarker)) {
-    return 'existing_duct';
-  }
-  if (normalizedDescription.includes('kabel w kanalizacji') || normalizedDescription.includes('kanalizacj')) {
+  if (hasExistingMarker && (hasDuctMarker || hasConduitMarker)) {
     return 'existing_duct';
   }
   if (hasConduitMarker) return 'underground';
+  if (normalizedDescription.includes('kabel w kanalizacji') || (hasDuctMarker && !hasProjectedMarker)) {
+    return 'existing_duct';
+  }
+  if (hasDuctMarker) return 'underground';
+  if (normalizedDescription.includes('kabel doziemny')) return 'underground';
   return /ADSS/i.test(`${cableType} ${rawName ?? ''}`) ? 'aerial' : 'underground';
 }
 
@@ -349,7 +356,28 @@ function extractProjectedConduitSegments(db: Database.Database): number[][][] {
   return segments;
 }
 
-function infrastructureFeatureType(tableName: string): MapInfrastructureFeatureInput['featureType'] | null {
+function isObjectsInfrastructureTable(tableName: string): boolean {
+  return normalizeColumnName(tableName).replace(/^_+/, '') === 'obiekty';
+}
+
+function rowLooksLikePole(row: Record<string, unknown>): boolean {
+  const description = [
+    row.typ_elementu,
+    row.typ_obiektu,
+    row.rodzaj,
+    row.model,
+    row.opis,
+  ]
+    .filter((value): value is string => typeof value === 'string')
+    .join(' ');
+
+  return normalizeCableRoutingText(description).includes('slup');
+}
+
+function infrastructureFeatureType(
+  tableName: string,
+  row: Record<string, unknown>,
+): MapInfrastructureFeatureInput['featureType'] | null {
   const normalizedName = normalizeColumnName(tableName);
   if (
     normalizedName.includes('odcinki_kanalizacji') ||
@@ -357,7 +385,7 @@ function infrastructureFeatureType(tableName: string): MapInfrastructureFeatureI
   ) {
     return 'duct';
   }
-  if (normalizedName.includes('slup')) return 'pole';
+  if (isObjectsInfrastructureTable(tableName) && rowLooksLikePole(row)) return 'pole';
   if (normalizedName.includes('studnia') || normalizedName.includes('studnie') || normalizedName.includes('szachty')) {
     return 'manhole';
   }
@@ -386,11 +414,12 @@ function extractInfrastructureFeatures(db: Database.Database): MapInfrastructure
   const features: MapInfrastructureFeatureInput[] = [];
 
   for (const tableName of getUserTableNames(db)) {
-    const featureType = infrastructureFeatureType(tableName);
-    if (!featureType || !tableHasColumns(db, tableName, ['geom'])) continue;
+    if (!tableHasColumns(db, tableName, ['geom'])) continue;
 
     const rows = db.prepare(`SELECT * FROM ${q(tableName)}`).all() as Array<Record<string, unknown>>;
     for (const row of rows) {
+      const featureType = infrastructureFeatureType(tableName, row);
+      if (!featureType) continue;
       if (!(row.geom instanceof Buffer)) continue;
       const geojson = parseGpkgGeoJSON(row.geom);
       if (!geojson || !geometryMatchesInfrastructureType(geojson, featureType)) continue;
@@ -399,8 +428,8 @@ function extractInfrastructureFeatures(db: Database.Database): MapInfrastructure
       features.push({
         featureType,
         sourceLayer: tableName,
-        label: firstStringField(row, ['oznaczenie', 'nazwa_slupa', 'nazwa', 'odcinek', 'id_odc', 'did']),
-        elementType: firstStringField(row, ['typ_elementu', 'typ_kanalizacji', 'model', 'typ_profilu']),
+        label: firstStringField(row, ['oznaczenie', 'nazwa_slupa', 'nazwa_obiektu', 'nazwa', 'odcinek', 'id_odc', 'did']),
+        elementType: firstStringField(row, ['typ_elementu', 'typ_obiektu', 'typ_kanalizacji', 'model', 'typ_profilu']),
         owner: firstStringField(row, ['wlasciciel', 'inwestor']),
         geojson,
       });
