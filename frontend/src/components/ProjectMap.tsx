@@ -23,6 +23,7 @@ import type { Feature, GeoJsonObject, Geometry } from 'geojson';
 import { api } from '../api';
 import { photoProjectRoute, type MapView } from '../app-routing';
 import { cn } from '../lib/utils';
+import { getMapBoundsPositions } from '../map-bounds';
 import { formatCableLength } from '../map-format';
 import {
   getCableStatusActions,
@@ -943,17 +944,8 @@ export default function ProjectMap({ projectId, view, onViewChange }: ProjectMap
 
   const boundsPositions = useMemo(() => {
     if (!data) return [];
-    return [
-      ...data.addresses.map((address) => [address.lat, address.lng] as LatLngExpression),
-      ...data.addressCandidates.map((candidate) => [candidate.lat, candidate.lng] as LatLngExpression),
-      ...data.infraNodes.map((node) => [node.lat, node.lng] as LatLngExpression),
-      ...data.trunkCables.flatMap((cable) => collectGeometryPositions(cable.geojson)),
-      ...data.polygons.flatMap((polygon) => collectGeometryPositions(polygon.geojson)),
-      ...(showInfrastructure
-        ? data.infrastructureFeatures.flatMap((feature) => collectGeometryPositions(feature.geojson))
-        : []),
-    ];
-  }, [data, showInfrastructure]);
+    return getMapBoundsPositions(data);
+  }, [data]);
 
   const totals = useMemo(() => {
     if (!data) {
