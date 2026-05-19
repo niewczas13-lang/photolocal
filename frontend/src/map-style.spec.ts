@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { getCableLineStyle, getCableLineStyles, getMarkerTone, getMarkerToneStyle, isCableReady } from './map-style';
+import {
+  getCableLineStyle,
+  getCableLineStyles,
+  getMarkerTone,
+  getMarkerToneStyle,
+  isCableReady,
+  isNodeReady,
+} from './map-style';
 
 describe('map styling', () => {
   it('uses distinct dashed line styles for each cable route and work stage', () => {
@@ -59,11 +66,27 @@ describe('map styling', () => {
     expect(getMarkerTone({ nodeType: 'OSD', status: 'WELDED', hasPhoto: false })).toBe('done');
   });
 
+  it('shows passive nodes with photos as in progress until welding is confirmed', () => {
+    const tone = getMarkerTone({ nodeType: 'OSD', status: 'PENDING', hasPhoto: true });
+
+    expect(tone).toBe('nodePhoto');
+    expect(getMarkerToneStyle(tone)).toMatchObject({
+      color: '#f97316',
+      border: '#c2410c',
+    });
+    expect(getMarkerTone({ nodeType: 'OSD', status: 'WELDED', hasPhoto: true })).toBe('done');
+  });
+
   it('counts suspended ADSS and pulled duct cables as ready', () => {
     expect(isCableReady('PENDING')).toBe(false);
     expect(isCableReady('DUCT_READY')).toBe(false);
     expect(isCableReady('PULLED')).toBe(true);
     expect(isCableReady('SUSPENDED')).toBe(true);
+  });
+
+  it('does not count passive node photos as welded work', () => {
+    expect(isNodeReady('PENDING', true)).toBe(false);
+    expect(isNodeReady('WELDED', false)).toBe(true);
   });
 
   it('uses gray for map addresses marked as not applicable', () => {

@@ -547,6 +547,197 @@ describe('projects routes', () => {
     expect(existsSync(nodeDetail.json().photos[0].storagePath)).toBe(true);
   });
 
+  it('deletes selected checklist photos and removes their files', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'photo-local-delete-photo-'));
+    process.env.PHOTO_LOCAL_DB = join(dir, 'test.sqlite');
+    process.env.PHOTO_BASE_DIR = join(dir, 'photos');
+
+    const { app, db } = await buildApp();
+    const repository = new ProjectsRepository(db);
+    const projectFolder = join(dir, 'photos', 'PROJEKT');
+    const project = repository.createProject({
+      name: 'PROJEKT',
+      projectDefinition: null,
+      projectType: 'SI',
+      splitterTopology: 'SINGLE',
+      splitterTopologySource: 'AUTO',
+      splitterCount: 1,
+      gpkgFileName: 'projekt.gpkg',
+      baseFolder: projectFolder,
+      addresses: [],
+      dacToAddressCableCount: 0,
+      adssToAddressCableCount: 0,
+      checklistNodes: [
+        {
+          id: 'node-source',
+          projectId: 'project-temp',
+          parentId: null,
+          name: 'ZS0001',
+          path: 'ZS0001',
+          nodeType: 'STATIC',
+          addressId: null,
+          sortOrder: 0,
+          minPhotos: 1,
+          acceptsPhotos: true,
+        },
+      ],
+    });
+    const storagePath = join(projectFolder, 'ZS0001', 'zs.jpeg');
+    const thumbnailPath = join(projectFolder, '.thumbnails', 'photo-delete.webp');
+    mkdirSync(join(projectFolder, 'ZS0001'), { recursive: true });
+    mkdirSync(join(projectFolder, '.thumbnails'), { recursive: true });
+    writeFileSync(storagePath, 'photo');
+    writeFileSync(thumbnailPath, 'thumb');
+    repository.addPhoto({
+      id: 'photo-delete',
+      projectId: project.id,
+      checklistNodeId: 'node-source',
+      sourceFileName: 'source.jpeg',
+      storedFileName: 'zs.jpeg',
+      storagePath,
+      thumbnailPath,
+      mimeType: 'image/jpeg',
+      fileSize: 5,
+      lat: null,
+      lng: null,
+      capturedAt: null,
+      reserveLocation: null,
+    });
+
+    const response = await app.inject({
+      method: 'DELETE',
+      url: `/api/projects/${project.id}/checklist/node-source/photos`,
+      headers: { 'content-type': 'application/json' },
+      payload: JSON.stringify({ photoIds: ['photo-delete'] }),
+    });
+    const nodeDetail = await app.inject({
+      method: 'GET',
+      url: `/api/projects/${project.id}/checklist/node-source`,
+    });
+    const checklist = repository.getChecklist(project.id) as Array<{ id: string; photoCount: number; status: string }>;
+    await app.close();
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ deleted: 1 });
+    expect(existsSync(storagePath)).toBe(false);
+    expect(existsSync(thumbnailPath)).toBe(false);
+    expect(nodeDetail.json().photos).toHaveLength(0);
+    expect(checklist.find((node) => node.id === 'node-source')).toMatchObject({
+      photoCount: 0,
+      status: 'OPEN',
+    });
+  });
+
+  it('moves selected checklist photos to another checklist folder', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'photo-local-move-folder-'));
+    process.env.PHOTO_LOCAL_DB = join(dir, 'test.sqlite');
+    process.env.PHOTO_BASE_DIR = join(dir, 'photos');
+
+    const { app, db } = await buildApp();
+    const repository = new ProjectsRepository(db);
+    const projectFolder = join(dir, 'photos', 'PROJEKT');
+    const project = repository.createProject({
+      name: 'PROJEKT',
+      projectDefinition: null,
+      projectType: 'SI',
+      splitterTopology: 'SINGLE',
+      splitterTopologySource: 'AUTO',
+      splitterCount: 1,
+      gpkgFileName: 'projekt.gpkg',
+      baseFolder: projectFolder,
+      addresses: [],
+      dacToAddressCableCount: 0,
+      adssToAddressCableCount: 0,
+      checklistNodes: [
+        {
+          id: 'node-source',
+          projectId: 'project-temp',
+          parentId: null,
+          name: 'ZS0001',
+          path: 'ZS0001',
+          nodeType: 'STATIC',
+          addressId: null,
+          sortOrder: 0,
+          minPhotos: 1,
+          acceptsPhotos: true,
+        },
+        {
+          id: 'node-target',
+          projectId: 'project-temp',
+          parentId: null,
+          name: 'Docelowy folder',
+          path: 'Docelowy_folder',
+          nodeType: 'STATIC',
+          addressId: null,
+          sortOrder: 1,
+          minPhotos: 1,
+          acceptsPhotos: true,
+        },
+      ],
+    });
+    const storagePath = join(projectFolder, 'ZS0001', 'zs.jpeg');
+    const thumbnailPath = join(projectFolder, '.thumbnails', 'photo-move.webp');
+    mkdirSync(join(projectFolder, 'ZS0001'), { recursive: true });
+    mkdirSync(join(projectFolder, '.thumbnails'), { recursive: true });
+    writeFileSync(storagePath, 'photo');
+    writeFileSync(thumbnailPath, 'thumb');
+    repository.addPhoto({
+      id: 'photo-move',
+      projectId: project.id,
+      checklistNodeId: 'node-source',
+      sourceFileName: 'source.jpeg',
+      storedFileName: 'zs.jpeg',
+      storagePath,
+      thumbnailPath,
+      mimeType: 'image/jpeg',
+      fileSize: 5,
+      lat: null,
+      lng: null,
+      capturedAt: null,
+      reserveLocation: null,
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/api/projects/${project.id}/checklist/node-source/photos/move`,
+      headers: { 'content-type': 'application/json' },
+      payload: JSON.stringify({ photoIds: ['photo-move'], targetNodeId: 'node-target' }),
+    });
+    const sourceDetail = await app.inject({
+      method: 'GET',
+      url: `/api/projects/${project.id}/checklist/node-source`,
+    });
+    const targetDetail = await app.inject({
+      method: 'GET',
+      url: `/api/projects/${project.id}/checklist/node-target`,
+    });
+    const checklist = repository.getChecklist(project.id) as Array<{ id: string; photoCount: number; status: string }>;
+    await app.close();
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({ moved: 1 });
+    expect(existsSync(storagePath)).toBe(false);
+    expect(sourceDetail.json().photos).toHaveLength(0);
+    expect(targetDetail.json().photos).toEqual([
+      expect.objectContaining({
+        id: 'photo-move',
+        checklistNodeId: 'node-target',
+        storedFileName: 'SOURCE_1.jpeg',
+        reserveLocation: null,
+      }),
+    ]);
+    expect(targetDetail.json().photos[0].storagePath).toContain('Docelowy_folder');
+    expect(existsSync(targetDetail.json().photos[0].storagePath)).toBe(true);
+    expect(checklist.find((node) => node.id === 'node-source')).toMatchObject({
+      photoCount: 0,
+      status: 'OPEN',
+    });
+    expect(checklist.find((node) => node.id === 'node-target')).toMatchObject({
+      photoCount: 1,
+      status: 'COMPLETE',
+    });
+  });
+
   it('lists and accepts a reviewed Google Chat batch into multiple checklist nodes', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'photo-local-chat-review-route-'));
     process.env.PHOTO_LOCAL_DB = join(dir, 'test.sqlite');

@@ -17,6 +17,7 @@ import {
   RefreshCw,
   FolderPlus,
   Map,
+  Trash2,
 } from 'lucide-react';
 import { api } from '../api';
 import type { ChatBatch, ChecklistNode, ChecklistNodeDetail, ChecklistPhoto, ProjectSummary, ReserveLocation } from '../types';
@@ -75,6 +76,13 @@ function collectContainerNodes(nodes: ChecklistNode[]): ChecklistNode[] {
   ]);
 }
 
+function collectPhotoNodes(nodes: ChecklistNode[]): ChecklistNode[] {
+  return nodes.flatMap((node) => [
+    ...(node.acceptsPhotos ? [node] : []),
+    ...collectPhotoNodes(node.children),
+  ]);
+}
+
 function collectAncestorIds(nodes: ChecklistNode[], targetId: string, trail: string[] = []): string[] | null {
   for (const node of nodes) {
     if (node.id === targetId) return trail;
@@ -116,6 +124,10 @@ function formatBytes(value: number): string {
   return `${(value / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+function isReserveNodePath(path: string): boolean {
+  return path.startsWith('Zapasy_kabli_instalacyjnych') || path.startsWith('Zapasy_kabli_napowietrznych');
+}
+
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'Nieznany blad';
 }
@@ -141,6 +153,9 @@ export default function ProjectView({
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [selectedPhotoIds, setSelectedPhotoIds] = useState<Set<string>>(new Set());
   const [movingPhotos, setMovingPhotos] = useState(false);
+  const [deletingPhotos, setDeletingPhotos] = useState(false);
+  const [moveTargetNodeId, setMoveTargetNodeId] = useState('');
+  const [moveReserveLocation, setMoveReserveLocation] = useState<ReserveLocation>('Doziemny');
   const [editingName, setEditingName] = useState(false);
   const [draftName, setDraftName] = useState(project.name);
   const [savingName, setSavingName] = useState(false);
@@ -240,9 +255,19 @@ export default function ProjectView({
   );
   const missingCount = useMemo(() => collectMissingNodes(nodes).length, [nodes]);
   const containerNodes = useMemo(() => collectContainerNodes(nodes), [nodes]);
+  const photoMoveTargets = useMemo(
+    () => collectPhotoNodes(nodes).filter((node) => node.id !== selectedNodeId),
+    [nodes, selectedNodeId],
+  );
+  const selectedMoveTarget = useMemo(
+    () => (moveTargetNodeId ? findNode(nodes, moveTargetNodeId) : null),
+    [nodes, moveTargetNodeId],
+  );
+  const moveTargetNeedsReserveLocation = selectedMoveTarget ? isReserveNodePath(selectedMoveTarget.path) : false;
 
   const handleNodeSelect = (node: ChecklistNode) => {
     setSelectedNodeId(node.id);
+    setMoveTargetNodeId('');
     const ancestors = collectAncestorIds(nodes, node.id) ?? [];
     setExpandedIds((current) => new Set([...current, ...ancestors]));
     if (node.path.startsWith('Zapasy_kabli_napowietrznych')) {
@@ -365,6 +390,47 @@ export default function ProjectView({
       alert('Blad podczas przenoszenia zdjec');
     } finally {
       setMovingPhotos(false);
+    }
+  };
+
+  const handleMoveToFolder = async () => {
+    if (!selectedNodeId || selectedPhotoIds.size === 0 || !moveTargetNodeId) return;
+
+    setMovingPhotos(true);
+    try {
+      await api.movePhotos(
+        projectId,
+        selectedNodeId,
+        [...selectedPhotoIds],
+        moveTargetNodeId,
+        moveTargetNeedsReserveLocation ? moveReserveLocation : null,
+      );
+      await refreshChecklist(selectedNodeId);
+      await refreshNodeDetail(selectedNodeId);
+      setMoveTargetNodeId('');
+    } catch (err) {
+      console.error(err);
+      alert('Blad podczas przenoszenia zdjec do folderu');
+    } finally {
+      setMovingPhotos(false);
+    }
+  };
+
+  const handleDeleteSelectedPhotos = async () => {
+    if (!selectedNodeId || selectedPhotoIds.size === 0) return;
+    const count = selectedPhotoIds.size;
+    if (!window.confirm(`Usunac zaznaczone zdjecia (${count}) z bazy i folderu?`)) return;
+
+    setDeletingPhotos(true);
+    try {
+      await api.deletePhotos(projectId, selectedNodeId, [...selectedPhotoIds]);
+      await refreshChecklist(selectedNodeId);
+      await refreshNodeDetail(selectedNodeId);
+    } catch (err) {
+      console.error(err);
+      alert('Blad podczas usuwania zdjec');
+    } finally {
+      setDeletingPhotos(false);
     }
   };
 
@@ -737,6 +803,72 @@ export default function ProjectView({
                           <CheckCheck size={16} className="mr-2" />
                           {allVisibleNodePhotosSelected ? 'Odznacz wszystko' : 'Zaznacz wszystko'}
                         </Button>
+                      </div>
+
+                      <div className="rounded-lg border border-border bg-muted/20 p-3 flex flex-col gap-3">
+                        <div className="flex flex-col gap-2 lg:flex-row lg:items-center">
+                          <span className="text-sm text-muted-foreground lg:w-32">
+                            Zaznaczone: {selectedPhotoIds.size}
+                          </span>
+                          <select
+                            value={moveTargetNodeId}
+                            onChange={(event) => setMoveTargetNodeId(event.target.value)}
+                            className="h-9 flex-1 min-w-0 rounded-md border border-input bg-background px-2 text-sm"
+                          >
+                            <option value="">Przenies do innego folderu...</option>
+                            {photoMoveTargets.map((node) => (
+                              <option key={node.id} value={node.id}>
+                                {node.path}
+                              </option>
+                            ))}
+                          </select>
+                          {moveTargetNeedsReserveLocation && (
+                            <select
+                              value={moveReserveLocation}
+                              onChange={(event) => setMoveReserveLocation(event.target.value as ReserveLocation)}
+                              className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+                            >
+                              <option value="Doziemny">Zapas doziemny</option>
+                              <option value="W studni">Zapas w studni</option>
+                              <option value="Napowietrzny">Zapas napow.</option>
+                            </select>
+                          )}
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={selectedPhotoIds.size === 0 || !moveTargetNodeId || movingPhotos}
+                            onClick={handleMoveToFolder}
+                          >
+                            <FolderPlus size={15} className="mr-2" />
+                            Przenies
+                          </Button>
+                          <Button
+                            variant="destructive"
+                            size="sm"
+                            disabled={selectedPhotoIds.size === 0 || deletingPhotos}
+                            onClick={handleDeleteSelectedPhotos}
+                          >
+                            <Trash2 size={15} className="mr-2" />
+                            Usun
+                          </Button>
+                        </div>
+
+                        {selectedNode && isReserveNodePath(selectedNode.path) && selectedPhotoIds.size > 0 && (
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="text-xs text-muted-foreground">Zmien typ zapasu:</span>
+                            {(['Doziemny', 'W studni', 'Napowietrzny'] as ReserveLocation[]).map((location) => (
+                              <Button
+                                key={location}
+                                variant="secondary"
+                                size="sm"
+                                disabled={movingPhotos}
+                                onClick={() => handleBulkMove(location)}
+                              >
+                                {location}
+                              </Button>
+                            ))}
+                          </div>
+                        )}
                       </div>
 
                       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">

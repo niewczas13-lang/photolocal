@@ -153,16 +153,17 @@ function cableTask(cable: ProjectMapCable): MapTaskRow {
 }
 
 function nodeTask(node: ProjectMapInfraNode): MapTaskRow {
-  const isDone = node.status === 'WELDED' || node.hasPhoto;
+  const isDone = node.status === 'WELDED';
+  const isProgress = !isDone && node.hasPhoto;
   return {
     id: `node-${node.id}`,
     sourceId: node.id,
     kind: 'node',
     title: node.label ?? node.name,
     subtitle: `${node.nodeType} · ${node.name}`,
-    statusLabel: isDone ? (node.hasPhoto && node.status !== 'WELDED' ? 'Jest zdjecie' : 'Wyspawane') : 'Do zrobienia',
-    summary: isDone ? 'Punkt wyspawany' : 'Punkt do spawania',
-    stage: isDone ? 'done' : 'todo',
+    statusLabel: isDone ? 'Wyspawane' : isProgress ? 'Jest zdjecie' : 'Do zrobienia',
+    summary: isDone ? 'Punkt wyspawany' : isProgress ? 'Zdjecie dodane, spaw do potwierdzenia' : 'Punkt do spawania',
+    stage: isDone ? 'done' : isProgress ? 'progress' : 'todo',
     nodeStatus: node.status,
   };
 }

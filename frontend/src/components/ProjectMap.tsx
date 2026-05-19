@@ -562,14 +562,23 @@ function NodePopup({
 }) {
   const actions = getNodeStatusActions(node.status);
   const label = node.label ?? node.name;
+  const nodeWelded = node.status === 'WELDED';
+  const nodeStatusLabel = nodeWelded
+    ? 'Wyspawane'
+    : node.hasPhoto
+      ? 'Jest zdjecie, spaw do potwierdzenia'
+      : STATUS_LABELS[node.status];
 
   return (
     <div className="project-map-popup">
       <div className="project-map-popup__title">{label}</div>
       <div className="project-map-popup__meta">{node.nodeType}</div>
       <div className="project-map-popup__status-row">
-        <Badge variant={node.status === 'WELDED' || node.hasPhoto ? 'default' : 'outline'}>
-          {node.hasPhoto ? 'Jest zdjecie' : STATUS_LABELS[node.status]}
+        <Badge
+          variant={nodeWelded ? 'default' : 'outline'}
+          className={!nodeWelded && node.hasPhoto ? 'border-orange-300 bg-orange-50 text-orange-700' : undefined}
+        >
+          {nodeStatusLabel}
         </Badge>
       </div>
       <MiniPhotoGallery projectId={projectId} photos={node.photos} />
@@ -1216,6 +1225,7 @@ export default function ProjectMap({ projectId, view, onViewChange }: ProjectMap
             <span><span className="project-map-dot project-map-dot--red" /> adres bez zapasu</span>
             <span><span className="project-map-dot project-map-dot--gray" /> adres nie dotyczy</span>
             <span><span className="project-map-dot project-map-dot--blue" /> adres do dodania</span>
+            <span><span className="project-map-dot project-map-dot--orange" /> punkt ze zdjeciem</span>
             <span><span className="project-map-line project-map-line--underground" /> kabel doziemny</span>
             <span><span className="project-map-line project-map-line--aerial" /> kabel napowietrzny</span>
             <span><span className="project-map-line project-map-line--duct" /> istniejaca kanalizacja</span>

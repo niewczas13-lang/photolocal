@@ -173,6 +173,45 @@ describe('map task list', () => {
     ]);
   });
 
+  it('keeps passive nodes with photos in progress until welding is confirmed', () => {
+    const rows = getMapTaskRows(
+      mapData({
+        infraNodes: [
+          {
+            id: 'node-with-photo',
+            nodeType: 'ZS',
+            name: 'OSTRZESZEWO/ZS0001',
+            label: 'ZS0001',
+            lat: 53.75,
+            lng: 20.55,
+            status: 'PENDING',
+            hasPhoto: true,
+            photos: [
+              {
+                id: 'photo-zs',
+                checklistNodeId: 'checklist-zs',
+                storedFileName: 'zs.jpeg',
+                reserveLocation: null,
+                uploadedAt: '2026-05-19T10:00:00.000Z',
+              },
+            ],
+          },
+        ],
+        addresses: [],
+        trunkCables: [],
+      }),
+    );
+
+    expect(rows).toEqual([
+      expect.objectContaining({
+        id: 'node-node-with-photo',
+        statusLabel: 'Jest zdjecie',
+        summary: 'Zdjecie dodane, spaw do potwierdzenia',
+        stage: 'progress',
+      }),
+    ]);
+  });
+
   it('sorts tasks into collapsible stage and kind folders', () => {
     const rows = getMapTaskRows(
       mapData({

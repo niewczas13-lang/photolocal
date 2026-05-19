@@ -119,6 +119,17 @@ export interface ChecklistPhotoRecord {
   reserveLocation: string | null;
 }
 
+export interface MovePhotoRecordInput {
+  projectId: string;
+  photoId: string;
+  sourceNodeId: string;
+  targetNodeId: string;
+  storedFileName: string;
+  storagePath: string;
+  thumbnailPath: string | null;
+  reserveLocation: string | null;
+}
+
 export interface CreateProjectInput {
   name: string;
   projectDefinition: string | null;
@@ -2112,6 +2123,80 @@ export class ProjectsRepository {
          WHERE id = ?`,
       )
       .run(input.storedFileName, input.storagePath, input.thumbnailPath, input.reserveLocation, photoId);
+  }
+
+  private refreshChecklistNodeStatus(projectId: string, nodeId: string): void {
+    this.db
+      .prepare(
+        `UPDATE checklist_nodes
+         SET status = CASE
+           WHEN status = 'NOT_APPLICABLE' THEN status
+           WHEN accepts_photos = 1
+             AND min_photos > 0
+             AND (
+               SELECT COUNT(*)
+               FROM photos
+               WHERE checklist_node_id = checklist_nodes.id
+             ) >= min_photos THEN 'COMPLETE'
+           ELSE 'OPEN'
+         END,
+         updated_at = CURRENT_TIMESTAMP
+         WHERE project_id = ? AND id = ?`,
+      )
+      .run(projectId, nodeId);
+  }
+
+  deletePhotoRecords(projectId: string, nodeId: string, photoIds: string[]): number {
+    if (photoIds.length === 0) return 0;
+
+    const placeholders = photoIds.map(() => '?').join(', ');
+    const tx = this.db.transaction(() => {
+      const result = this.db
+        .prepare(
+          `DELETE FROM photos
+           WHERE project_id = ?
+             AND checklist_node_id = ?
+             AND id IN (${placeholders})`,
+        )
+        .run(projectId, nodeId, ...photoIds);
+
+      this.refreshChecklistNodeStatus(projectId, nodeId);
+      this.db.prepare(`UPDATE projects SET updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(projectId);
+      return result.changes;
+    });
+
+    return Number(tx());
+  }
+
+  movePhotoRecord(input: MovePhotoRecordInput): void {
+    const tx = this.db.transaction(() => {
+      this.db
+        .prepare(
+          `UPDATE photos
+           SET checklist_node_id = ?,
+               stored_file_name = ?,
+               storage_path = ?,
+               thumbnail_path = ?,
+               reserve_location = ?
+           WHERE project_id = ? AND id = ? AND checklist_node_id = ?`,
+        )
+        .run(
+          input.targetNodeId,
+          input.storedFileName,
+          input.storagePath,
+          input.thumbnailPath,
+          input.reserveLocation,
+          input.projectId,
+          input.photoId,
+          input.sourceNodeId,
+        );
+
+      this.refreshChecklistNodeStatus(input.projectId, input.sourceNodeId);
+      this.refreshChecklistNodeStatus(input.projectId, input.targetNodeId);
+      this.db.prepare(`UPDATE projects SET updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(input.projectId);
+    });
+
+    tx();
   }
 
   addPhoto(input: AddPhotoInput): void {

@@ -303,6 +303,24 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ photoIds, reserveLocation }),
     }),
+  deletePhotos: (projectId: string, nodeId: string, photoIds: string[]) =>
+    request<{ deleted: number }>(`/api/projects/${projectId}/checklist/${nodeId}/photos`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ photoIds }),
+    }),
+  movePhotos: (
+    projectId: string,
+    nodeId: string,
+    photoIds: string[],
+    targetNodeId: string,
+    reserveLocation: ReserveLocation | null,
+  ) =>
+    request<{ moved: number }>(`/api/projects/${projectId}/checklist/${nodeId}/photos/move`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ photoIds, targetNodeId, reserveLocation }),
+    }),
   photoThumbUrl: (projectId: string, photoId: string) => `/api/projects/${projectId}/photos/${photoId}/thumb`,
   photoFileUrl: (projectId: string, photoId: string) => `/api/projects/${projectId}/photos/${photoId}/file`,
   chatBatchFileUrl: (projectId: string, batchId: string, fileId: string) =>

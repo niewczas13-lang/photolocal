@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type Database from 'better-sqlite3';
 import { existsSync, mkdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -190,8 +190,32 @@ function toOptionalDistributionNodeType(value: unknown): 'OSD' | 'OPP' | null {
   return value === 'OSD' || value === 'OPP' ? value : null;
 }
 
+function toUniqueStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return [
+    ...new Set(
+      value
+        .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+        .map((item) => item.trim()),
+    ),
+  ];
+}
+
+function isReserveChecklistPath(path: string): boolean {
+  return path.startsWith('Zapasy_kabli_instalacyjnych') || path.startsWith('Zapasy_kabli_napowietrznych');
+}
+
 function isMissingFileError(error: unknown): boolean {
   return Boolean(error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT');
+}
+
+async function removeFileIfExists(path: string | null): Promise<void> {
+  if (!path) return;
+  try {
+    await unlink(path);
+  } catch (error) {
+    if (!isMissingFileError(error)) throw error;
+  }
 }
 
 export interface RegisterProjectRoutesOptions {
@@ -1077,6 +1101,86 @@ export async function registerProjectRoutes(
     }
 
     return { moved: photos.filter((photo) => photo.reserveLocation !== reserveLocation).length };
+  });
+
+  app.delete('/api/projects/:projectId/checklist/:nodeId/photos', async (request, reply) => {
+    const { projectId, nodeId } = request.params as { projectId: string; nodeId: string };
+    const body = request.body as { photoIds?: unknown };
+    const project = repository.getProject(projectId);
+    const node = repository.getChecklistNode(projectId, nodeId);
+    const photoIds = toUniqueStringArray(body.photoIds);
+
+    if (!project || !node) return reply.status(404).send({ error: 'Project or checklist node not found' });
+    if (photoIds.length === 0) return reply.status(400).send({ error: 'photoIds are required' });
+
+    const photos = repository.getPhotosByIds(projectId, nodeId, photoIds);
+    if (photos.length !== photoIds.length) return reply.status(404).send({ error: 'Some photos were not found' });
+
+    for (const photo of photos) {
+      await removeFileIfExists(photo.storagePath);
+      await removeFileIfExists(photo.thumbnailPath);
+    }
+
+    return { deleted: repository.deletePhotoRecords(projectId, nodeId, photoIds) };
+  });
+
+  app.post('/api/projects/:projectId/checklist/:nodeId/photos/move', async (request, reply) => {
+    const { projectId, nodeId } = request.params as { projectId: string; nodeId: string };
+    const body = request.body as { photoIds?: unknown; targetNodeId?: unknown; reserveLocation?: unknown };
+    const project = repository.getProject(projectId);
+    const sourceNode = repository.getChecklistNode(projectId, nodeId);
+    const targetNodeId = typeof body.targetNodeId === 'string' ? body.targetNodeId.trim() : '';
+    const targetNode = targetNodeId ? repository.getChecklistNode(projectId, targetNodeId) : undefined;
+    const photoIds = toUniqueStringArray(body.photoIds);
+
+    if (!project || !sourceNode || !targetNode) {
+      return reply.status(404).send({ error: 'Project, source node, or target node not found' });
+    }
+    if (photoIds.length === 0) return reply.status(400).send({ error: 'photoIds are required' });
+    if (targetNode.id === sourceNode.id) return reply.status(400).send({ error: 'targetNodeId must be different' });
+    if (!Boolean(targetNode.acceptsPhotos)) {
+      return reply.status(400).send({ error: 'Target checklist node does not accept photos' });
+    }
+
+    const targetReserveLocation = isReserveChecklistPath(targetNode.path)
+      ? isReserveLocation(body.reserveLocation)
+        ? body.reserveLocation
+        : null
+      : null;
+    if (isReserveChecklistPath(targetNode.path) && !targetReserveLocation) {
+      return reply.status(400).send({ error: 'reserveLocation is required for target reserve node' });
+    }
+
+    const photos = repository.getPhotosByIds(projectId, nodeId, photoIds);
+    if (photos.length !== photoIds.length) return reply.status(404).send({ error: 'Some photos were not found' });
+
+    let existingCount = repository.countPhotosForNode(targetNode.id, targetReserveLocation);
+    for (const photo of photos) {
+      const target = resolvePhotoTarget({
+        projectFolder: project.baseFolder,
+        nodePath: targetNode.path,
+        nodeName: targetNode.name,
+        existingCount,
+        reserveLocation: targetReserveLocation,
+        sourceFileName: photo.sourceFileName,
+      });
+
+      await mkdir(dirname(target.absolutePath), { recursive: true });
+      await rename(photo.storagePath, target.absolutePath);
+      repository.movePhotoRecord({
+        projectId,
+        photoId: photo.id,
+        sourceNodeId: nodeId,
+        targetNodeId: targetNode.id,
+        storedFileName: target.fileName,
+        storagePath: target.absolutePath,
+        thumbnailPath: photo.thumbnailPath,
+        reserveLocation: targetReserveLocation,
+      });
+      existingCount += 1;
+    }
+
+    return { moved: photos.length };
   });
 
   app.post('/api/projects', async (request, reply) => {

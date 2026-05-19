@@ -5,7 +5,7 @@ import type {
   ProjectMapNodeStatus,
 } from './types';
 
-export type MarkerTone = 'addressPending' | 'notApplicable' | 'done' | 'osd' | 'opp' | 'zs';
+export type MarkerTone = 'addressPending' | 'notApplicable' | 'done' | 'nodePhoto' | 'osd' | 'opp' | 'zs';
 
 export interface MarkerToneStyle {
   color: string;
@@ -84,14 +84,15 @@ export function isCableReady(status: ProjectMapCableStatus): boolean {
   return status === 'PULLED' || status === 'WELDED' || status === 'SUSPENDED';
 }
 
-export function isNodeReady(status: ProjectMapNodeStatus, hasPhoto: boolean): boolean {
-  return status === 'WELDED' || hasPhoto;
+export function isNodeReady(status: ProjectMapNodeStatus, _hasPhoto: boolean): boolean {
+  return status === 'WELDED';
 }
 
 export function getMarkerTone(
   node: Pick<ProjectMapInfraNode, 'nodeType' | 'status' | 'hasPhoto'>,
 ): MarkerTone {
   if (isNodeReady(node.status, node.hasPhoto)) return 'done';
+  if (node.hasPhoto) return 'nodePhoto';
   if (node.nodeType === 'OSD') return 'osd';
   if (node.nodeType === 'OPP') return 'opp';
   return 'zs';
@@ -99,6 +100,7 @@ export function getMarkerTone(
 
 export function getMarkerToneStyle(tone: MarkerTone): MarkerToneStyle {
   if (tone === 'done') return { color: '#16a34a', border: '#166534' };
+  if (tone === 'nodePhoto') return { color: '#f97316', border: '#c2410c' };
   if (tone === 'notApplicable') return { color: '#94a3b8', border: '#475569' };
   if (tone === 'osd') return { color: '#2563eb', border: '#1d4ed8' };
   if (tone === 'opp') return { color: '#9333ea', border: '#7e22ce' };
