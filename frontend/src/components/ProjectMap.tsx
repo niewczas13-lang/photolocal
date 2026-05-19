@@ -27,6 +27,7 @@ import { getMapBoundsPositions } from '../map-bounds';
 import { formatCableLength } from '../map-format';
 import {
   INFRASTRUCTURE_MAP_PANE,
+  INFRASTRUCTURE_POPUP_PANE,
   INFRASTRUCTURE_PANE_STYLE,
   getInfrastructureLineStyle,
   getInfrastructurePointIconSpec,
@@ -1162,7 +1163,7 @@ export default function ProjectMap({ projectId, view, onViewChange }: ProjectMap
                           pathOptions={getInfrastructureLineStyle()}
                           pane={INFRASTRUCTURE_MAP_PANE}
                         >
-                          <Popup>
+                          <Popup pane={INFRASTRUCTURE_POPUP_PANE}>
                             <InfrastructurePopup feature={feature} />
                           </Popup>
                         </Polyline>
@@ -1178,7 +1179,7 @@ export default function ProjectMap({ projectId, view, onViewChange }: ProjectMap
                         icon={infrastructurePointIcon(feature.featureType)}
                         pane={INFRASTRUCTURE_MAP_PANE}
                       >
-                        <Popup>
+                        <Popup pane={INFRASTRUCTURE_POPUP_PANE}>
                           <InfrastructurePopup feature={feature} />
                         </Popup>
                       </Marker>

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   INFRASTRUCTURE_MAP_PANE,
+  INFRASTRUCTURE_POPUP_PANE,
   INFRASTRUCTURE_PANE_STYLE,
   getInfrastructureLineStyle,
   getInfrastructurePointIconSpec,
@@ -36,5 +37,10 @@ describe('infrastructure map styling', () => {
   it('uses a low map pane so infrastructure stays under project layers', () => {
     expect(INFRASTRUCTURE_MAP_PANE).toBe('project-map-infrastructure');
     expect(INFRASTRUCTURE_PANE_STYLE.zIndex).toBeLessThan(400);
+  });
+
+  it('keeps infrastructure popups in the normal top popup pane', () => {
+    expect(INFRASTRUCTURE_POPUP_PANE).toBe('popupPane');
+    expect(INFRASTRUCTURE_POPUP_PANE).not.toBe(INFRASTRUCTURE_MAP_PANE);
   });
 });

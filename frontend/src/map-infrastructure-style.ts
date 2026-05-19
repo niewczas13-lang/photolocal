@@ -3,6 +3,7 @@ import type { PathOptions } from 'leaflet';
 import type { ProjectMapInfrastructureFeatureType } from './types';
 
 export const INFRASTRUCTURE_MAP_PANE = 'project-map-infrastructure';
+export const INFRASTRUCTURE_POPUP_PANE = 'popupPane';
 export const INFRASTRUCTURE_PANE_STYLE = { zIndex: 250 };
 
 export interface InfrastructurePointIconSpec {
