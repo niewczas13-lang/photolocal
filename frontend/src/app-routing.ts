@@ -4,6 +4,7 @@ export interface PhotoRoute {
   mode: 'photos';
   projectId: string | null;
   tab: ProjectTab;
+  nodeId?: string;
 }
 
 export interface MapRoute {
@@ -37,11 +38,18 @@ export function parseRouteFromHash(hash: string): AppRoute {
   }
 
   const tab = PROJECT_TABS.has(parts[2] as ProjectTab) ? (parts[2] as ProjectTab) : DEFAULT_TAB;
-  return { mode: 'photos', projectId: decodeURIComponent(parts[1]), tab };
+  const nodeId = tab === 'photos' && parts[3] ? decodeURIComponent(parts[3]) : undefined;
+  return { mode: 'photos', projectId: decodeURIComponent(parts[1]), tab, ...(nodeId ? { nodeId } : {}) };
 }
 
-export function photoProjectRoute(projectId: string | null, tab: ProjectTab = DEFAULT_TAB): string {
-  return projectId ? `/projects/${encodeURIComponent(projectId)}/${tab}` : projectListRoute();
+export function photoProjectRoute(
+  projectId: string | null,
+  tab: ProjectTab = DEFAULT_TAB,
+  nodeId?: string | null,
+): string {
+  if (!projectId) return projectListRoute();
+  const suffix = tab === 'photos' && nodeId ? `/${encodeURIComponent(nodeId)}` : '';
+  return `/projects/${encodeURIComponent(projectId)}/${tab}${suffix}`;
 }
 
 export function mapProjectRoute(projectId: string | null, view: MapView = 'map'): string {

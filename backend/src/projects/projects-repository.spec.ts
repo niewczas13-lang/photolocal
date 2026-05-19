@@ -724,6 +724,7 @@ describe('ProjectsRepository', () => {
     expect(map.addresses[0].photos).toEqual([
       expect.objectContaining({
         id: 'photo-reserve',
+        checklistNodeId: 'reserve-address-1',
         storedFileName: 'reserve.jpeg',
       }),
     ]);

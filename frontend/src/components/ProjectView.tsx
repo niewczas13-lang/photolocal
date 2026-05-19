@@ -36,8 +36,9 @@ import { Card, CardContent } from './ui/card';
 interface ProjectViewProps {
   project: ProjectSummary;
   initialTab: ProjectTab;
+  initialNodeId: string | null;
   onBack: () => void;
-  onTabChange: (tab: ProjectTab) => void;
+  onTabChange: (tab: ProjectTab, nodeId?: string | null) => void;
   onOpenMap: () => void;
   onOpenSettings: () => void;
   onRename: (newName: string) => void;
@@ -122,6 +123,7 @@ function getErrorMessage(error: unknown): string {
 export default function ProjectView({
   project,
   initialTab,
+  initialNodeId,
   onBack,
   onTabChange,
   onOpenMap,
@@ -214,9 +216,9 @@ export default function ProjectView({
   };
 
   useEffect(() => {
-    void refreshChecklist(null);
+    void refreshChecklist(initialNodeId);
     void refreshChatBatches();
-  }, [projectId]);
+  }, [projectId, initialNodeId]);
 
   useEffect(() => {
     setActiveTab(initialTab);
@@ -247,7 +249,7 @@ export default function ProjectView({
       setReserveLocation('Napowietrzny');
     }
     setActiveTab('photos');
-    onTabChange('photos');
+    onTabChange('photos', node.id);
   };
 
   const openAddFolderForm = () => {
@@ -598,7 +600,7 @@ export default function ProjectView({
             onValueChange={(value) => {
               const nextTab = value as ProjectTab;
               setActiveTab(nextTab);
-              onTabChange(nextTab);
+              onTabChange(nextTab, nextTab === 'photos' ? selectedNodeId : null);
             }}
             className="flex-1 flex flex-col min-h-0"
           >

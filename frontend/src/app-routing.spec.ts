@@ -42,6 +42,13 @@ describe('app routing', () => {
   it('builds isolated hash routes for PhotoLocal and map workspace', () => {
     expect(projectListRoute()).toBe('/');
     expect(photoProjectRoute('project-1', 'review')).toBe('/projects/project-1/review');
+    expect(photoProjectRoute('project-1', 'photos', 'node-5')).toBe('/projects/project-1/photos/node-5');
+    expect(parseRouteFromHash('#/projects/project-1/photos/node-5')).toEqual({
+      mode: 'photos',
+      projectId: 'project-1',
+      tab: 'photos',
+      nodeId: 'node-5',
+    });
     expect(mapProjectRoute('project-1')).toBe('/mapa/projects/project-1');
     expect(mapProjectRoute('project-1', 'tasks')).toBe('/mapa/projects/project-1/tasks');
     expect(mapProjectRoute('project-1', 'notes')).toBe('/mapa/projects/project-1/notes');

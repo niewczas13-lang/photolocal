@@ -524,6 +524,7 @@
   color: var(--muted-foreground);
   font-size: 12px;
   font-weight: 700;
+  text-decoration: none;
 }
 
 .project-map-status-button {

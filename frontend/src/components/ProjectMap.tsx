@@ -19,7 +19,7 @@ import {
 import type { Feature, GeoJsonObject, Geometry } from 'geojson';
 
 import { api } from '../api';
-import type { MapView } from '../app-routing';
+import { photoProjectRoute, type MapView } from '../app-routing';
 import { cn } from '../lib/utils';
 import { formatCableLength } from '../map-format';
 import {
@@ -378,6 +378,8 @@ function MapNoteTargetPanel({
 
 function MiniPhotoGallery({ projectId, photos }: { projectId: string; photos: ProjectMapPhoto[] }) {
   if (photos.length === 0) return null;
+  const galleryPhoto = photos[4] ?? photos[0];
+  const galleryHref = `#${photoProjectRoute(projectId, 'photos', galleryPhoto.checklistNodeId)}`;
 
   return (
     <div className="project-map-mini-gallery" aria-label="Zdjecia przypisane do elementu">
@@ -394,7 +396,11 @@ function MiniPhotoGallery({ projectId, photos }: { projectId: string; photos: Pr
           <span>{photo.storedFileName}</span>
         </a>
       ))}
-      {photos.length > 4 && <span className="project-map-mini-gallery__more">+{photos.length - 4}</span>}
+      {photos.length > 4 && (
+        <a href={galleryHref} className="project-map-mini-gallery__more">
+          +{photos.length - 4}
+        </a>
+      )}
     </div>
   );
 }

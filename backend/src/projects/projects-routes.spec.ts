@@ -282,6 +282,70 @@ describe('projects routes', () => {
     expect(checklist[0].photoCount).toBe(1);
   });
 
+  it('serves a thumbnail fallback when the original photo file is missing', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'photo-local-missing-original-'));
+    process.env.PHOTO_LOCAL_DB = join(dir, 'test.sqlite');
+    process.env.PHOTO_BASE_DIR = join(dir, 'photos');
+
+    const { app, db } = await buildApp();
+    const repository = new ProjectsRepository(db);
+    const project = repository.createProject({
+      name: 'PROJEKT',
+      projectDefinition: null,
+      projectType: 'SI',
+      splitterTopology: 'SINGLE',
+      splitterTopologySource: 'AUTO',
+      splitterCount: 1,
+      gpkgFileName: 'projekt.gpkg',
+      baseFolder: join(dir, 'photos', 'PROJEKT'),
+      addresses: [],
+      dacToAddressCableCount: 0,
+      adssToAddressCableCount: 0,
+      checklistNodes: [
+        {
+          id: 'node-upload',
+          projectId: 'project-temp',
+          parentId: null,
+          name: 'WRONCKIEJ_13',
+          path: 'Zapasy_kabli_instalacyjnych/OSD2640/WRONCKIEJ_13',
+          nodeType: 'CABLE_RESERVE',
+          addressId: null,
+          sortOrder: 0,
+          minPhotos: 1,
+          acceptsPhotos: true,
+        },
+      ],
+    });
+    const thumbnailPath = join(dir, 'photos', 'PROJEKT', '.thumbnails', 'photo-missing.webp');
+    mkdirSync(join(dir, 'photos', 'PROJEKT', '.thumbnails'), { recursive: true });
+    writeFileSync(thumbnailPath, 'thumbnail');
+    repository.addPhoto({
+      id: 'photo-missing',
+      projectId: project.id,
+      checklistNodeId: 'node-upload',
+      sourceFileName: 'original.jpeg',
+      storedFileName: 'stored.jpeg',
+      storagePath: join(dir, 'photos', 'PROJEKT', 'missing.jpeg'),
+      thumbnailPath,
+      mimeType: 'image/jpeg',
+      fileSize: 123,
+      lat: null,
+      lng: null,
+      capturedAt: null,
+      reserveLocation: 'Doziemny',
+    });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/api/projects/${project.id}/photos/photo-missing/file`,
+    });
+    await app.close();
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers['content-type']).toContain('image/webp');
+    expect(response.body).toBe('thumbnail');
+  });
+
   it('moves selected reserve photos to another reserve location folder', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'photo-local-move-'));
     process.env.PHOTO_LOCAL_DB = join(dir, 'test.sqlite');

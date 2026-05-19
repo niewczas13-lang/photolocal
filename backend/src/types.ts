@@ -65,6 +65,7 @@ export type ProjectMapAddressStatus = 'PENDING' | 'COMPLETE' | 'NOT_APPLICABLE';
 
 export interface ProjectMapPhoto {
   id: string;
+  checklistNodeId: string;
   storedFileName: string;
   reserveLocation: string | null;
   uploadedAt: string;

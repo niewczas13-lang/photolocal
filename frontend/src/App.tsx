@@ -91,12 +91,13 @@ export default function App() {
           <ProjectView 
             project={selectedProject}
             initialTab={route.tab}
+            initialNodeId={route.nodeId ?? null}
             onBack={() => {
               window.location.hash = projectListRoute();
               void api.listProjects().then(setProjects);
             }} 
-            onTabChange={(tab) => {
-              window.location.hash = photoProjectRoute(selectedProjectId, tab);
+            onTabChange={(tab, nodeId) => {
+              window.location.hash = photoProjectRoute(selectedProjectId, tab, nodeId);
             }}
             onOpenMap={() => {
               window.location.hash = mapProjectRoute(selectedProjectId);

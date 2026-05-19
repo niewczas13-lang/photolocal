@@ -167,6 +167,10 @@ function toNullableFiniteNumber(value: unknown): number | null {
   return Number.isFinite(numberValue) ? numberValue : null;
 }
 
+function isMissingFileError(error: unknown): boolean {
+  return Boolean(error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT');
+}
+
 export async function registerProjectRoutes(app: FastifyInstance, db: Database.Database): Promise<void> {
   const repository = new ProjectsRepository(db);
   const chatBatchesRepository = new ChatBatchesRepository(db);
@@ -682,9 +686,16 @@ export async function registerProjectRoutes(app: FastifyInstance, db: Database.D
     const photo = repository.getPhoto(projectId, photoId);
     if (!photo?.thumbnailPath) return reply.status(404).send({ error: 'Photo thumbnail not found' });
 
-    const buffer = await readFile(photo.thumbnailPath);
-    reply.header('Content-Type', 'image/webp');
-    return reply.send(buffer);
+    try {
+      const buffer = await readFile(photo.thumbnailPath);
+      reply.header('Content-Type', 'image/webp');
+      return reply.send(buffer);
+    } catch (error) {
+      if (isMissingFileError(error)) {
+        return reply.status(404).send({ error: 'Photo thumbnail file not found' });
+      }
+      throw error;
+    }
   });
 
   app.get('/api/projects/:projectId/photos/:photoId/file', async (request, reply) => {
@@ -692,9 +703,25 @@ export async function registerProjectRoutes(app: FastifyInstance, db: Database.D
     const photo = repository.getPhoto(projectId, photoId);
     if (!photo) return reply.status(404).send({ error: 'Photo not found' });
 
-    const buffer = await readFile(photo.storagePath);
-    reply.header('Content-Type', photo.mimeType);
-    return reply.send(buffer);
+    try {
+      const buffer = await readFile(photo.storagePath);
+      reply.header('Content-Type', photo.mimeType);
+      return reply.send(buffer);
+    } catch (error) {
+      if (!isMissingFileError(error)) throw error;
+      if (!photo.thumbnailPath) return reply.status(404).send({ error: 'Photo file not found' });
+
+      try {
+        const thumbnailBuffer = await readFile(photo.thumbnailPath);
+        reply.header('Content-Type', 'image/webp');
+        return reply.send(thumbnailBuffer);
+      } catch (thumbnailError) {
+        if (isMissingFileError(thumbnailError)) {
+          return reply.status(404).send({ error: 'Photo file not found' });
+        }
+        throw thumbnailError;
+      }
+    }
   });
 
   app.patch('/api/projects/:projectId', async (request, reply) => {

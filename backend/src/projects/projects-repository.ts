@@ -238,12 +238,14 @@ function mapNotePhotoRow(row: {
 
 function mapProjectPhotoRow(row: {
   id: string;
+  checklistNodeId: string;
   storedFileName: string;
   reserveLocation: string | null;
   uploadedAt: string;
 }): ProjectMapPhoto {
   return {
     id: row.id,
+    checklistNodeId: row.checklistNodeId,
     storedFileName: row.storedFileName,
     reserveLocation: row.reserveLocation,
     uploadedAt: row.uploadedAt,
@@ -607,6 +609,7 @@ export class ProjectsRepository {
         `SELECT
           node.address_id AS addressId,
           photo.id,
+          photo.checklist_node_id AS checklistNodeId,
           photo.stored_file_name AS storedFileName,
           photo.reserve_location AS reserveLocation,
           photo.uploaded_at AS uploadedAt
@@ -620,6 +623,7 @@ export class ProjectsRepository {
       .all(projectId, projectId) as Array<{
       addressId: string;
       id: string;
+      checklistNodeId: string;
       storedFileName: string;
       reserveLocation: string | null;
       uploadedAt: string;
@@ -779,6 +783,7 @@ export class ProjectsRepository {
           node.name,
           node.path,
           photo.id,
+          photo.checklist_node_id AS checklistNodeId,
           photo.stored_file_name AS storedFileName,
           photo.reserve_location AS reserveLocation,
           photo.uploaded_at AS uploadedAt
@@ -792,6 +797,7 @@ export class ProjectsRepository {
       name: string;
       path: string;
       id: string;
+      checklistNodeId: string;
       storedFileName: string;
       reserveLocation: string | null;
       uploadedAt: string;
