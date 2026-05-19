@@ -25,6 +25,8 @@ import { getOllamaDiagnostics } from '../chat-import/ollama-diagnostics.js';
 import { extractGpkg } from '../gpkg/gpkg-extractor.js';
 import {
   createAdresyAppGeocoder,
+  createFallbackAddressGeocoder,
+  createNominatimGeocoder,
   type AddressGeocoder,
 } from '../geocoding/address-geocoder.js';
 import {
@@ -206,11 +208,17 @@ export async function registerProjectRoutes(
   const initialConfig = loadConfig();
   const addressGeocoder =
     options.addressGeocoder ??
-    createAdresyAppGeocoder({
-      baseUrl: initialConfig.adresyAppBaseUrl,
-      apiKey: initialConfig.adresyAppApiKey,
-      radiusMeters: initialConfig.adresyAppReverseRadiusMeters,
-    });
+    createFallbackAddressGeocoder([
+      createAdresyAppGeocoder({
+        baseUrl: initialConfig.adresyAppBaseUrl,
+        apiKey: initialConfig.adresyAppApiKey,
+        radiusMeters: initialConfig.adresyAppReverseRadiusMeters,
+      }),
+      createNominatimGeocoder({
+        baseUrl: initialConfig.nominatimBaseUrl,
+        userAgent: initialConfig.nominatimUserAgent,
+      }),
+    ]);
   let isClosing = false;
   const classificationDiagnosticsTimers = new Map<string, NodeJS.Timeout>();
   const stopClassificationDiagnostics = (projectId: string) => {

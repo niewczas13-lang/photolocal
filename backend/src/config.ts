@@ -20,6 +20,8 @@ export interface AppConfig {
   adresyAppBaseUrl: string;
   adresyAppApiKey: string | null;
   adresyAppReverseRadiusMeters: number;
+  nominatimBaseUrl: string;
+  nominatimUserAgent: string;
 }
 
 export function loadConfig(): AppConfig {
@@ -38,6 +40,9 @@ export function loadConfig(): AppConfig {
   const adresyAppBaseUrl = process.env.ADRESY_APP_BASE_URL ?? 'https://api.adresy.app/api/v1';
   const adresyAppApiKey = process.env.ADRESY_APP_API_KEY?.trim() || null;
   const adresyAppReverseRadiusMeters = Math.max(1, Number(process.env.ADRESY_APP_REVERSE_RADIUS_METERS ?? 200));
+  const nominatimBaseUrl = process.env.NOMINATIM_BASE_URL ?? 'https://nominatim.openstreetmap.org';
+  const nominatimUserAgent =
+    process.env.NOMINATIM_USER_AGENT?.trim() || 'PhotoLocal/0.1 (local reverse geocoding)';
 
   mkdirSync(dirname(dbPath), { recursive: true });
   mkdirSync(dirname(logPath), { recursive: true });
@@ -56,5 +61,7 @@ export function loadConfig(): AppConfig {
     adresyAppBaseUrl,
     adresyAppApiKey,
     adresyAppReverseRadiusMeters,
+    nominatimBaseUrl,
+    nominatimUserAgent,
   };
 }

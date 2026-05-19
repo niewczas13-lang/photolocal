@@ -122,10 +122,13 @@ PHOTO_LOCAL_LOG=.\logs\app.log
 ADRESY_APP_BASE_URL=https://api.adresy.app/api/v1
 ADRESY_APP_API_KEY=
 ADRESY_APP_REVERSE_RADIUS_METERS=200
+NOMINATIM_BASE_URL=https://nominatim.openstreetmap.org
+NOMINATIM_USER_AGENT=PhotoLocal/0.1 (local reverse geocoding)
 OLLAMA_VISION_MODEL=qwen2.5vl:3b
 ```
 
 `ADRESY_APP_API_KEY` jest opcjonalny. Bez klucza reverse geocoding adresow z mapy dziala tylko w limicie testowym uslugi Adresy.app.
+Jesli Adresy.app nie zwroci uzytecznego adresu, aplikacja sprobuje fallback przez Nominatim. Publiczny Nominatim wymaga opisowego `User-Agent` i nie jest do masowych zapytan.
 
 ### 6. Przygotuj Ollame
 
