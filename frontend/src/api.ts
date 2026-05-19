@@ -15,6 +15,7 @@ import type {
   GoogleChatInviteSetupResult,
   GoogleChatSpace,
   ProjectMapCable,
+  ProjectMapCandidateReserveLocation,
   ProjectMapData,
   ProjectMapInfraNode,
   ProjectMapNote,
@@ -113,6 +114,35 @@ export const api = {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ reason }),
+    }),
+  reverseGeocodeMapAddressCandidate: (projectId: string, lat: number, lng: number) =>
+    request<ProjectMapData>(`/api/projects/${projectId}/map/address-candidates/reverse`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ lat, lng }),
+    }),
+  approveMapAddressCandidate: (
+    projectId: string,
+    candidateId: string,
+    input: {
+      city: string;
+      street: string;
+      buildingNo: string | null;
+      propertyId: string | null;
+      parcelNumber: string | null;
+      distributionPoint: string | null;
+      reserveLocation: ProjectMapCandidateReserveLocation;
+      createDistributionNodeType: 'OSD' | 'OPP' | null;
+    },
+  ) =>
+    request<ProjectMapData>(`/api/projects/${projectId}/map/address-candidates/${candidateId}/approve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
+    }),
+  rejectMapAddressCandidate: (projectId: string, candidateId: string) =>
+    request<ProjectMapData>(`/api/projects/${projectId}/map/address-candidates/${candidateId}/reject`, {
+      method: 'POST',
     }),
   createMapNote: (
     projectId: string,

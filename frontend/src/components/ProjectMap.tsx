@@ -8,6 +8,7 @@ import {
   ImagePlus,
   ListChecks,
   Map,
+  MapPinPlus,
   MessageSquarePlus,
   RefreshCw,
   Save,
@@ -37,8 +38,10 @@ import {
 } from '../map-style';
 import type {
   ProjectMapAddress,
+  ProjectMapAddressCandidate,
   ProjectMapCable,
   ProjectMapCableStatus,
+  ProjectMapCandidateReserveLocation,
   ProjectMapData,
   ProjectMapInfraNode,
   ProjectMapNote,
@@ -48,6 +51,7 @@ import type {
   ProjectMapPolygon,
 } from '../types';
 import { MapStatusActionButton } from './MapStatusControls';
+import ProjectMapAddressCandidates from './ProjectMapAddressCandidates';
 import ProjectMapNotes from './ProjectMapNotes';
 import ProjectMapTasks from './ProjectMapTasks';
 import { Badge } from './ui/badge';
@@ -138,6 +142,16 @@ function markerIcon(kind: 'address' | 'OSD' | 'OPP' | 'ZS', tone: MarkerTone): L
     iconSize: [24, 24],
     iconAnchor: [12, 12],
     popupAnchor: [0, -12],
+  });
+}
+
+function addressCandidateIcon(): L.DivIcon {
+  return L.divIcon({
+    className: 'project-map-candidate-marker',
+    html: '<span class="project-map-candidate-marker__pin"></span>',
+    iconSize: [24, 24],
+    iconAnchor: [12, 22],
+    popupAnchor: [0, -20],
   });
 }
 
@@ -422,6 +436,23 @@ function MapClickNoteCreator({
   return null;
 }
 
+function MapClickAddressCreator({
+  enabled,
+  onPick,
+}: {
+  enabled: boolean;
+  onPick: (lat: number, lng: number) => void;
+}) {
+  useMapEvents({
+    click(event) {
+      if (!enabled) return;
+      onPick(event.latlng.lat, event.latlng.lng);
+    },
+  });
+
+  return null;
+}
+
 function DraftNoteMarker({
   position,
   busy,
@@ -634,12 +665,47 @@ function AddressPopup({
   );
 }
 
+function AddressCandidatePopup({
+  candidate,
+  busy,
+  onOpenReview,
+  onReject,
+}: {
+  candidate: ProjectMapAddressCandidate;
+  busy: boolean;
+  onOpenReview: () => void;
+  onReject: (candidateId: string) => void;
+}) {
+  return (
+    <div className="project-map-popup">
+      <div className="project-map-popup__title">{candidate.label}</div>
+      <div className="project-map-popup__meta">
+        {candidate.suggestedDistributionPoint
+          ? `Rejonizacja: ${candidate.suggestedDistributionPoint}`
+          : 'Do przypisania do OPP/OSD'}
+      </div>
+      <div className="project-map-popup__status-row">
+        <Badge variant="outline">Adres do dodania</Badge>
+      </div>
+      <div className="project-map-popup__actions">
+        <Button type="button" size="sm" onClick={onOpenReview} disabled={busy}>
+          Zatwierdz
+        </Button>
+        <Button type="button" size="sm" variant="outline" onClick={() => onReject(candidate.id)} disabled={busy}>
+          Odrzuc
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 export default function ProjectMap({ projectId, view, onViewChange }: ProjectMapProps) {
   const [data, setData] = useState<ProjectMapData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [addingFreeNote, setAddingFreeNote] = useState(false);
+  const [addingAddress, setAddingAddress] = useState(false);
   const [draftNotePosition, setDraftNotePosition] = useState<{ lat: number; lng: number } | null>(null);
 
   const refresh = useCallback(async () => {
@@ -687,6 +753,56 @@ export default function ProjectMap({ projectId, view, onViewChange }: ProjectMap
     setError(null);
     try {
       setData(await api.markMapAddressNotApplicable(projectId, addressId, 'Oznaczone z mapy jako nie dotyczy'));
+    } catch (err) {
+      setError(getErrorMessage(err));
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const createAddressCandidate = async (lat: number, lng: number) => {
+    setBusyId('address-candidate');
+    setError(null);
+    try {
+      setData(await api.reverseGeocodeMapAddressCandidate(projectId, lat, lng));
+      setAddingAddress(false);
+      onViewChange('address-candidates');
+    } catch (err) {
+      setError(getErrorMessage(err));
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const approveAddressCandidate = async (
+    candidateId: string,
+    input: {
+      city: string;
+      street: string;
+      buildingNo: string | null;
+      propertyId: string | null;
+      parcelNumber: string | null;
+      distributionPoint: string | null;
+      reserveLocation: ProjectMapCandidateReserveLocation;
+      createDistributionNodeType: 'OSD' | 'OPP' | null;
+    },
+  ) => {
+    setBusyId(candidateId);
+    setError(null);
+    try {
+      setData(await api.approveMapAddressCandidate(projectId, candidateId, input));
+    } catch (err) {
+      setError(getErrorMessage(err));
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const rejectAddressCandidate = async (candidateId: string) => {
+    setBusyId(candidateId);
+    setError(null);
+    try {
+      setData(await api.rejectMapAddressCandidate(projectId, candidateId));
     } catch (err) {
       setError(getErrorMessage(err));
     } finally {
@@ -749,6 +865,7 @@ export default function ProjectMap({ projectId, view, onViewChange }: ProjectMap
     if (!data) return [];
     return [
       ...data.addresses.map((address) => [address.lat, address.lng] as LatLngExpression),
+      ...data.addressCandidates.map((candidate) => [candidate.lat, candidate.lng] as LatLngExpression),
       ...data.infraNodes.map((node) => [node.lat, node.lng] as LatLngExpression),
       ...data.trunkCables.flatMap((cable) => collectGeometryPositions(cable.geojson)),
       ...data.polygons.flatMap((polygon) => collectGeometryPositions(polygon.geojson)),
@@ -765,6 +882,7 @@ export default function ProjectMap({ projectId, view, onViewChange }: ProjectMap
         nodesReady: 0,
         nodesTotal: 0,
         notesTotal: 0,
+        candidatesTotal: 0,
       };
     }
     return {
@@ -775,6 +893,7 @@ export default function ProjectMap({ projectId, view, onViewChange }: ProjectMap
       nodesReady: data.infraNodes.filter((node) => isNodeReady(node.status, node.hasPhoto)).length,
       nodesTotal: data.infraNodes.length,
       notesTotal: data.notes.length,
+      candidatesTotal: data.addressCandidates.length,
     };
   }, [data]);
 
@@ -802,6 +921,7 @@ export default function ProjectMap({ projectId, view, onViewChange }: ProjectMap
           <span><Cable size={15} /> Kable {totals.cablesReady}/{totals.cablesTotal}</span>
           <span><Triangle size={15} /> Punkty {totals.nodesReady}/{totals.nodesTotal}</span>
           <span><StickyNote size={15} /> Notatki {totals.notesTotal}</span>
+          <span><MapPinPlus size={15} /> Do dodania {totals.candidatesTotal}</span>
         </div>
         <div className="project-map-toolbar__actions">
           <div className="project-map-view-switch" aria-label="Widok mapy">
@@ -835,19 +955,48 @@ export default function ProjectMap({ projectId, view, onViewChange }: ProjectMap
               <StickyNote size={14} />
               Notatki
             </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className={cn(
+                'project-map-view-switch__button',
+                view === 'address-candidates' && 'project-map-view-switch__button--active',
+              )}
+              onClick={() => onViewChange('address-candidates')}
+            >
+              <MapPinPlus size={14} />
+              Adresy
+            </Button>
           </div>
           {view === 'map' && (
-            <Button
-              variant={addingFreeNote ? 'default' : 'outline'}
-              size="sm"
-              onClick={() => {
-                setAddingFreeNote((current) => !current);
-                setDraftNotePosition(null);
-              }}
-            >
-              <MessageSquarePlus size={14} className="mr-2" />
-              Dodaj notatke
-            </Button>
+            <>
+              <Button
+                variant={addingAddress ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => {
+                  setAddingAddress((current) => !current);
+                  setAddingFreeNote(false);
+                  setDraftNotePosition(null);
+                }}
+                disabled={busyId === 'address-candidate'}
+              >
+                <MapPinPlus size={14} className="mr-2" />
+                Dodaj adres
+              </Button>
+              <Button
+                variant={addingFreeNote ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => {
+                  setAddingFreeNote((current) => !current);
+                  setAddingAddress(false);
+                  setDraftNotePosition(null);
+                }}
+              >
+                <MessageSquarePlus size={14} className="mr-2" />
+                Dodaj notatke
+              </Button>
+            </>
           )}
           <Button variant="outline" size="sm" onClick={() => void refresh()} disabled={loading}>
             <RefreshCw size={14} className="mr-2" />
@@ -873,11 +1022,23 @@ export default function ProjectMap({ projectId, view, onViewChange }: ProjectMap
           onDeleteNote={(noteId) => void deleteMapNote(noteId)}
           onUploadNotePhoto={(noteId, file) => void uploadMapNotePhoto(noteId, file)}
         />
+      ) : view === 'address-candidates' ? (
+        <ProjectMapAddressCandidates
+          data={data}
+          busyId={busyId}
+          onApproveCandidate={(candidateId, input) => void approveAddressCandidate(candidateId, input)}
+          onRejectCandidate={(candidateId) => void rejectAddressCandidate(candidateId)}
+        />
       ) : (
         <>
           <div className="project-map-canvas">
             {addingFreeNote && !draftNotePosition && (
               <div className="project-map-note-hint">Kliknij miejsce na mapie dla nowej notatki.</div>
+            )}
+            {addingAddress && (
+              <div className="project-map-note-hint project-map-note-hint--address">
+                Kliknij adres na mapie do odczytania z PRG.
+              </div>
             )}
             <MapContainer center={[52.05, 19.4]} zoom={7} className="project-map-leaflet">
               <TileLayer
@@ -886,8 +1047,12 @@ export default function ProjectMap({ projectId, view, onViewChange }: ProjectMap
               />
               <FitBounds positions={boundsPositions} />
               <MapClickNoteCreator
-                enabled={addingFreeNote}
+                enabled={addingFreeNote && !addingAddress}
                 onPick={(lat, lng) => setDraftNotePosition({ lat, lng })}
+              />
+              <MapClickAddressCreator
+                enabled={addingAddress && !addingFreeNote && busyId !== 'address-candidate'}
+                onPick={(lat, lng) => void createAddressCandidate(lat, lng)}
               />
               {draftNotePosition && (
                 <DraftNoteMarker
@@ -1009,6 +1174,23 @@ export default function ProjectMap({ projectId, view, onViewChange }: ProjectMap
                 </Marker>
               ))}
 
+              {data.addressCandidates.map((candidate) => (
+                <Marker
+                  key={candidate.id}
+                  position={[candidate.lat, candidate.lng]}
+                  icon={addressCandidateIcon()}
+                >
+                  <Popup>
+                    <AddressCandidatePopup
+                      candidate={candidate}
+                      busy={busyId === candidate.id}
+                      onOpenReview={() => onViewChange('address-candidates')}
+                      onReject={(candidateId) => void rejectAddressCandidate(candidateId)}
+                    />
+                  </Popup>
+                </Marker>
+              ))}
+
               {data.notes.map((note) =>
                 note.lat == null || note.lng == null ? null : (
                   <Marker key={`note-${note.id}`} position={[note.lat, note.lng]} icon={noteMarkerIcon()}>
@@ -1030,6 +1212,7 @@ export default function ProjectMap({ projectId, view, onViewChange }: ProjectMap
           <div className="project-map-legend" aria-hidden="true">
             <span><span className="project-map-dot project-map-dot--red" /> adres bez zapasu</span>
             <span><span className="project-map-dot project-map-dot--gray" /> adres nie dotyczy</span>
+            <span><span className="project-map-dot project-map-dot--blue" /> adres do dodania</span>
             <span><span className="project-map-line project-map-line--underground" /> kabel doziemny</span>
             <span><span className="project-map-line project-map-line--aerial" /> kabel napowietrzny</span>
             <span><span className="project-map-line project-map-line--duct" /> istniejaca kanalizacja</span>

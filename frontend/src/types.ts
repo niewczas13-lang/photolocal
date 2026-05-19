@@ -84,6 +84,9 @@ export type ProjectMapNodeStatus = 'PENDING' | 'WELDED';
 export type ProjectMapCableRoutingType = 'underground' | 'aerial' | 'existing_duct';
 export type ProjectMapNoteTargetType = 'cable' | 'node' | 'address' | 'polygon' | 'free';
 export type ProjectMapAddressStatus = 'PENDING' | 'COMPLETE' | 'NOT_APPLICABLE';
+export type ProjectMapAddressCandidateStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
+export type ProjectMapAddressCandidateAssignmentSource = 'NONE' | 'REGION';
+export type ProjectMapCandidateReserveLocation = 'Doziemny' | 'Napowietrzny';
 
 export interface ProjectMapPhoto {
   id: string;
@@ -107,6 +110,28 @@ export interface ProjectMapAddress {
   status: ProjectMapAddressStatus;
   isNotApplicable: boolean;
   photos: ProjectMapPhoto[];
+}
+
+export interface ProjectMapAddressCandidate {
+  id: string;
+  label: string;
+  status: ProjectMapAddressCandidateStatus;
+  city: string;
+  street: string;
+  buildingNo: string | null;
+  postalCode: string | null;
+  propertyId: string | null;
+  parcelNumber: string | null;
+  lat: number;
+  lng: number;
+  geocoderSource: string;
+  geocoderDistanceMeters: number | null;
+  suggestedDistributionPoint: string | null;
+  assignmentSource: ProjectMapAddressCandidateAssignmentSource;
+  approvedAddressId: string | null;
+  reserveLocation: ProjectMapCandidateReserveLocation | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface ProjectMapPolygon {
@@ -178,6 +203,7 @@ export interface ProjectMapNote {
 
 export interface ProjectMapData {
   addresses: ProjectMapAddress[];
+  addressCandidates: ProjectMapAddressCandidate[];
   polygons: ProjectMapPolygon[];
   trunkCables: ProjectMapCable[];
   infraNodes: ProjectMapInfraNode[];

@@ -24,6 +24,10 @@ import { importChatFolders } from '../chat-import/chat-importer.js';
 import { getOllamaDiagnostics } from '../chat-import/ollama-diagnostics.js';
 import { extractGpkg } from '../gpkg/gpkg-extractor.js';
 import {
+  createAdresyAppGeocoder,
+  type AddressGeocoder,
+} from '../geocoding/address-geocoder.js';
+import {
   getGoogleChatDownloadStatus,
   listGoogleChatSpaces,
   startGoogleChatDownload,
@@ -167,13 +171,46 @@ function toNullableFiniteNumber(value: unknown): number | null {
   return Number.isFinite(numberValue) ? numberValue : null;
 }
 
+function toRequiredFiniteNumber(value: unknown): number | null {
+  const numberValue = Number(value);
+  return Number.isFinite(numberValue) ? numberValue : null;
+}
+
+function isCandidateReserveLocation(value: unknown): value is 'Doziemny' | 'Napowietrzny' {
+  return value === 'Doziemny' || value === 'Napowietrzny';
+}
+
+function toOptionalString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function toOptionalDistributionNodeType(value: unknown): 'OSD' | 'OPP' | null {
+  return value === 'OSD' || value === 'OPP' ? value : null;
+}
+
 function isMissingFileError(error: unknown): boolean {
   return Boolean(error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT');
 }
 
-export async function registerProjectRoutes(app: FastifyInstance, db: Database.Database): Promise<void> {
+export interface RegisterProjectRoutesOptions {
+  addressGeocoder?: AddressGeocoder;
+}
+
+export async function registerProjectRoutes(
+  app: FastifyInstance,
+  db: Database.Database,
+  options: RegisterProjectRoutesOptions = {},
+): Promise<void> {
   const repository = new ProjectsRepository(db);
   const chatBatchesRepository = new ChatBatchesRepository(db);
+  const initialConfig = loadConfig();
+  const addressGeocoder =
+    options.addressGeocoder ??
+    createAdresyAppGeocoder({
+      baseUrl: initialConfig.adresyAppBaseUrl,
+      apiKey: initialConfig.adresyAppApiKey,
+      radiusMeters: initialConfig.adresyAppReverseRadiusMeters,
+    });
   let isClosing = false;
   const classificationDiagnosticsTimers = new Map<string, NodeJS.Timeout>();
   const stopClassificationDiagnostics = (projectId: string) => {
@@ -504,6 +541,94 @@ export async function registerProjectRoutes(app: FastifyInstance, db: Database.D
     } catch (error) {
       return reply.status(404).send({
         error: error instanceof Error ? error.message : 'Map address not found',
+      });
+    }
+  });
+
+  app.post('/api/projects/:projectId/map/address-candidates/reverse', async (request, reply) => {
+    const { projectId } = request.params as { projectId: string };
+    const body = request.body as { lat?: unknown; lng?: unknown };
+    const project = repository.getProject(projectId);
+    const lat = toRequiredFiniteNumber(body.lat);
+    const lng = toRequiredFiniteNumber(body.lng);
+
+    if (!project) return reply.status(404).send({ error: 'Project not found' });
+    if (lat == null || lng == null) return reply.status(400).send({ error: 'Valid lat and lng are required' });
+
+    try {
+      const geocoded = await addressGeocoder.reverse({ lat, lng });
+      repository.addMapAddressCandidate({
+        projectId,
+        lat: geocoded?.lat ?? lat,
+        lng: geocoded?.lng ?? lng,
+        city: geocoded?.city ?? '',
+        street: geocoded?.street ?? '',
+        buildingNo: geocoded?.buildingNo ?? null,
+        postalCode: geocoded?.postalCode ?? null,
+        propertyId: geocoded?.propertyId ?? null,
+        parcelNumber: geocoded?.parcelNumber ?? null,
+        geocoderSource: geocoded?.source ?? 'manual',
+        geocoderDistanceMeters: geocoded?.distanceMeters ?? null,
+      });
+      return repository.getProjectMap(projectId);
+    } catch (error) {
+      return reply.status(502).send({
+        error: error instanceof Error ? error.message : 'Reverse geocoding failed',
+      });
+    }
+  });
+
+  app.post('/api/projects/:projectId/map/address-candidates/:candidateId/approve', async (request, reply) => {
+    const { projectId, candidateId } = request.params as { projectId: string; candidateId: string };
+    const body = request.body as {
+      city?: unknown;
+      street?: unknown;
+      buildingNo?: unknown;
+      propertyId?: unknown;
+      parcelNumber?: unknown;
+      distributionPoint?: unknown;
+      reserveLocation?: unknown;
+      createDistributionNodeType?: unknown;
+    };
+    const project = repository.getProject(projectId);
+
+    if (!project) return reply.status(404).send({ error: 'Project not found' });
+    if (!isCandidateReserveLocation(body.reserveLocation)) {
+      return reply.status(400).send({ error: 'Reserve location must be Doziemny or Napowietrzny' });
+    }
+
+    try {
+      repository.approveMapAddressCandidate({
+        projectId,
+        candidateId,
+        city: toOptionalString(body.city) ?? '',
+        street: toOptionalString(body.street) ?? '',
+        buildingNo: toOptionalString(body.buildingNo),
+        propertyId: toOptionalString(body.propertyId),
+        parcelNumber: toOptionalString(body.parcelNumber),
+        distributionPoint: toOptionalString(body.distributionPoint),
+        reserveLocation: body.reserveLocation,
+        createDistributionNodeType: toOptionalDistributionNodeType(body.createDistributionNodeType),
+      });
+      return repository.getProjectMap(projectId);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to approve address candidate';
+      return reply.status(message.includes('not found') ? 404 : 400).send({ error: message });
+    }
+  });
+
+  app.post('/api/projects/:projectId/map/address-candidates/:candidateId/reject', async (request, reply) => {
+    const { projectId, candidateId } = request.params as { projectId: string; candidateId: string };
+    const project = repository.getProject(projectId);
+
+    if (!project) return reply.status(404).send({ error: 'Project not found' });
+
+    try {
+      repository.rejectMapAddressCandidate(projectId, candidateId);
+      return repository.getProjectMap(projectId);
+    } catch (error) {
+      return reply.status(404).send({
+        error: error instanceof Error ? error.message : 'Map address candidate not found',
       });
     }
   });

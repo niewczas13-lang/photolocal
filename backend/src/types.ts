@@ -62,6 +62,9 @@ export interface MapInfraNodeInput {
 export type MapCableStatus = 'PENDING' | 'DUCT_READY' | 'PULLED' | 'WELDED' | 'SUSPENDED';
 export type MapNodeStatus = 'PENDING' | 'WELDED';
 export type ProjectMapAddressStatus = 'PENDING' | 'COMPLETE' | 'NOT_APPLICABLE';
+export type MapAddressCandidateStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
+export type MapAddressCandidateAssignmentSource = 'NONE' | 'REGION';
+export type ReserveLocationKind = 'Doziemny' | 'Napowietrzny';
 
 export interface ProjectMapPhoto {
   id: string;
@@ -85,6 +88,28 @@ export interface ProjectMapAddress {
   status: ProjectMapAddressStatus;
   isNotApplicable: boolean;
   photos: ProjectMapPhoto[];
+}
+
+export interface ProjectMapAddressCandidate {
+  id: string;
+  label: string;
+  status: MapAddressCandidateStatus;
+  city: string;
+  street: string;
+  buildingNo: string | null;
+  postalCode: string | null;
+  propertyId: string | null;
+  parcelNumber: string | null;
+  lat: number;
+  lng: number;
+  geocoderSource: string;
+  geocoderDistanceMeters: number | null;
+  suggestedDistributionPoint: string | null;
+  assignmentSource: MapAddressCandidateAssignmentSource;
+  approvedAddressId: string | null;
+  reserveLocation: ReserveLocationKind | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface ProjectMapPolygon {
@@ -156,6 +181,7 @@ export interface ProjectMapNote {
 
 export interface ProjectMapRecord {
   addresses: ProjectMapAddress[];
+  addressCandidates: ProjectMapAddressCandidate[];
   polygons: ProjectMapPolygon[];
   trunkCables: ProjectMapCable[];
   infraNodes: ProjectMapInfraNode[];

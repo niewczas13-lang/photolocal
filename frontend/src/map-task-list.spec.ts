@@ -36,6 +36,7 @@ function mapData(overrides: Partial<ProjectMapData> = {}): ProjectMapData {
         photos: [],
       },
     ],
+    addressCandidates: [],
     polygons: [],
     trunkCables: [
       {

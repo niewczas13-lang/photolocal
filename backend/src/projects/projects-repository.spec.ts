@@ -733,6 +733,203 @@ describe('ProjectsRepository', () => {
     });
   });
 
+  it('stores clicked address candidates without creating checklist folders', () => {
+    const { db, repository } = createRepository();
+
+    const project = repository.createProject({
+      name: 'MAPA',
+      projectDefinition: null,
+      projectType: 'SI',
+      splitterTopology: 'SINGLE',
+      splitterTopologySource: 'AUTO',
+      splitterCount: 1,
+      gpkgFileName: 'mapa.gpkg',
+      baseFolder: 'C:/photos/MAPA',
+      addresses: [],
+      dacToAddressCableCount: 0,
+      adssToAddressCableCount: 0,
+      checklistNodes: [],
+      polygons: [
+        {
+          osdName: 'OSTRZESZEWO/OPP0002',
+          label: 'OSTRZESZEWO/OPP0002',
+          geojson: {
+            type: 'Polygon',
+            coordinates: [
+              [
+                [20.4, 53.7],
+                [20.7, 53.7],
+                [20.7, 54.0],
+                [20.4, 54.0],
+                [20.4, 53.7],
+              ],
+            ],
+          },
+          households: null,
+          paCount: null,
+          cableRef: null,
+        },
+      ],
+      trunkCables: [],
+      infraNodes: [],
+    });
+
+    const candidate = repository.addMapAddressCandidate({
+      projectId: project.id,
+      lat: 53.8,
+      lng: 20.5,
+      city: 'Ostrzeszewo',
+      street: 'Lesna',
+      buildingNo: '7',
+      postalCode: '10-001',
+      propertyId: null,
+      parcelNumber: null,
+      geocoderSource: 'adresy.app',
+      geocoderDistanceMeters: 8.4,
+    });
+    const map = repository.getProjectMap(project.id);
+    const checklist = repository.getChecklist(project.id);
+    db.close();
+
+    expect(candidate).toMatchObject({
+      city: 'Ostrzeszewo',
+      street: 'Lesna',
+      buildingNo: '7',
+      suggestedDistributionPoint: 'OSTRZESZEWO/OPP0002',
+      assignmentSource: 'REGION',
+      status: 'PENDING',
+    });
+    expect(map.addressCandidates).toHaveLength(1);
+    expect(map.addressCandidates[0]).toMatchObject({
+      id: candidate.id,
+      label: 'Lesna 7, Ostrzeszewo',
+      geocoderDistanceMeters: 8.4,
+    });
+    expect(map.addresses).toEqual([]);
+    expect(checklist).toEqual([]);
+  });
+
+  it('approves an address candidate into a reserve checklist folder', () => {
+    const { db, repository } = createRepository();
+
+    const project = repository.createProject({
+      name: 'MAPA',
+      projectDefinition: null,
+      projectType: 'KPO',
+      splitterTopology: 'SINGLE',
+      splitterTopologySource: 'AUTO',
+      splitterCount: 1,
+      gpkgFileName: 'mapa.gpkg',
+      baseFolder: 'C:/photos/MAPA',
+      addresses: [],
+      dacToAddressCableCount: 0,
+      adssToAddressCableCount: 0,
+      checklistNodes: [],
+      polygons: [],
+      trunkCables: [],
+      infraNodes: [
+        {
+          nodeType: 'OSD',
+          name: 'RADOM/OSD0001',
+          label: 'RADOM/OSD0001',
+          lat: 51.5,
+          lng: 21.2,
+        },
+      ],
+    });
+    const candidate = repository.addMapAddressCandidate({
+      projectId: project.id,
+      lat: 51.51,
+      lng: 21.21,
+      city: 'Radom',
+      street: 'Polna',
+      buildingNo: '12',
+      postalCode: null,
+      propertyId: null,
+      parcelNumber: null,
+      geocoderSource: 'adresy.app',
+      geocoderDistanceMeters: 3,
+    });
+
+    const approved = repository.approveMapAddressCandidate({
+      projectId: project.id,
+      candidateId: candidate.id,
+      city: 'Radom',
+      street: 'Polna',
+      buildingNo: '12',
+      propertyId: null,
+      parcelNumber: null,
+      distributionPoint: 'RADOM/OSD0001',
+      reserveLocation: 'Doziemny',
+      createDistributionNodeType: null,
+    });
+    const map = repository.getProjectMap(project.id);
+    const checklistPaths = (repository.getChecklist(project.id) as Array<{ path: string }>)
+      .map((node) => node.path)
+      .sort();
+    const [summary] = repository.listProjects();
+    db.close();
+
+    expect(approved).toMatchObject({
+      status: 'APPROVED',
+      approvedAddressId: expect.any(String),
+    });
+    expect(map.addressCandidates).toEqual([]);
+    expect(map.addresses).toEqual([
+      expect.objectContaining({
+        id: approved.approvedAddressId,
+        label: 'Polna 12, Radom',
+        distributionPoint: 'RADOM/OSD0001',
+        status: 'PENDING',
+      }),
+    ]);
+    expect(checklistPaths).toEqual([
+      'Zapasy_kabli_instalacyjnych',
+      'Zapasy_kabli_instalacyjnych/RADOM_OSD0001',
+      'Zapasy_kabli_instalacyjnych/RADOM_OSD0001/POLNA_12',
+    ]);
+    expect(summary.addressCount).toBe(1);
+  });
+
+  it('rejects pending address candidates from the map workflow', () => {
+    const { db, repository } = createRepository();
+
+    const project = repository.createProject({
+      name: 'MAPA',
+      projectDefinition: null,
+      projectType: 'SI',
+      splitterTopology: 'SINGLE',
+      splitterTopologySource: 'AUTO',
+      splitterCount: 1,
+      gpkgFileName: 'mapa.gpkg',
+      baseFolder: 'C:/photos/MAPA',
+      addresses: [],
+      dacToAddressCableCount: 0,
+      adssToAddressCableCount: 0,
+      checklistNodes: [],
+    });
+    const candidate = repository.addMapAddressCandidate({
+      projectId: project.id,
+      lat: 51.51,
+      lng: 21.21,
+      city: 'Radom',
+      street: 'Polna',
+      buildingNo: '12',
+      postalCode: null,
+      propertyId: null,
+      parcelNumber: null,
+      geocoderSource: 'adresy.app',
+      geocoderDistanceMeters: 3,
+    });
+
+    const rejected = repository.rejectMapAddressCandidate(project.id, candidate.id);
+    const map = repository.getProjectMap(project.id);
+    db.close();
+
+    expect(rejected.status).toBe('REJECTED');
+    expect(map.addressCandidates).toEqual([]);
+  });
+
   it('marks map addresses as not applicable through their reserve nodes', () => {
     const { db, repository } = createRepository();
 

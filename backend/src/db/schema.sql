@@ -122,6 +122,28 @@ CREATE TABLE IF NOT EXISTS map_notes (
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS map_address_candidates (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  status TEXT NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'APPROVED', 'REJECTED')),
+  lat REAL NOT NULL,
+  lng REAL NOT NULL,
+  city TEXT NOT NULL DEFAULT '',
+  street TEXT NOT NULL DEFAULT '',
+  building_no TEXT,
+  postal_code TEXT,
+  property_id TEXT,
+  parcel_number TEXT,
+  geocoder_source TEXT NOT NULL DEFAULT 'manual',
+  geocoder_distance_m REAL,
+  suggested_distribution_point TEXT,
+  assignment_source TEXT NOT NULL DEFAULT 'NONE' CHECK (assignment_source IN ('NONE', 'REGION')),
+  approved_address_id TEXT REFERENCES addresses(id) ON DELETE SET NULL,
+  reserve_location TEXT CHECK (reserve_location IN ('Doziemny', 'Napowietrzny') OR reserve_location IS NULL),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS map_note_photos (
   id TEXT PRIMARY KEY,
   project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -198,6 +220,8 @@ CREATE INDEX IF NOT EXISTS idx_map_polygons_project_id ON map_polygons(project_i
 CREATE INDEX IF NOT EXISTS idx_map_trunk_cables_project_id ON map_trunk_cables(project_id);
 CREATE INDEX IF NOT EXISTS idx_map_infra_nodes_project_id ON map_infra_nodes(project_id);
 CREATE INDEX IF NOT EXISTS idx_map_notes_project_id ON map_notes(project_id);
+CREATE INDEX IF NOT EXISTS idx_map_address_candidates_project_id ON map_address_candidates(project_id);
+CREATE INDEX IF NOT EXISTS idx_map_address_candidates_status ON map_address_candidates(status);
 CREATE INDEX IF NOT EXISTS idx_map_note_photos_note_id ON map_note_photos(note_id);
 CREATE INDEX IF NOT EXISTS idx_chat_photo_batches_project_id ON chat_photo_batches(project_id);
 CREATE INDEX IF NOT EXISTS idx_chat_photo_batches_status ON chat_photo_batches(status);

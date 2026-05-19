@@ -1,10 +1,24 @@
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import Fastify from 'fastify';
 import { afterEach, describe, expect, it } from 'vitest';
 import { buildApp } from '../app.js';
 import { ChatBatchesRepository } from '../chat-import/chat-batches-repository.js';
+import { openDatabase } from '../db/connection.js';
+import { runMigrations } from '../db/migrations.js';
+import type { AddressGeocoder } from '../geocoding/address-geocoder.js';
 import { ProjectsRepository } from './projects-repository.js';
+import { registerProjectRoutes } from './projects-routes.js';
+
+async function buildProjectRoutesTestApp(geocoder: AddressGeocoder) {
+  const dir = mkdtempSync(join(tmpdir(), 'photo-local-route-candidates-'));
+  const db = openDatabase(join(dir, 'test.sqlite'));
+  runMigrations(db);
+  const app = Fastify({ logger: false });
+  await registerProjectRoutes(app, db, { addressGeocoder: geocoder });
+  return { app, db, dir, repository: new ProjectsRepository(db) };
+}
 
 describe('projects routes', () => {
   afterEach(() => {
@@ -146,6 +160,104 @@ describe('projects routes', () => {
     expect(cableStatusResponse.json().trunkCables[0]).toMatchObject({ id: cableId, status: 'SUSPENDED' });
     expect(nodeStatusResponse.statusCode).toBe(200);
     expect(nodeStatusResponse.json().infraNodes[0]).toMatchObject({ id: nodeId, status: 'WELDED' });
+  });
+
+  it('creates and approves map address candidates through API routes', async () => {
+    const geocoder: AddressGeocoder = {
+      async reverse(point) {
+        expect(point).toEqual({ lat: 53.8, lng: 20.5 });
+        return {
+          city: 'Ostrzeszewo',
+          street: 'Lesna',
+          buildingNo: '7',
+          postalCode: '10-001',
+          propertyId: null,
+          parcelNumber: null,
+          lat: 53.8001,
+          lng: 20.5001,
+          distanceMeters: 4,
+          source: 'adresy.app',
+        };
+      },
+    };
+    const { app, db, repository } = await buildProjectRoutesTestApp(geocoder);
+    const project = repository.createProject({
+      name: 'MAPA',
+      projectDefinition: null,
+      projectType: 'SI',
+      splitterTopology: 'SINGLE',
+      splitterTopologySource: 'AUTO',
+      splitterCount: 1,
+      gpkgFileName: 'mapa.gpkg',
+      baseFolder: 'C:/photos/MAPA',
+      addresses: [],
+      dacToAddressCableCount: 0,
+      adssToAddressCableCount: 0,
+      checklistNodes: [],
+      polygons: [
+        {
+          osdName: 'OSTRZESZEWO/OPP0002',
+          label: 'OSTRZESZEWO/OPP0002',
+          geojson: {
+            type: 'Polygon',
+            coordinates: [
+              [
+                [20.4, 53.7],
+                [20.7, 53.7],
+                [20.7, 54.0],
+                [20.4, 54.0],
+                [20.4, 53.7],
+              ],
+            ],
+          },
+          households: null,
+          paCount: null,
+          cableRef: null,
+        },
+      ],
+      trunkCables: [],
+      infraNodes: [],
+    });
+
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: `/api/projects/${project.id}/map/address-candidates/reverse`,
+      headers: { 'content-type': 'application/json' },
+      payload: JSON.stringify({ lat: 53.8, lng: 20.5 }),
+    });
+    const candidateId = createResponse.json().addressCandidates[0].id as string;
+    const approveResponse = await app.inject({
+      method: 'POST',
+      url: `/api/projects/${project.id}/map/address-candidates/${candidateId}/approve`,
+      headers: { 'content-type': 'application/json' },
+      payload: JSON.stringify({
+        city: 'Ostrzeszewo',
+        street: 'Lesna',
+        buildingNo: '7',
+        propertyId: null,
+        parcelNumber: null,
+        distributionPoint: null,
+        reserveLocation: 'Doziemny',
+        createDistributionNodeType: null,
+      }),
+    });
+    await app.close();
+    db.close();
+
+    expect(createResponse.statusCode).toBe(200);
+    expect(createResponse.json().addressCandidates[0]).toMatchObject({
+      city: 'Ostrzeszewo',
+      suggestedDistributionPoint: 'OSTRZESZEWO/OPP0002',
+      assignmentSource: 'REGION',
+    });
+    expect(approveResponse.statusCode).toBe(200);
+    expect(approveResponse.json().addressCandidates).toEqual([]);
+    expect(approveResponse.json().addresses[0]).toMatchObject({
+      city: 'Ostrzeszewo',
+      street: 'Lesna',
+      buildingNo: '7',
+      distributionPoint: 'OSTRZESZEWO/OPP0002',
+    });
   });
 
   it('creates map notes and stores uploaded note photos', async () => {

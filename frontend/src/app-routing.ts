@@ -14,7 +14,7 @@ export interface MapRoute {
 }
 
 export type AppRoute = PhotoRoute | MapRoute;
-export type MapView = 'map' | 'tasks' | 'notes';
+export type MapView = 'map' | 'tasks' | 'notes' | 'address-candidates';
 
 const DEFAULT_TAB: ProjectTab = 'photos';
 const PROJECT_TABS = new Set<ProjectTab>(['photos', 'missing', 'import', 'ready', 'review']);
@@ -29,7 +29,14 @@ export function parseRouteFromHash(hash: string): AppRoute {
 
   if (parts[0] === 'mapa') {
     const projectId = parts[1] === 'projects' && parts[2] ? decodeURIComponent(parts[2]) : null;
-    const view: MapView = parts[3] === 'tasks' ? 'tasks' : parts[3] === 'notes' ? 'notes' : 'map';
+    const view: MapView =
+      parts[3] === 'tasks'
+        ? 'tasks'
+        : parts[3] === 'notes'
+          ? 'notes'
+          : parts[3] === 'address-candidates'
+            ? 'address-candidates'
+            : 'map';
     return { mode: 'map', projectId, view };
   }
 
@@ -54,6 +61,7 @@ export function photoProjectRoute(
 
 export function mapProjectRoute(projectId: string | null, view: MapView = 'map'): string {
   if (!projectId) return '/mapa';
-  const suffix = view === 'tasks' ? '/tasks' : view === 'notes' ? '/notes' : '';
+  const suffix =
+    view === 'tasks' ? '/tasks' : view === 'notes' ? '/notes' : view === 'address-candidates' ? '/address-candidates' : '';
   return `/mapa/projects/${encodeURIComponent(projectId)}${suffix}`;
 }

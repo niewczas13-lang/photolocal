@@ -119,8 +119,13 @@ Typowa konfiguracja:
 PHOTO_LOCAL_PORT=4873
 PHOTO_LOCAL_DB=.\data\photo-local.sqlite
 PHOTO_LOCAL_LOG=.\logs\app.log
+ADRESY_APP_BASE_URL=https://api.adresy.app/api/v1
+ADRESY_APP_API_KEY=
+ADRESY_APP_REVERSE_RADIUS_METERS=200
 OLLAMA_VISION_MODEL=qwen2.5vl:3b
 ```
+
+`ADRESY_APP_API_KEY` jest opcjonalny. Bez klucza reverse geocoding adresow z mapy dziala tylko w limicie testowym uslugi Adresy.app.
 
 ### 6. Przygotuj Ollame
 

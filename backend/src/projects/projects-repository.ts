@@ -5,12 +5,15 @@ import type {
   ChecklistNodeSource,
   ChecklistNodeType,
   CableRoutingType,
+  MapAddressCandidateAssignmentSource,
+  MapAddressCandidateStatus,
   MapCableStatus,
   MapInfraNodeInput,
   MapNoteTargetType,
   MapNodeStatus,
   MapPolygonInput,
   ProjectMapAddressStatus,
+  ProjectMapAddressCandidate,
   ProjectMapPhoto,
   MapTrunkCableInput,
   ProjectMapNote,
@@ -18,11 +21,12 @@ import type {
   ProjectMapRecord,
   ProjectRecord,
   ProjectType,
+  ReserveLocationKind,
   SplitterTopology,
   SplitterTopologySource,
 } from '../types.js';
 import type { GeneratedChecklistNode, ChecklistAddress } from '../checklist/checklist-generator.js';
-import { safeFolderName } from '../utils/path-names.js';
+import { safeFolderName, toAddressFolderName } from '../utils/path-names.js';
 
 export interface AddPhotoInput {
   id: string;
@@ -48,6 +52,33 @@ export interface AddMapNoteInput {
   body: string;
   lat: number | null;
   lng: number | null;
+}
+
+export interface AddMapAddressCandidateInput {
+  projectId: string;
+  lat: number;
+  lng: number;
+  city: string;
+  street: string;
+  buildingNo: string | null;
+  postalCode: string | null;
+  propertyId: string | null;
+  parcelNumber: string | null;
+  geocoderSource: string;
+  geocoderDistanceMeters: number | null;
+}
+
+export interface ApproveMapAddressCandidateInput {
+  projectId: string;
+  candidateId: string;
+  city: string;
+  street: string;
+  buildingNo: string | null;
+  propertyId: string | null;
+  parcelNumber: string | null;
+  distributionPoint: string | null;
+  reserveLocation: ReserveLocationKind;
+  createDistributionNodeType: 'OSD' | 'OPP' | null;
 }
 
 export interface UpdateMapNoteInput {
@@ -204,6 +235,125 @@ function buildAddressLabel(address: {
 function parseGeojson(value: string): Record<string, unknown> {
   const parsed = JSON.parse(value) as unknown;
   return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : {};
+}
+
+function asGeometry(value: Record<string, unknown>): Record<string, unknown> | null {
+  if (value.type === 'Feature') {
+    const geometry = value.geometry;
+    return geometry && typeof geometry === 'object' && !Array.isArray(geometry)
+      ? (geometry as Record<string, unknown>)
+      : null;
+  }
+  return value;
+}
+
+function isCoordinate(value: unknown): value is [number, number] {
+  return (
+    Array.isArray(value) &&
+    value.length >= 2 &&
+    typeof value[0] === 'number' &&
+    typeof value[1] === 'number'
+  );
+}
+
+function pointInRing(lng: number, lat: number, ring: unknown[]): boolean {
+  let inside = false;
+  for (let index = 0, previousIndex = ring.length - 1; index < ring.length; previousIndex = index++) {
+    const current = ring[index];
+    const previous = ring[previousIndex];
+    if (!isCoordinate(current) || !isCoordinate(previous)) continue;
+
+    const [currentLng, currentLat] = current;
+    const [previousLng, previousLat] = previous;
+    const intersects =
+      currentLat > lat !== previousLat > lat &&
+      lng < ((previousLng - currentLng) * (lat - currentLat)) / (previousLat - currentLat) + currentLng;
+    if (intersects) inside = !inside;
+  }
+  return inside;
+}
+
+function pointInPolygonCoordinates(lng: number, lat: number, polygon: unknown[]): boolean {
+  const [outerRing, ...holes] = polygon;
+  if (!Array.isArray(outerRing) || !pointInRing(lng, lat, outerRing)) return false;
+  return !holes.some((hole) => Array.isArray(hole) && pointInRing(lng, lat, hole));
+}
+
+function pointInGeojson(lng: number, lat: number, value: Record<string, unknown>): boolean {
+  const geometry = asGeometry(value);
+  if (!geometry) return false;
+
+  if (geometry.type === 'Polygon' && Array.isArray(geometry.coordinates)) {
+    return pointInPolygonCoordinates(lng, lat, geometry.coordinates);
+  }
+
+  if (geometry.type === 'MultiPolygon' && Array.isArray(geometry.coordinates)) {
+    return geometry.coordinates.some((polygon) => Array.isArray(polygon) && pointInPolygonCoordinates(lng, lat, polygon));
+  }
+
+  return false;
+}
+
+function buildCandidateLabel(candidate: {
+  city: string;
+  street: string;
+  buildingNo: string | null;
+  lat: number;
+  lng: number;
+}): string {
+  const label = buildAddressLabel(candidate);
+  return label || `Punkt ${candidate.lat.toFixed(5)}, ${candidate.lng.toFixed(5)}`;
+}
+
+function mapAddressCandidateRow(row: {
+  id: string;
+  status: MapAddressCandidateStatus;
+  city: string;
+  street: string;
+  buildingNo: string | null;
+  postalCode: string | null;
+  propertyId: string | null;
+  parcelNumber: string | null;
+  lat: number;
+  lng: number;
+  geocoderSource: string;
+  geocoderDistanceMeters: number | null;
+  suggestedDistributionPoint: string | null;
+  assignmentSource: MapAddressCandidateAssignmentSource;
+  approvedAddressId: string | null;
+  reserveLocation: ReserveLocationKind | null;
+  createdAt: string;
+  updatedAt: string;
+}): ProjectMapAddressCandidate {
+  const lat = Number(row.lat);
+  const lng = Number(row.lng);
+  return {
+    id: row.id,
+    label: buildCandidateLabel({
+      city: row.city,
+      street: row.street,
+      buildingNo: row.buildingNo,
+      lat,
+      lng,
+    }),
+    status: row.status,
+    city: row.city,
+    street: row.street,
+    buildingNo: row.buildingNo,
+    postalCode: row.postalCode,
+    propertyId: row.propertyId,
+    parcelNumber: row.parcelNumber,
+    lat,
+    lng,
+    geocoderSource: row.geocoderSource,
+    geocoderDistanceMeters: row.geocoderDistanceMeters == null ? null : Number(row.geocoderDistanceMeters),
+    suggestedDistributionPoint: row.suggestedDistributionPoint,
+    assignmentSource: row.assignmentSource,
+    approvedAddressId: row.approvedAddressId,
+    reserveLocation: row.reserveLocation,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
 }
 
 function mapNotePhotoRow(row: {
@@ -566,6 +716,430 @@ export class ProjectsRepository {
     return this.listProjects().find((project) => project.id === projectId) ?? null;
   }
 
+  private findDistributionPointForRegion(projectId: string, lat: number, lng: number): string | null {
+    const polygonRows = this.db
+      .prepare(
+        `SELECT osd_name AS osdName, geojson
+         FROM map_polygons
+         WHERE project_id = ?
+         ORDER BY osd_name COLLATE NOCASE ASC`,
+      )
+      .all(projectId) as Array<{ osdName: string; geojson: string }>;
+
+    for (const polygon of polygonRows) {
+      if (pointInGeojson(lng, lat, parseGeojson(polygon.geojson))) return polygon.osdName;
+    }
+
+    return null;
+  }
+
+  private getMapAddressCandidate(projectId: string, candidateId: string): ProjectMapAddressCandidate | null {
+    const row = this.db
+      .prepare(
+        `SELECT
+          id,
+          status,
+          city,
+          street,
+          building_no AS buildingNo,
+          postal_code AS postalCode,
+          property_id AS propertyId,
+          parcel_number AS parcelNumber,
+          lat,
+          lng,
+          geocoder_source AS geocoderSource,
+          geocoder_distance_m AS geocoderDistanceMeters,
+          suggested_distribution_point AS suggestedDistributionPoint,
+          assignment_source AS assignmentSource,
+          approved_address_id AS approvedAddressId,
+          reserve_location AS reserveLocation,
+          created_at AS createdAt,
+          updated_at AS updatedAt
+        FROM map_address_candidates
+        WHERE project_id = ? AND id = ?`,
+      )
+      .get(projectId, candidateId) as
+      | {
+          id: string;
+          status: MapAddressCandidateStatus;
+          city: string;
+          street: string;
+          buildingNo: string | null;
+          postalCode: string | null;
+          propertyId: string | null;
+          parcelNumber: string | null;
+          lat: number;
+          lng: number;
+          geocoderSource: string;
+          geocoderDistanceMeters: number | null;
+          suggestedDistributionPoint: string | null;
+          assignmentSource: MapAddressCandidateAssignmentSource;
+          approvedAddressId: string | null;
+          reserveLocation: ReserveLocationKind | null;
+          createdAt: string;
+          updatedAt: string;
+        }
+      | undefined;
+
+    return row ? mapAddressCandidateRow(row) : null;
+  }
+
+  listMapAddressCandidates(projectId: string): ProjectMapAddressCandidate[] {
+    const rows = this.db
+      .prepare(
+        `SELECT
+          id,
+          status,
+          city,
+          street,
+          building_no AS buildingNo,
+          postal_code AS postalCode,
+          property_id AS propertyId,
+          parcel_number AS parcelNumber,
+          lat,
+          lng,
+          geocoder_source AS geocoderSource,
+          geocoder_distance_m AS geocoderDistanceMeters,
+          suggested_distribution_point AS suggestedDistributionPoint,
+          assignment_source AS assignmentSource,
+          approved_address_id AS approvedAddressId,
+          reserve_location AS reserveLocation,
+          created_at AS createdAt,
+          updated_at AS updatedAt
+        FROM map_address_candidates
+        WHERE project_id = ? AND status = 'PENDING'
+        ORDER BY created_at DESC, id ASC`,
+      )
+      .all(projectId) as Array<Parameters<typeof mapAddressCandidateRow>[0]>;
+
+    return rows.map(mapAddressCandidateRow);
+  }
+
+  addMapAddressCandidate(input: AddMapAddressCandidateInput): ProjectMapAddressCandidate {
+    const id = randomUUID();
+    const suggestedDistributionPoint = this.findDistributionPointForRegion(input.projectId, input.lat, input.lng);
+    const assignmentSource: MapAddressCandidateAssignmentSource = suggestedDistributionPoint ? 'REGION' : 'NONE';
+
+    this.db
+      .prepare(
+        `INSERT INTO map_address_candidates (
+          id, project_id, status, lat, lng, city, street, building_no,
+          postal_code, property_id, parcel_number, geocoder_source, geocoder_distance_m,
+          suggested_distribution_point, assignment_source
+        ) VALUES (?, ?, 'PENDING', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        id,
+        input.projectId,
+        input.lat,
+        input.lng,
+        input.city.trim(),
+        input.street.trim(),
+        input.buildingNo,
+        input.postalCode,
+        input.propertyId,
+        input.parcelNumber,
+        input.geocoderSource,
+        input.geocoderDistanceMeters,
+        suggestedDistributionPoint,
+        assignmentSource,
+      );
+    this.db.prepare(`UPDATE projects SET updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(input.projectId);
+
+    const created = this.getMapAddressCandidate(input.projectId, id);
+    if (!created) throw new Error(`Created map address candidate ${id} not found`);
+    return created;
+  }
+
+  private upsertManualChecklistNode(input: {
+    projectId: string;
+    parentId: string | null;
+    name: string;
+    path: string;
+    nodeType: ChecklistNodeType;
+    addressId: string | null;
+    sortOrder: number;
+    minPhotos: number;
+    acceptsPhotos: boolean;
+  }): string {
+    const existing = this.db
+      .prepare(`SELECT id FROM checklist_nodes WHERE project_id = ? AND path = ?`)
+      .get(input.projectId, input.path) as { id: string } | undefined;
+
+    if (existing) {
+      this.db
+        .prepare(
+          `UPDATE checklist_nodes
+           SET parent_id = ?,
+               name = ?,
+               node_type = ?,
+               address_id = ?,
+               sort_order = ?,
+               min_photos = ?,
+               accepts_photos = ?,
+               updated_at = CURRENT_TIMESTAMP
+           WHERE project_id = ? AND id = ?`,
+        )
+        .run(
+          input.parentId,
+          input.name,
+          input.nodeType,
+          input.addressId,
+          input.sortOrder,
+          input.minPhotos,
+          input.acceptsPhotos ? 1 : 0,
+          input.projectId,
+          existing.id,
+        );
+      return existing.id;
+    }
+
+    const id = randomUUID();
+    this.db
+      .prepare(
+        `INSERT INTO checklist_nodes (
+          id, project_id, parent_id, name, path, node_type, source, address_id,
+          sort_order, min_photos, accepts_photos, status
+        ) VALUES (?, ?, ?, ?, ?, ?, 'MANUAL', ?, ?, ?, ?, 'OPEN')`,
+      )
+      .run(
+        id,
+        input.projectId,
+        input.parentId,
+        input.name,
+        input.path,
+        input.nodeType,
+        input.addressId,
+        input.sortOrder,
+        input.minPhotos,
+        input.acceptsPhotos ? 1 : 0,
+      );
+    return id;
+  }
+
+  private ensureReserveChecklistPath(input: {
+    projectId: string;
+    distributionPoint: string;
+    addressId: string;
+    street: string;
+    buildingNo: string | null;
+    reserveLocation: ReserveLocationKind;
+  }): void {
+    const rootPath =
+      input.reserveLocation === 'Napowietrzny' ? 'Zapasy_kabli_napowietrznych' : 'Zapasy_kabli_instalacyjnych';
+    const rootSort = input.reserveLocation === 'Napowietrzny' ? 8 : 7;
+    const rootId = this.upsertManualChecklistNode({
+      projectId: input.projectId,
+      parentId: null,
+      name: rootPath,
+      path: rootPath,
+      nodeType: 'STATIC',
+      addressId: null,
+      sortOrder: rootSort,
+      minPhotos: 0,
+      acceptsPhotos: false,
+    });
+
+    const safeDistributionPoint = safeFolderName(input.distributionPoint);
+    const distributionPath = `${rootPath}/${safeDistributionPoint}`;
+    const distributionId = this.upsertManualChecklistNode({
+      projectId: input.projectId,
+      parentId: rootId,
+      name: input.distributionPoint,
+      path: distributionPath,
+      nodeType: 'DISTRIBUTION',
+      addressId: null,
+      sortOrder: 0,
+      minPhotos: 0,
+      acceptsPhotos: false,
+    });
+
+    const addressName = toAddressFolderName(input.street, input.buildingNo);
+    this.upsertManualChecklistNode({
+      projectId: input.projectId,
+      parentId: distributionId,
+      name: addressName,
+      path: `${distributionPath}/${addressName}`,
+      nodeType: 'CABLE_RESERVE',
+      addressId: input.addressId,
+      sortOrder: 0,
+      minPhotos: 1,
+      acceptsPhotos: true,
+    });
+  }
+
+  approveMapAddressCandidate(input: ApproveMapAddressCandidateInput): ProjectMapAddressCandidate {
+    const candidate = this.getMapAddressCandidate(input.projectId, input.candidateId);
+    if (!candidate) throw new Error('Map address candidate not found');
+    if (candidate.status !== 'PENDING') throw new Error('Map address candidate is not pending');
+
+    const city = input.city.trim();
+    const street = input.street.trim();
+    const distributionPoint = (input.distributionPoint ?? candidate.suggestedDistributionPoint ?? '').trim();
+    if (!city) throw new Error('City is required');
+    if (!street) throw new Error('Street is required');
+    if (!distributionPoint) throw new Error('Distribution point is required');
+
+    const tx = this.db.transaction(() => {
+      if (input.createDistributionNodeType) {
+        this.db
+          .prepare(
+            `INSERT INTO map_infra_nodes (
+              id, project_id, node_type, name, label, lat, lng, status
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'PENDING')
+            ON CONFLICT(project_id, node_type, name) DO UPDATE SET
+              label = excluded.label,
+              lat = excluded.lat,
+              lng = excluded.lng`,
+          )
+          .run(
+            randomUUID(),
+            input.projectId,
+            input.createDistributionNodeType,
+            distributionPoint,
+            distributionPoint,
+            candidate.lat,
+            candidate.lng,
+          );
+      }
+
+      const existingAddressRows = this.db
+        .prepare(
+          `SELECT id, city, street, building_no AS buildingNo, distribution_point AS distributionPoint
+           FROM addresses
+           WHERE project_id = ?`,
+        )
+        .all(input.projectId) as Array<{
+        id: string;
+        city: string;
+        street: string;
+        buildingNo: string | null;
+        distributionPoint: string | null;
+      }>;
+      const targetKey = getAddressMergeKey({
+        city,
+        street,
+        buildingNo: input.buildingNo,
+        distributionPoint,
+      });
+      const existingAddress = existingAddressRows.find((address) => getAddressMergeKey(address) === targetKey);
+      const addressId = existingAddress?.id ?? randomUUID();
+
+      if (existingAddress) {
+        this.db
+          .prepare(
+            `UPDATE addresses
+             SET city = ?,
+                 street = ?,
+                 building_no = ?,
+                 property_id = ?,
+                 parcel_number = ?,
+                 distribution_point = ?,
+                 lat = ?,
+                 lng = ?
+             WHERE project_id = ? AND id = ?`,
+          )
+          .run(
+            city,
+            street,
+            input.buildingNo,
+            input.propertyId,
+            input.parcelNumber,
+            distributionPoint,
+            candidate.lat,
+            candidate.lng,
+            input.projectId,
+            addressId,
+          );
+      } else {
+        this.db
+          .prepare(
+            `INSERT INTO addresses (
+              id, project_id, city, street, building_no, property_id, parcel_number,
+              distribution_point, lat, lng, household_count, business_unit_count
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0)`,
+          )
+          .run(
+            addressId,
+            input.projectId,
+            city,
+            street,
+            input.buildingNo,
+            input.propertyId,
+            input.parcelNumber,
+            distributionPoint,
+            candidate.lat,
+            candidate.lng,
+          );
+      }
+
+      this.ensureReserveChecklistPath({
+        projectId: input.projectId,
+        distributionPoint,
+        addressId,
+        street,
+        buildingNo: input.buildingNo,
+        reserveLocation: input.reserveLocation,
+      });
+
+      this.db
+        .prepare(
+          `UPDATE map_address_candidates
+           SET status = 'APPROVED',
+               city = ?,
+               street = ?,
+               building_no = ?,
+               property_id = ?,
+               parcel_number = ?,
+               approved_address_id = ?,
+               reserve_location = ?,
+               updated_at = CURRENT_TIMESTAMP
+           WHERE project_id = ? AND id = ?`,
+        )
+        .run(
+          city,
+          street,
+          input.buildingNo,
+          input.propertyId,
+          input.parcelNumber,
+          addressId,
+          input.reserveLocation,
+          input.projectId,
+          input.candidateId,
+        );
+
+      this.db
+        .prepare(
+          `UPDATE projects
+           SET address_count = (SELECT COUNT(*) FROM addresses WHERE project_id = ?),
+               updated_at = CURRENT_TIMESTAMP
+           WHERE id = ?`,
+        )
+        .run(input.projectId, input.projectId);
+    });
+
+    tx();
+    const approved = this.getMapAddressCandidate(input.projectId, input.candidateId);
+    if (!approved) throw new Error('Approved map address candidate not found');
+    return approved;
+  }
+
+  rejectMapAddressCandidate(projectId: string, candidateId: string): ProjectMapAddressCandidate {
+    const result = this.db
+      .prepare(
+        `UPDATE map_address_candidates
+         SET status = 'REJECTED',
+             updated_at = CURRENT_TIMESTAMP
+         WHERE project_id = ? AND id = ? AND status = 'PENDING'`,
+      )
+      .run(projectId, candidateId);
+    if (result.changes === 0) throw new Error('Map address candidate not found');
+
+    const rejected = this.getMapAddressCandidate(projectId, candidateId);
+    if (!rejected) throw new Error('Rejected map address candidate not found');
+    return rejected;
+  }
+
   getProjectMap(projectId: string): ProjectMapRecord {
     const addressRows = this.db
       .prepare(
@@ -848,7 +1422,14 @@ export class ProjectsRepository {
       };
     });
 
-    return { addresses, polygons, trunkCables, infraNodes, notes: this.listMapNotes(projectId) };
+    return {
+      addresses,
+      addressCandidates: this.listMapAddressCandidates(projectId),
+      polygons,
+      trunkCables,
+      infraNodes,
+      notes: this.listMapNotes(projectId),
+    };
   }
 
   updateCableStatus(projectId: string, cableId: string, status: MapCableStatus): void {
