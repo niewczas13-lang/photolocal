@@ -591,6 +591,91 @@ describe('GPKG extractor helpers', () => {
     });
   });
 
+  it('keeps OKW cable rows as underground even when they overlap existing duct infrastructure', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'photo-local-gpkg-okw-underground-over-duct-'));
+    const gpkgPath = join(dir, 'sample.gpkg');
+    const db = new Database(gpkgPath);
+
+    db.exec(`
+      CREATE TABLE PA (
+        id_posesja_opl TEXT,
+        nazwa_miejsc TEXT,
+        nazwa_ul TEXT,
+        nr_domu TEXT,
+        nr_dzialki TEXT,
+        geom BLOB
+      );
+      CREATE TABLE "Kable Swiatlowodowe" (
+        model_kabla TEXT,
+        typ_elementu TEXT,
+        od TEXT,
+        do TEXT,
+        odcinek_kabla TEXT,
+        geom BLOB
+      );
+      CREATE TABLE "_Odcinki Kanalizacji" (
+        typ_elementu TEXT,
+        oznaczenie TEXT,
+        geom BLOB
+      );
+    `);
+
+    const ductRoute = lineGeometry([
+      [574000, 424000],
+      [574100, 424100],
+    ]);
+    db.prepare('INSERT INTO PA VALUES (?, ?, ?, ?, ?, ?)').run(
+      'pa-1',
+      'Ostrzeszewo',
+      'Testowa',
+      '1',
+      null,
+      pointGeometry(574000, 424000),
+    );
+    db.prepare('INSERT INTO "_Odcinki Kanalizacji" VALUES (?, ?, ?)').run(
+      'Kanalizacja pierwotna',
+      'OSTRZESZEWO/KAN/001',
+      ductRoute,
+    );
+
+    const insertCable = db.prepare('INSERT INTO "Kable Swiatlowodowe" VALUES (?, ?, ?, ?, ?, ?)');
+    insertCable.run(
+      'MI-MKF 12J G.652D [ZN-05_[W1]_1x12(12)]',
+      'Kabel doziemny',
+      'OSTRZESZEWO/OPP0002',
+      'OSTRZESZEWO/OSD0001',
+      'OKW0337263/001',
+      ductRoute,
+    );
+    insertCable.run(
+      'MI-MKF 12J G.652D [ZN-05_[W1]_1x12(12)]',
+      'Kabel doziemny',
+      'OSTRZESZEWO/OPP0002',
+      'OSTRZESZEWO/OSD0002',
+      'OKW0337271/001',
+      ductRoute,
+    );
+    insertCable.run(
+      'MI-MKF 72J G.652D [ZN-05_[W1]_6x12(72)]',
+      'Kabel doziemny',
+      'OSTRZESZEWO/OPP0002',
+      'OSTRZESZEWO/OSD0003',
+      'OKW0337264/001',
+      ductRoute,
+    );
+    db.close();
+
+    const result = extractGpkg(gpkgPath);
+
+    expect(result.trunkCables).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ rawName: 'OKW0337263/001', routingType: 'underground' }),
+        expect.objectContaining({ rawName: 'OKW0337271/001', routingType: 'underground' }),
+        expect.objectContaining({ rawName: 'OKW0337264/001', routingType: 'underground' }),
+      ]),
+    );
+  });
+
   it('extracts pole infrastructure from _Obiekty instead of conceptual pole layers', () => {
     const dir = mkdtempSync(join(tmpdir(), 'photo-local-gpkg-obiekty-poles-'));
     const gpkgPath = join(dir, 'sample.gpkg');

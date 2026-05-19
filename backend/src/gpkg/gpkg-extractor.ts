@@ -262,15 +262,24 @@ function normalizeCableRoutingText(value: string): string {
     .toLowerCase();
 }
 
+function getNormalizedCableRoutingDescription(row: Record<string, unknown>): string {
+  const routeDescription = [row.typ_elementu, row.modyfikacja, row.uwagi]
+    .filter((value): value is string => typeof value === 'string')
+    .join(' ');
+
+  return normalizeCableRoutingText(routeDescription);
+}
+
+function isUndergroundWorkCableReference(rawName: string | null): boolean {
+  return /^OKW/i.test(rawName?.trim() ?? '');
+}
+
 function getCableRoutingType(
   row: Record<string, unknown>,
   cableType: string,
   rawName: string | null,
 ): CableRoutingType {
-  const routeDescription = [row.typ_elementu, row.modyfikacja, row.uwagi]
-    .filter((value): value is string => typeof value === 'string')
-    .join(' ');
-  const normalizedDescription = normalizeCableRoutingText(routeDescription);
+  const normalizedDescription = getNormalizedCableRoutingDescription(row);
   const hasExistingMarker = normalizedDescription.includes('istniej');
   const hasProjectedMarker =
     normalizedDescription.includes('projekt') ||
@@ -285,6 +294,7 @@ function getCableRoutingType(
   if (hasExistingMarker && (hasDuctMarker || hasConduitMarker)) {
     return 'existing_duct';
   }
+  if (isUndergroundWorkCableReference(rawName)) return 'underground';
   if (hasConduitMarker) return 'underground';
   if (normalizedDescription.includes('kabel w kanalizacji') || (hasDuctMarker && !hasProjectedMarker)) {
     return 'existing_duct';
@@ -737,7 +747,9 @@ function extractMapGeometry(db: Database.Database): {
       const baseRoutingType = getCableRoutingType(row, cableType, rawName);
       const runsAlongExistingDuct = cablePartlyRunsAlongConduit(projectedSegments, existingDuctSegments);
       const runsAlongProjectedConduit = cableRunsAlongProjectedConduit(projectedSegments, projectedConduitSegments);
-      const routingType = runsAlongExistingDuct
+      const inferExistingDuctFromGeometry =
+        runsAlongExistingDuct && !isUndergroundWorkCableReference(rawName);
+      const routingType = inferExistingDuctFromGeometry
         ? 'existing_duct'
         : baseRoutingType === 'existing_duct' && runsAlongProjectedConduit
           ? 'underground'
