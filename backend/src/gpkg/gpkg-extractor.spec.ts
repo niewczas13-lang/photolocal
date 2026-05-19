@@ -336,6 +336,73 @@ describe('GPKG extractor helpers', () => {
     });
   });
 
+  it('keeps cables in newly built conduit as underground route work', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'photo-local-gpkg-new-conduit-map-'));
+    const gpkgPath = join(dir, 'sample.gpkg');
+    const db = new Database(gpkgPath);
+
+    db.exec(`
+      CREATE TABLE PA (
+        id_posesja_opl TEXT,
+        nazwa_miejsc TEXT,
+        nazwa_ul TEXT,
+        nr_domu TEXT,
+        nr_dzialki TEXT,
+        geom BLOB
+      );
+      CREATE TABLE "Kable Swiatlowodowe" (
+        model_kabla TEXT,
+        typ_elementu TEXT,
+        od TEXT,
+        do TEXT,
+        odcinek_kabla TEXT,
+        geom BLOB
+      );
+    `);
+
+    db.prepare('INSERT INTO PA VALUES (?, ?, ?, ?, ?, ?)').run(
+      'pa-1',
+      'Ostrzeszewo',
+      'Testowa',
+      '1',
+      null,
+      pointGeometry(574000, 424000),
+    );
+    const insertCable = db.prepare('INSERT INTO "Kable Swiatlowodowe" VALUES (?, ?, ?, ?, ?, ?)');
+    insertCable.run(
+      'MI-MKF 12J G.652D',
+      'Kabel w nowobudowanym rurociagu',
+      'OSTRZESZEWO/OPP0002',
+      'OSTRZESZEWO/OSD0001',
+      'OKW0337263/001',
+      lineGeometry([
+        [574000, 424000],
+        [574100, 424100],
+      ]),
+    );
+    insertCable.run(
+      'MI-MKF 12J G.652D',
+      'Projektowany kabel w rurociagu',
+      'OSTRZESZEWO/OPP0002',
+      'OSTRZESZEWO/OSD0002',
+      'OKW0337271/001',
+      lineGeometry([
+        [574100, 424100],
+        [574200, 424200],
+      ]),
+    );
+    db.close();
+
+    const result = extractGpkg(gpkgPath);
+
+    expect(result.trunkCables).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ rawName: 'OKW0337263/001', routingType: 'underground' }),
+        expect.objectContaining({ rawName: 'OKW0337271/001', routingType: 'underground' }),
+      ]),
+    );
+  });
+
   it('extracts route and installation cable lengths for map popups', () => {
     const dir = mkdtempSync(join(tmpdir(), 'photo-local-gpkg-cable-lengths-'));
     const gpkgPath = join(dir, 'sample.gpkg');

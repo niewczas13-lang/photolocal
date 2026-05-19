@@ -173,15 +173,36 @@ function getTrunkCableKey(input: {
   return input.rawName?.trim() || `${input.fromNode}|${input.toNode}|${input.cableType}`;
 }
 
+function normalizeCableRoutingText(value: string): string {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+}
+
 function getCableRoutingType(
   row: Record<string, unknown>,
   cableType: string,
   rawName: string | null,
 ): CableRoutingType {
-  const elementType = row.typ_elementu == null ? '' : String(row.typ_elementu);
-  if (/Kabel napowietrzny/i.test(elementType)) return 'aerial';
-  if (/Kabel w kanalizacji|kanalizacj|ruroci[aą]g/i.test(elementType)) return 'existing_duct';
-  if (/Kabel doziemny/i.test(elementType)) return 'underground';
+  const routeDescription = [row.typ_elementu, row.modyfikacja, row.uwagi]
+    .filter((value): value is string => typeof value === 'string')
+    .join(' ');
+  const normalizedDescription = normalizeCableRoutingText(routeDescription);
+  const hasExistingMarker = normalizedDescription.includes('istniej');
+  const hasConduitMarker =
+    normalizedDescription.includes('rurociag') ||
+    normalizedDescription.includes('mikrokanalizacj');
+
+  if (normalizedDescription.includes('kabel napowietrzny')) return 'aerial';
+  if (normalizedDescription.includes('kabel doziemny')) return 'underground';
+  if (hasExistingMarker && (normalizedDescription.includes('kanalizacj') || hasConduitMarker)) {
+    return 'existing_duct';
+  }
+  if (normalizedDescription.includes('kabel w kanalizacji') || normalizedDescription.includes('kanalizacj')) {
+    return 'existing_duct';
+  }
+  if (hasConduitMarker) return 'underground';
   return /ADSS/i.test(`${cableType} ${rawName ?? ''}`) ? 'aerial' : 'underground';
 }
 
