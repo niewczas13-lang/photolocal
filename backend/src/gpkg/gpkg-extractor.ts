@@ -139,6 +139,25 @@ function lineSegmentsFromGeojson(geojson: Record<string, unknown>): number[][][]
   return [];
 }
 
+function lineSegmentsLengthMeters(segments: number[][][]): number | null {
+  let total = 0;
+  for (const segment of segments) {
+    for (let index = 1; index < segment.length; index += 1) {
+      const previous = segment[index - 1];
+      const current = segment[index];
+      total += Math.hypot(current[0] - previous[0], current[1] - previous[1]);
+    }
+  }
+
+  return total > 0 ? Math.round(total * 10) / 10 : null;
+}
+
+function addNullableLengths(left: number | null | undefined, right: number | null | undefined): number | null {
+  if (left == null) return right == null ? null : right;
+  if (right == null) return left;
+  return Math.round((left + right) * 10) / 10;
+}
+
 function geojsonFromLineSegments(segments: number[][][]): Record<string, unknown> {
   return segments.length === 1
     ? { type: 'LineString', coordinates: segments[0] }
@@ -164,6 +183,39 @@ function getCableRoutingType(
   if (/Kabel w kanalizacji|kanalizacj|ruroci[aą]g/i.test(elementType)) return 'existing_duct';
   if (/Kabel doziemny/i.test(elementType)) return 'underground';
   return /ADSS/i.test(`${cableType} ${rawName ?? ''}`) ? 'aerial' : 'underground';
+}
+
+function normalizeColumnName(value: string): string {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/gi, '_')
+    .toLowerCase();
+}
+
+function parseLengthMeters(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return Math.round(value * 10) / 10;
+  if (typeof value !== 'string') return null;
+  const normalized = value.replace(',', '.').replace(/[^\d.-]+/g, '').trim();
+  if (!normalized) return null;
+  const numeric = Number(normalized);
+  return Number.isFinite(numeric) ? Math.round(numeric * 10) / 10 : null;
+}
+
+function getInstallationLengthMeters(row: Record<string, unknown>): number | null {
+  for (const [key, value] of Object.entries(row)) {
+    const normalizedKey = normalizeColumnName(key);
+    const isInstallationLength =
+      (normalizedKey.includes('dlugosc') && normalizedKey.includes('instal')) ||
+      normalizedKey === 'dl_instalacyjna' ||
+      normalizedKey === 'dl_inst';
+    if (!isInstallationLength) continue;
+
+    const length = parseLengthMeters(value);
+    if (length != null) return length;
+  }
+
+  return null;
 }
 
 function isExistingPassiveDevice(value: unknown): boolean {
@@ -377,6 +429,9 @@ function extractMapGeometry(db: Database.Database): {
 
       const geojson = parseGpkgGeoJSON(row.geom);
       if (!geojson) continue;
+      const projectedSegments = lineSegmentsFromGeojson(geojson);
+      const routeLengthMeters = lineSegmentsLengthMeters(projectedSegments);
+      const installationLengthMeters = getInstallationLengthMeters(row);
       reprojectGeometry(geojson);
       const segments = lineSegmentsFromGeojson(geojson);
       if (segments.length === 0) continue;
@@ -395,7 +450,18 @@ function extractMapGeometry(db: Database.Database): {
 
       if (existingCable) {
         existingCable.segments.push(...segments);
+        existingCable.cable.routeLengthMeters = addNullableLengths(
+          existingCable.cable.routeLengthMeters,
+          routeLengthMeters,
+        );
+        existingCable.cable.installationLengthMeters = addNullableLengths(
+          existingCable.cable.installationLengthMeters,
+          installationLengthMeters,
+        );
         if (routingType === 'aerial') existingCable.cable.routingType = routingType;
+        if (routingType === 'existing_duct' && existingCable.cable.routingType !== 'aerial') {
+          existingCable.cable.routingType = routingType;
+        }
       } else {
         trunkCableMap.set(cableKey, {
           cable: {
@@ -405,6 +471,8 @@ function extractMapGeometry(db: Database.Database): {
             osdName,
             rawName,
             routingType,
+            routeLengthMeters,
+            installationLengthMeters,
           },
           segments: [...segments],
         });

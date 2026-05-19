@@ -21,6 +21,7 @@ import type { Feature, GeoJsonObject, Geometry } from 'geojson';
 import { api } from '../api';
 import type { MapView } from '../app-routing';
 import { cn } from '../lib/utils';
+import { formatCableLength } from '../map-format';
 import {
   getCableStatusActions,
   getNodeStatusActions,
@@ -43,6 +44,7 @@ import type {
   ProjectMapNote,
   ProjectMapNoteTargetType,
   ProjectMapNodeStatus,
+  ProjectMapPhoto,
   ProjectMapPolygon,
 } from '../types';
 import { MapStatusActionButton } from './MapStatusControls';
@@ -374,6 +376,29 @@ function MapNoteTargetPanel({
   );
 }
 
+function MiniPhotoGallery({ projectId, photos }: { projectId: string; photos: ProjectMapPhoto[] }) {
+  if (photos.length === 0) return null;
+
+  return (
+    <div className="project-map-mini-gallery" aria-label="Zdjecia przypisane do elementu">
+      {photos.slice(0, 4).map((photo) => (
+        <a
+          key={photo.id}
+          href={api.photoFileUrl(projectId, photo.id)}
+          target="_blank"
+          rel="noreferrer"
+          title={photo.storedFileName}
+          className="project-map-mini-gallery__item"
+        >
+          <img src={api.photoThumbUrl(projectId, photo.id)} alt={photo.storedFileName} loading="lazy" />
+          <span>{photo.storedFileName}</span>
+        </a>
+      ))}
+      {photos.length > 4 && <span className="project-map-mini-gallery__more">+{photos.length - 4}</span>}
+    </div>
+  );
+}
+
 function MapClickNoteCreator({
   enabled,
   onPick,
@@ -440,6 +465,16 @@ function CablePopup({
       <div className="project-map-popup__meta">
         {cable.cableType} · {cableRouteLabel(cable.routingType)}
       </div>
+      <div className="project-map-popup__metrics">
+        <span>
+          <strong>Trasowa</strong>
+          {formatCableLength(cable.routeLengthMeters)}
+        </span>
+        <span>
+          <strong>Instalacyjna</strong>
+          {formatCableLength(cable.installationLengthMeters)}
+        </span>
+      </div>
       <div className="project-map-popup__status-row">
         <Badge variant="outline">{STATUS_LABELS[cable.status]}</Badge>
       </div>
@@ -473,12 +508,14 @@ function CablePopup({
 }
 
 function NodePopup({
+  projectId,
   node,
   notes,
   onStatusChange,
   onCreateNote,
   busy,
 }: {
+  projectId: string;
   node: ProjectMapInfraNode;
   notes: ProjectMapNote[];
   onStatusChange: (nodeId: string, status: ProjectMapNodeStatus) => void;
@@ -497,6 +534,7 @@ function NodePopup({
           {node.hasPhoto ? 'Jest zdjecie' : STATUS_LABELS[node.status]}
         </Badge>
       </div>
+      <MiniPhotoGallery projectId={projectId} photos={node.photos} />
       <div className="project-map-popup__actions">
         {actions.map((action) => (
           <MapStatusActionButton
@@ -527,23 +565,50 @@ function NodePopup({
 }
 
 function AddressPopup({
+  projectId,
   address,
   notes,
+  onMarkNotApplicable,
   onCreateNote,
   busy,
 }: {
+  projectId: string;
   address: ProjectMapAddress;
   notes: ProjectMapNote[];
+  onMarkNotApplicable: (addressId: string) => void;
   onCreateNote: (input: CreateMapNoteInput) => void;
   busy: boolean;
 }) {
+  const addressReady = address.hasReservePhoto || address.isNotApplicable;
+
   return (
     <div className="project-map-popup">
       <div className="project-map-popup__title">{address.label}</div>
       <div className="project-map-popup__meta">{address.distributionPoint ?? 'Bez punktu dystrybucyjnego'}</div>
-      <Badge variant={address.hasReservePhoto ? 'default' : 'outline'}>
-        {address.hasReservePhoto ? 'Zapas ze zdjeciem' : 'Brak zdjecia zapasu'}
+      <Badge variant={addressReady ? 'default' : 'outline'}>
+        {address.isNotApplicable
+          ? 'Nie dotyczy'
+          : address.hasReservePhoto
+            ? 'Zapas ze zdjeciem'
+            : 'Brak zdjecia zapasu'}
       </Badge>
+      <MiniPhotoGallery projectId={projectId} photos={address.photos} />
+      {!addressReady && (
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="project-map-popup__single-action"
+          disabled={busy}
+          onClick={() => {
+            if (window.confirm('Oznaczyc ten adres jako nie dotyczy?')) {
+              onMarkNotApplicable(address.id);
+            }
+          }}
+        >
+          Nie dotyczy
+        </Button>
+      )}
       <MapNoteTargetPanel
         notes={notes}
         targetLabel={address.label}
@@ -604,6 +669,18 @@ export default function ProjectMap({ projectId, view, onViewChange }: ProjectMap
     setError(null);
     try {
       setData(await api.updateMapNodeStatus(projectId, nodeId, status));
+    } catch (err) {
+      setError(getErrorMessage(err));
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const markAddressNotApplicable = async (addressId: string) => {
+    setBusyId(addressId);
+    setError(null);
+    try {
+      setData(await api.markMapAddressNotApplicable(projectId, addressId, 'Oznaczone z mapy jako nie dotyczy'));
     } catch (err) {
       setError(getErrorMessage(err));
     } finally {
@@ -685,7 +762,7 @@ export default function ProjectMap({ projectId, view, onViewChange }: ProjectMap
       };
     }
     return {
-      addressesReady: data.addresses.filter((address) => address.hasReservePhoto).length,
+      addressesReady: data.addresses.filter((address) => address.hasReservePhoto || address.isNotApplicable).length,
       addressesTotal: data.addresses.length,
       cablesReady: data.trunkCables.filter((cable) => isCableReady(cable.status)).length,
       cablesTotal: data.trunkCables.length,
@@ -839,7 +916,7 @@ export default function ProjectMap({ projectId, view, onViewChange }: ProjectMap
                       <div className="project-map-popup">
                         <div className="project-map-popup__title">{label}</div>
                         <div className="project-map-popup__meta">
-                          Adresy ze zdjeciem: {polygon.addressWithReservePhoto}/{polygon.addressTotal}
+                          Adresy gotowe: {polygon.addressWithReservePhoto}/{polygon.addressTotal}
                         </div>
                         <div className="project-map-popup__meta">
                           HH: {polygon.households ?? '-'} PA: {polygon.paCount ?? '-'}
@@ -893,6 +970,7 @@ export default function ProjectMap({ projectId, view, onViewChange }: ProjectMap
                 >
                   <Popup>
                     <NodePopup
+                      projectId={projectId}
                       node={node}
                       notes={notesForTarget(data.notes, 'node', node.id)}
                       onStatusChange={updateNodeStatus}
@@ -907,14 +985,19 @@ export default function ProjectMap({ projectId, view, onViewChange }: ProjectMap
                 <Marker
                   key={address.id}
                   position={[address.lat, address.lng]}
-                  icon={markerIcon('address', address.hasReservePhoto ? 'done' : 'addressPending')}
+                  icon={markerIcon(
+                    'address',
+                    address.isNotApplicable ? 'notApplicable' : address.hasReservePhoto ? 'done' : 'addressPending',
+                  )}
                 >
                   <Popup>
                     <AddressPopup
+                      projectId={projectId}
                       address={address}
                       notes={notesForTarget(data.notes, 'address', address.id)}
+                      onMarkNotApplicable={(addressId) => void markAddressNotApplicable(addressId)}
                       onCreateNote={(input) => void createMapNote(input)}
-                      busy={busyId === 'note'}
+                      busy={busyId === address.id || busyId === 'note'}
                     />
                   </Popup>
                 </Marker>
@@ -940,6 +1023,7 @@ export default function ProjectMap({ projectId, view, onViewChange }: ProjectMap
 
           <div className="project-map-legend" aria-hidden="true">
             <span><span className="project-map-dot project-map-dot--red" /> adres bez zapasu</span>
+            <span><span className="project-map-dot project-map-dot--gray" /> adres nie dotyczy</span>
             <span><span className="project-map-line project-map-line--underground" /> kabel doziemny</span>
             <span><span className="project-map-line project-map-line--aerial" /> kabel napowietrzny</span>
             <span><span className="project-map-line project-map-line--duct" /> istniejaca kanalizacja</span>

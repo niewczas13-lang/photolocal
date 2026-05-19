@@ -10,6 +10,8 @@ import type {
   MapNoteTargetType,
   MapNodeStatus,
   MapPolygonInput,
+  ProjectMapAddressStatus,
+  ProjectMapPhoto,
   MapTrunkCableInput,
   ProjectMapNote,
   ProjectMapNotePhoto,
@@ -234,6 +236,20 @@ function mapNotePhotoRow(row: {
   };
 }
 
+function mapProjectPhotoRow(row: {
+  id: string;
+  storedFileName: string;
+  reserveLocation: string | null;
+  uploadedAt: string;
+}): ProjectMapPhoto {
+  return {
+    id: row.id,
+    storedFileName: row.storedFileName,
+    reserveLocation: row.reserveLocation,
+    uploadedAt: row.uploadedAt,
+  };
+}
+
 export class ProjectsRepository {
   constructor(private readonly db: Database.Database) {}
 
@@ -289,8 +305,9 @@ export class ProjectsRepository {
 
     const insertCable = this.db.prepare(
       `INSERT INTO map_trunk_cables (
-        id, project_id, cable_key, cable_type, route_type, from_node, to_node, osd_name, geojson, raw_name
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        id, project_id, cable_key, cable_type, route_type, from_node, to_node, osd_name,
+        geojson, raw_name, route_length_m, installation_length_m
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(project_id, cable_key) DO UPDATE SET
         cable_type = excluded.cable_type,
         route_type = excluded.route_type,
@@ -298,7 +315,9 @@ export class ProjectsRepository {
         to_node = excluded.to_node,
         osd_name = excluded.osd_name,
         geojson = excluded.geojson,
-        raw_name = excluded.raw_name`,
+        raw_name = excluded.raw_name,
+        route_length_m = excluded.route_length_m,
+        installation_length_m = excluded.installation_length_m`,
     );
     for (const cable of trunkCables) {
       insertCable.run(
@@ -312,6 +331,8 @@ export class ProjectsRepository {
         cable.osdName,
         JSON.stringify(cable.geojson),
         cable.rawName,
+        cable.routeLengthMeters ?? null,
+        cable.installationLengthMeters ?? null,
       );
     }
 
@@ -554,7 +575,8 @@ export class ProjectsRepository {
           address.distribution_point AS distributionPoint,
           address.lat,
           address.lng,
-          COUNT(photo.id) AS reservePhotoCount
+          COUNT(photo.id) AS reservePhotoCount,
+          COUNT(DISTINCT CASE WHEN node.status = 'NOT_APPLICABLE' THEN node.id END) AS notApplicableReserveNodeCount
         FROM addresses address
         LEFT JOIN checklist_nodes node
           ON node.address_id = address.id
@@ -577,10 +599,46 @@ export class ProjectsRepository {
       lat: number;
       lng: number;
       reservePhotoCount: number;
+      notApplicableReserveNodeCount: number;
     }>;
+
+    const addressPhotoRows = this.db
+      .prepare(
+        `SELECT
+          node.address_id AS addressId,
+          photo.id,
+          photo.stored_file_name AS storedFileName,
+          photo.reserve_location AS reserveLocation,
+          photo.uploaded_at AS uploadedAt
+        FROM photos photo
+        JOIN checklist_nodes node ON node.id = photo.checklist_node_id
+        WHERE photo.project_id = ?
+          AND node.project_id = ?
+          AND node.address_id IS NOT NULL
+        ORDER BY photo.uploaded_at DESC, photo.id ASC`,
+      )
+      .all(projectId, projectId) as Array<{
+      addressId: string;
+      id: string;
+      storedFileName: string;
+      reserveLocation: string | null;
+      uploadedAt: string;
+    }>;
+    const photosByAddressId = new Map<string, ProjectMapPhoto[]>();
+    for (const photo of addressPhotoRows) {
+      const photos = photosByAddressId.get(photo.addressId) ?? [];
+      photos.push(mapProjectPhotoRow(photo));
+      photosByAddressId.set(photo.addressId, photos);
+    }
 
     const addresses = addressRows.map((address) => {
       const reservePhotoCount = Number(address.reservePhotoCount);
+      const isNotApplicable = reservePhotoCount === 0 && Number(address.notApplicableReserveNodeCount) > 0;
+      const status: ProjectMapAddressStatus = reservePhotoCount > 0
+        ? 'COMPLETE'
+        : isNotApplicable
+          ? 'NOT_APPLICABLE'
+          : 'PENDING';
       return {
         id: address.id,
         label: buildAddressLabel(address),
@@ -592,6 +650,9 @@ export class ProjectsRepository {
         lng: Number(address.lng),
         reservePhotoCount,
         hasReservePhoto: reservePhotoCount > 0,
+        status,
+        isNotApplicable,
+        photos: photosByAddressId.get(address.id) ?? [],
       };
     });
 
@@ -602,7 +663,9 @@ export class ProjectsRepository {
       if (!nodeKey) continue;
       const counts = addressCountsByNode.get(nodeKey) ?? { total: 0, withReservePhoto: 0 };
       counts.total += 1;
-      if (address.hasReservePhoto) counts.withReservePhoto += 1;
+      if (address.status === 'COMPLETE' || address.status === 'NOT_APPLICABLE') {
+        counts.withReservePhoto += 1;
+      }
       addressCountsByNode.set(nodeKey, counts);
 
       const terminalNodeKey = normalizeMapNodeTerminalKey(address.distributionPoint);
@@ -611,7 +674,9 @@ export class ProjectsRepository {
         withReservePhoto: 0,
       };
       terminalCounts.total += 1;
-      if (address.hasReservePhoto) terminalCounts.withReservePhoto += 1;
+      if (address.status === 'COMPLETE' || address.status === 'NOT_APPLICABLE') {
+        terminalCounts.withReservePhoto += 1;
+      }
       addressCountsByTerminalNode.set(terminalNodeKey, terminalCounts);
     }
 
@@ -671,6 +736,8 @@ export class ProjectsRepository {
           osd_name AS osdName,
           geojson,
           raw_name AS rawName,
+          route_length_m AS routeLengthMeters,
+          installation_length_m AS installationLengthMeters,
           status
         FROM map_trunk_cables
         WHERE project_id = ?
@@ -685,6 +752,8 @@ export class ProjectsRepository {
       osdName: string;
       geojson: string;
       rawName: string | null;
+      routeLengthMeters: number | null;
+      installationLengthMeters: number | null;
       status: MapCableStatus;
     }>;
 
@@ -697,6 +766,10 @@ export class ProjectsRepository {
       osdName: cable.osdName,
       geojson: parseGeojson(cable.geojson),
       rawName: cable.rawName,
+      routeLengthMeters: cable.routeLengthMeters == null ? null : Number(cable.routeLengthMeters),
+      installationLengthMeters: cable.installationLengthMeters == null
+        ? null
+        : Number(cable.installationLengthMeters),
       status: cable.status,
     }));
 
@@ -705,15 +778,24 @@ export class ProjectsRepository {
         `SELECT
           node.name,
           node.path,
-          COUNT(photo.id) AS photoCount
+          photo.id,
+          photo.stored_file_name AS storedFileName,
+          photo.reserve_location AS reserveLocation,
+          photo.uploaded_at AS uploadedAt
         FROM checklist_nodes node
-        LEFT JOIN photos photo ON photo.checklist_node_id = node.id
+        JOIN photos photo ON photo.checklist_node_id = node.id
         WHERE node.project_id = ?
           AND node.node_type != 'CABLE_RESERVE'
-        GROUP BY node.id
-        HAVING COUNT(photo.id) > 0`,
+        ORDER BY photo.uploaded_at DESC, photo.id ASC`,
       )
-      .all(projectId) as Array<{ name: string; path: string; photoCount: number }>;
+      .all(projectId) as Array<{
+      name: string;
+      path: string;
+      id: string;
+      storedFileName: string;
+      reserveLocation: string | null;
+      uploadedAt: string;
+    }>;
 
     const infraRows = this.db
       .prepare(
@@ -741,11 +823,12 @@ export class ProjectsRepository {
 
     const infraNodes = infraRows.map((node) => {
       const nodeKey = normalizeSearchKey(node.name);
-      const hasPhoto = photoNodeRows.some((photoNode) => {
+      const photos = photoNodeRows.filter((photoNode) => {
         const nameKey = normalizeSearchKey(photoNode.name);
         const pathKey = normalizeSearchKey(photoNode.path);
         return nameKey === nodeKey || pathKey.includes(nodeKey);
       });
+      const hasPhoto = photos.length > 0;
       return {
         id: node.id,
         nodeType: node.nodeType,
@@ -755,6 +838,7 @@ export class ProjectsRepository {
         lng: Number(node.lng),
         status: node.status,
         hasPhoto,
+        photos: photos.map(mapProjectPhotoRow),
       };
     });
 
@@ -1499,6 +1583,36 @@ export class ProjectsRepository {
          WHERE id = ? AND project_id = ?`,
       )
       .run(reason, nodeId, projectId);
+  }
+
+  markAddressNotApplicable(projectId: string, addressId: string, reason: string | null): void {
+    const reserveNodes = this.db
+      .prepare(
+        `SELECT id
+         FROM checklist_nodes
+         WHERE project_id = ?
+           AND address_id = ?
+           AND node_type = 'CABLE_RESERVE'`,
+      )
+      .all(projectId, addressId) as Array<{ id: string }>;
+
+    if (reserveNodes.length === 0) throw new Error('Address reserve node not found');
+
+    const tx = this.db.transaction(() => {
+      const updateNode = this.db.prepare(
+        `UPDATE checklist_nodes
+         SET status = 'NOT_APPLICABLE',
+             not_applicable_reason = ?,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE project_id = ? AND id = ?`,
+      );
+      for (const node of reserveNodes) {
+        updateNode.run(reason, projectId, node.id);
+      }
+      this.db.prepare(`UPDATE projects SET updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(projectId);
+    });
+
+    tx();
   }
 
   reopenNode(projectId: string, nodeId: string): void {

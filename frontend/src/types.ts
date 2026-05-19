@@ -83,6 +83,14 @@ export type ProjectMapCableStatus = 'PENDING' | 'DUCT_READY' | 'PULLED' | 'WELDE
 export type ProjectMapNodeStatus = 'PENDING' | 'WELDED';
 export type ProjectMapCableRoutingType = 'underground' | 'aerial' | 'existing_duct';
 export type ProjectMapNoteTargetType = 'cable' | 'node' | 'address' | 'polygon' | 'free';
+export type ProjectMapAddressStatus = 'PENDING' | 'COMPLETE' | 'NOT_APPLICABLE';
+
+export interface ProjectMapPhoto {
+  id: string;
+  storedFileName: string;
+  reserveLocation: string | null;
+  uploadedAt: string;
+}
 
 export interface ProjectMapAddress {
   id: string;
@@ -95,6 +103,9 @@ export interface ProjectMapAddress {
   lng: number;
   reservePhotoCount: number;
   hasReservePhoto: boolean;
+  status: ProjectMapAddressStatus;
+  isNotApplicable: boolean;
+  photos: ProjectMapPhoto[];
 }
 
 export interface ProjectMapPolygon {
@@ -119,6 +130,8 @@ export interface ProjectMapCable {
   rawName: string | null;
   routingType: ProjectMapCableRoutingType;
   status: ProjectMapCableStatus;
+  routeLengthMeters: number | null;
+  installationLengthMeters: number | null;
 }
 
 export interface ProjectMapInfraNode {
@@ -130,6 +143,7 @@ export interface ProjectMapInfraNode {
   lng: number;
   status: ProjectMapNodeStatus;
   hasPhoto: boolean;
+  photos: ProjectMapPhoto[];
 }
 
 export interface ProjectMapNotePhoto {

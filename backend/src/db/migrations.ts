@@ -43,6 +43,8 @@ function migrateMapTrunkCableIdentity(db: Database.Database, schema: string): vo
     (row.sql.includes('cable_key') &&
       row.sql.includes('route_type') &&
       row.sql.includes('existing_duct') &&
+      row.sql.includes('route_length_m') &&
+      row.sql.includes('installation_length_m') &&
       row.sql.includes('SUSPENDED') &&
       row.sql.includes('UNIQUE(project_id, cable_key)'))
   ) {
@@ -60,6 +62,8 @@ function migrateMapTrunkCableIdentity(db: Database.Database, schema: string): vo
   const routeTypeExpression = columns.has('route_type')
     ? "CASE WHEN route_type IN ('underground', 'aerial', 'existing_duct') THEN route_type ELSE 'underground' END"
     : `CASE WHEN cable_type LIKE '%ADSS%' OR ${rawNameExpression} LIKE '%ADSS%' THEN 'aerial' ELSE 'underground' END`;
+  const routeLengthExpression = columns.has('route_length_m') ? 'route_length_m' : 'NULL';
+  const installationLengthExpression = columns.has('installation_length_m') ? 'installation_length_m' : 'NULL';
 
   db.exec(`
     PRAGMA foreign_keys = OFF;
@@ -68,7 +72,8 @@ function migrateMapTrunkCableIdentity(db: Database.Database, schema: string): vo
   db.exec(schema);
   db.exec(`
     INSERT OR IGNORE INTO map_trunk_cables (
-      id, project_id, cable_key, cable_type, route_type, from_node, to_node, osd_name, geojson, raw_name, status
+      id, project_id, cable_key, cable_type, route_type, from_node, to_node, osd_name,
+      geojson, raw_name, route_length_m, installation_length_m, status
     )
     SELECT
       id,
@@ -81,6 +86,8 @@ function migrateMapTrunkCableIdentity(db: Database.Database, schema: string): vo
       osd_name,
       geojson,
       raw_name,
+      ${routeLengthExpression},
+      ${installationLengthExpression},
       ${statusExpression}
     FROM map_trunk_cables_old;
     DROP TABLE map_trunk_cables_old;

@@ -108,6 +108,12 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status }),
     }),
+  markMapAddressNotApplicable: (projectId: string, addressId: string, reason: string | null) =>
+    request<ProjectMapData>(`/api/projects/${projectId}/map/addresses/${addressId}/not-applicable`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason }),
+    }),
   createMapNote: (
     projectId: string,
     input: {

@@ -91,6 +91,8 @@ CREATE TABLE IF NOT EXISTS map_trunk_cables (
   osd_name TEXT NOT NULL,
   geojson TEXT NOT NULL,
   raw_name TEXT,
+  route_length_m REAL,
+  installation_length_m REAL,
   status TEXT NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'DUCT_READY', 'PULLED', 'WELDED', 'SUSPENDED')),
   UNIQUE(project_id, cable_key)
 );

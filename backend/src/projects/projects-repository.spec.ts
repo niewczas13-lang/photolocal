@@ -687,6 +687,8 @@ describe('ProjectsRepository', () => {
       toNode: 'OSD0001',
       status: 'PENDING',
       routingType: 'underground',
+      routeLengthMeters: null,
+      installationLengthMeters: null,
     });
     expect(map.infraNodes[0]).toMatchObject({
       nodeType: 'OSD',
@@ -717,9 +719,79 @@ describe('ProjectsRepository', () => {
     expect(map.addresses[0]).toMatchObject({
       hasReservePhoto: true,
       reservePhotoCount: 1,
+      status: 'COMPLETE',
     });
+    expect(map.addresses[0].photos).toEqual([
+      expect.objectContaining({
+        id: 'photo-reserve',
+        storedFileName: 'reserve.jpeg',
+      }),
+    ]);
     expect(map.polygons[0]).toMatchObject({
       addressWithReservePhoto: 1,
+    });
+  });
+
+  it('marks map addresses as not applicable through their reserve nodes', () => {
+    const { db, repository } = createRepository();
+
+    const project = repository.createProject({
+      name: 'ADRES NIE DOTYCZY',
+      projectDefinition: null,
+      projectType: 'SI',
+      splitterTopology: 'SINGLE',
+      splitterTopologySource: 'AUTO',
+      splitterCount: 1,
+      gpkgFileName: 'adresy.gpkg',
+      baseFolder: 'C:/photos/ADRESY',
+      addresses: [
+        {
+          id: 'address-skip',
+          city: 'Radom',
+          street: 'Polna',
+          buildingNo: '15',
+          propertyId: null,
+          parcelNumber: null,
+          distributionPoint: 'RADOM/OSD0001',
+          lat: 51.4,
+          lng: 21.1,
+          householdCount: 1,
+          businessUnitCount: 0,
+        },
+      ],
+      dacToAddressCableCount: 1,
+      adssToAddressCableCount: 0,
+      checklistNodes: [
+        {
+          id: 'reserve-skip',
+          projectId: 'project-temp',
+          parentId: null,
+          name: 'POLNA_15',
+          path: 'Zapasy_kabli_instalacyjnych/RADOM_OSD0001/POLNA_15',
+          nodeType: 'CABLE_RESERVE',
+          addressId: 'address-skip',
+          sortOrder: 0,
+          minPhotos: 1,
+          acceptsPhotos: true,
+        },
+      ],
+    });
+
+    repository.markAddressNotApplicable(project.id, 'address-skip', 'Klient potwierdzil brak zakresu');
+
+    const map = repository.getProjectMap(project.id);
+    const node = repository.getChecklistNode(project.id, 'reserve-skip');
+    db.close();
+
+    expect(map.addresses[0]).toMatchObject({
+      id: 'address-skip',
+      status: 'NOT_APPLICABLE',
+      isNotApplicable: true,
+      hasReservePhoto: false,
+    });
+    expect(node).toMatchObject({
+      status: 'NOT_APPLICABLE',
+      notApplicableReason: 'Klient potwierdzil brak zakresu',
     });
   });
 

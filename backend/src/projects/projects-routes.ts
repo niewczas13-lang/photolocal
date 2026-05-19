@@ -483,6 +483,27 @@ export async function registerProjectRoutes(app: FastifyInstance, db: Database.D
     }
   });
 
+  app.post('/api/projects/:projectId/map/addresses/:addressId/not-applicable', async (request, reply) => {
+    const { projectId, addressId } = request.params as { projectId: string; addressId: string };
+    const body = request.body as { reason?: unknown };
+    const project = repository.getProject(projectId);
+
+    if (!project) return reply.status(404).send({ error: 'Project not found' });
+
+    try {
+      repository.markAddressNotApplicable(
+        projectId,
+        addressId,
+        typeof body.reason === 'string' && body.reason.trim() ? body.reason.trim() : null,
+      );
+      return repository.getProjectMap(projectId);
+    } catch (error) {
+      return reply.status(404).send({
+        error: error instanceof Error ? error.message : 'Map address not found',
+      });
+    }
+  });
+
   app.post('/api/projects/:projectId/map/notes', async (request, reply) => {
     const { projectId } = request.params as { projectId: string };
     const body = request.body as {

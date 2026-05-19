@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
-import { Camera, Map, Search, Settings } from 'lucide-react';
+import { Camera, Map, PanelLeftClose, PanelLeftOpen, Search, Settings } from 'lucide-react';
 
 import type { MapView } from '../app-routing';
+import { cn } from '../lib/utils';
 import type { ProjectSummary } from '../types';
 import ProjectMap from './ProjectMap';
 import { Badge } from './ui/badge';
@@ -32,6 +33,7 @@ export default function MapWorkspace({
   onOpenSettings,
 }: MapWorkspaceProps) {
   const [query, setQuery] = useState('');
+  const [projectPanelOpen, setProjectPanelOpen] = useState(true);
   const selectedProject = selectedProjectId
     ? projects.find((project) => project.id === selectedProjectId) ?? null
     : null;
@@ -46,19 +48,29 @@ export default function MapWorkspace({
   }, [projects, query]);
 
   return (
-    <div className="flex h-[calc(100vh-64px)] overflow-hidden bg-background">
-      <aside className="flex w-80 shrink-0 flex-col border-r border-border bg-muted/10">
-        <div className="border-b border-border p-4">
-          <div className="flex items-center gap-2">
-            <div className="rounded-md bg-primary/10 p-2 text-primary">
+    <div className={cn('map-workspace', !projectPanelOpen && 'map-workspace--collapsed')}>
+      <aside className="map-workspace__sidebar">
+        <div className="map-workspace__sidebar-header">
+          <div className="map-workspace__sidebar-heading">
+            <div className="map-workspace__sidebar-icon">
               <Map size={18} />
             </div>
-            <div>
-              <h2 className="text-base font-bold leading-none">Mapy zlecen</h2>
-              <p className="mt-1 text-xs text-muted-foreground">{projects.length} projektow w bazie</p>
+            <div className="map-workspace__sidebar-title">
+              <h2>Mapy zlecen</h2>
+              <p>{projects.length} projektow w bazie</p>
             </div>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="map-workspace__sidebar-toggle"
+              aria-label={projectPanelOpen ? 'Zwin panel projektow' : 'Rozwin panel projektow'}
+              onClick={() => setProjectPanelOpen((current) => !current)}
+            >
+              {projectPanelOpen ? <PanelLeftClose size={17} /> : <PanelLeftOpen size={17} />}
+            </Button>
           </div>
-          <div className="relative mt-4">
+          <div className="map-workspace__search">
             <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
             <Input
               value={query}
@@ -69,7 +81,7 @@ export default function MapWorkspace({
           </div>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto p-2">
+        <div className="map-workspace__project-list">
           {filteredProjects.map((project) => {
             const isSelected = project.id === selectedProjectId;
             return (
@@ -77,10 +89,10 @@ export default function MapWorkspace({
                 key={project.id}
                 type="button"
                 onClick={() => onSelectProject(project.id)}
-                className={`mb-2 w-full rounded-md border p-3 text-left transition ${
+                className={`map-workspace__project-card ${
                   isSelected
-                    ? 'border-primary bg-primary/5 shadow-sm'
-                    : 'border-border bg-background hover:border-primary/40'
+                    ? 'map-workspace__project-card--selected'
+                    : 'map-workspace__project-card--idle'
                 }`}
               >
                 <div className="flex items-start justify-between gap-3">
@@ -110,10 +122,20 @@ export default function MapWorkspace({
         </div>
       </aside>
 
-      <section className="flex min-w-0 flex-1 flex-col">
+      <section className="map-workspace__main">
         {selectedProject ? (
           <>
-            <div className="flex min-h-16 items-center justify-between gap-4 border-b border-border px-5">
+            <div className="map-workspace__project-header">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="map-workspace__main-toggle"
+                onClick={() => setProjectPanelOpen((current) => !current)}
+              >
+                {projectPanelOpen ? <PanelLeftClose size={15} /> : <PanelLeftOpen size={15} />}
+                Projekty
+              </Button>
               <div className="min-w-0">
                 <h1 className="truncate text-lg font-bold">{selectedProject.name}</h1>
                 <p className="text-sm text-muted-foreground">
@@ -128,9 +150,6 @@ export default function MapWorkspace({
                 <Button variant="outline" size="sm" onClick={() => onOpenSettings(selectedProject.id)}>
                   <Settings size={15} />
                   Ustawienia
-                </Button>
-                <Button variant="outline" size="sm" onClick={() => onSelectProject(selectedProject.id)}>
-                  Odswiez widok
                 </Button>
               </div>
             </div>

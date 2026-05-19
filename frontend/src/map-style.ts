@@ -5,7 +5,7 @@ import type {
   ProjectMapNodeStatus,
 } from './types';
 
-export type MarkerTone = 'addressPending' | 'done' | 'osd' | 'opp' | 'zs';
+export type MarkerTone = 'addressPending' | 'notApplicable' | 'done' | 'osd' | 'opp' | 'zs';
 
 export interface MarkerToneStyle {
   color: string;
@@ -63,6 +63,7 @@ export function getMarkerTone(
 
 export function getMarkerToneStyle(tone: MarkerTone): MarkerToneStyle {
   if (tone === 'done') return { color: '#16a34a', border: '#166534' };
+  if (tone === 'notApplicable') return { color: '#94a3b8', border: '#475569' };
   if (tone === 'osd') return { color: '#2563eb', border: '#1d4ed8' };
   if (tone === 'opp') return { color: '#9333ea', border: '#7e22ce' };
   if (tone === 'zs') return { color: '#0891b2', border: '#0e7490' };

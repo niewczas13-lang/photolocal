@@ -16,6 +16,9 @@ function mapData(overrides: Partial<ProjectMapData> = {}): ProjectMapData {
         lng: 20.55,
         reservePhotoCount: 0,
         hasReservePhoto: false,
+        status: 'PENDING',
+        isNotApplicable: false,
+        photos: [],
       },
       {
         id: 'address-2',
@@ -28,6 +31,9 @@ function mapData(overrides: Partial<ProjectMapData> = {}): ProjectMapData {
         lng: 20.57,
         reservePhotoCount: 1,
         hasReservePhoto: true,
+        status: 'COMPLETE',
+        isNotApplicable: false,
+        photos: [],
       },
     ],
     polygons: [],
@@ -42,6 +48,8 @@ function mapData(overrides: Partial<ProjectMapData> = {}): ProjectMapData {
         rawName: 'OKH0030737-BD/010',
         routingType: 'underground',
         status: 'DUCT_READY',
+        routeLengthMeters: null,
+        installationLengthMeters: null,
       },
       {
         id: 'cable-2',
@@ -53,6 +61,8 @@ function mapData(overrides: Partial<ProjectMapData> = {}): ProjectMapData {
         rawName: 'OKH0030737-BA/007',
         routingType: 'aerial',
         status: 'SUSPENDED',
+        routeLengthMeters: null,
+        installationLengthMeters: null,
       },
       {
         id: 'cable-3',
@@ -64,6 +74,8 @@ function mapData(overrides: Partial<ProjectMapData> = {}): ProjectMapData {
         rawName: 'OKH0030737-IST/001',
         routingType: 'existing_duct',
         status: 'PENDING',
+        routeLengthMeters: null,
+        installationLengthMeters: null,
       },
     ],
     infraNodes: [
@@ -76,6 +88,7 @@ function mapData(overrides: Partial<ProjectMapData> = {}): ProjectMapData {
         lng: 20.55,
         status: 'WELDED',
         hasPhoto: false,
+        photos: [],
       },
       {
         id: 'node-2',
@@ -86,6 +99,7 @@ function mapData(overrides: Partial<ProjectMapData> = {}): ProjectMapData {
         lng: 20.57,
         status: 'PENDING',
         hasPhoto: false,
+        photos: [],
       },
     ],
     notes: [],
@@ -172,6 +186,8 @@ describe('map task list', () => {
             rawName: 'OKH-010',
             routingType: 'underground',
             status: 'PENDING',
+            routeLengthMeters: null,
+            installationLengthMeters: null,
           },
           {
             id: 'cable-a',
@@ -183,6 +199,8 @@ describe('map task list', () => {
             rawName: 'OKH-002',
             routingType: 'underground',
             status: 'PENDING',
+            routeLengthMeters: null,
+            installationLengthMeters: null,
           },
         ],
       }),
@@ -208,5 +226,40 @@ describe('map task list', () => {
       ['address', 1],
     ]);
     expect(groups[0].folders[0].rows.map((row) => row.title)).toEqual(['OKH-002', 'OKH-010']);
+  });
+
+  it('counts addresses marked as not applicable as completed work', () => {
+    const rows = getMapTaskRows(
+      mapData({
+        addresses: [
+          {
+            id: 'address-skip',
+            label: 'Polna 15',
+            city: 'Radom',
+            street: 'Polna',
+            buildingNo: '15',
+            distributionPoint: 'RADOM/OSD0001',
+            lat: 51.4,
+            lng: 21.1,
+            reservePhotoCount: 0,
+            hasReservePhoto: false,
+            status: 'NOT_APPLICABLE',
+            isNotApplicable: true,
+            photos: [],
+          },
+        ],
+      }),
+    );
+
+    expect(rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'address-address-skip',
+          statusLabel: 'Nie dotyczy',
+          summary: 'Adres oznaczony jako nie dotyczy',
+          stage: 'done',
+        }),
+      ]),
+    );
   });
 });

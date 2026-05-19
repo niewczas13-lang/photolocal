@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { getCableLineStyle, getMarkerTone, isCableReady } from './map-style';
+import { getCableLineStyle, getMarkerTone, getMarkerToneStyle, isCableReady } from './map-style';
 
 describe('map styling', () => {
   it('uses distinct line styles for underground and aerial cables', () => {
@@ -41,5 +41,11 @@ describe('map styling', () => {
     expect(isCableReady('DUCT_READY')).toBe(false);
     expect(isCableReady('PULLED')).toBe(true);
     expect(isCableReady('SUSPENDED')).toBe(true);
+  });
+
+  it('uses gray for map addresses marked as not applicable', () => {
+    expect(getMarkerToneStyle('notApplicable')).toMatchObject({
+      color: '#94a3b8',
+    });
   });
 });

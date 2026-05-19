@@ -47,6 +47,8 @@ export interface MapTrunkCableInput {
   geojson: Record<string, unknown>;
   rawName: string | null;
   routingType?: CableRoutingType;
+  routeLengthMeters?: number | null;
+  installationLengthMeters?: number | null;
 }
 
 export interface MapInfraNodeInput {
@@ -59,6 +61,14 @@ export interface MapInfraNodeInput {
 
 export type MapCableStatus = 'PENDING' | 'DUCT_READY' | 'PULLED' | 'WELDED' | 'SUSPENDED';
 export type MapNodeStatus = 'PENDING' | 'WELDED';
+export type ProjectMapAddressStatus = 'PENDING' | 'COMPLETE' | 'NOT_APPLICABLE';
+
+export interface ProjectMapPhoto {
+  id: string;
+  storedFileName: string;
+  reserveLocation: string | null;
+  uploadedAt: string;
+}
 
 export interface ProjectMapAddress {
   id: string;
@@ -71,6 +81,9 @@ export interface ProjectMapAddress {
   lng: number;
   reservePhotoCount: number;
   hasReservePhoto: boolean;
+  status: ProjectMapAddressStatus;
+  isNotApplicable: boolean;
+  photos: ProjectMapPhoto[];
 }
 
 export interface ProjectMapPolygon {
@@ -95,6 +108,8 @@ export interface ProjectMapCable {
   rawName: string | null;
   routingType: CableRoutingType;
   status: MapCableStatus;
+  routeLengthMeters: number | null;
+  installationLengthMeters: number | null;
 }
 
 export interface ProjectMapInfraNode {
@@ -106,6 +121,7 @@ export interface ProjectMapInfraNode {
   lng: number;
   status: MapNodeStatus;
   hasPhoto: boolean;
+  photos: ProjectMapPhoto[];
 }
 
 export interface ProjectMapNotePhoto {

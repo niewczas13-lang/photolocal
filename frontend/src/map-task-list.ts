@@ -160,15 +160,20 @@ function nodeTask(node: ProjectMapInfraNode): MapTaskRow {
 }
 
 function addressTask(address: ProjectMapAddress): MapTaskRow {
+  const isDone = address.hasReservePhoto || address.isNotApplicable;
   return {
     id: `address-${address.id}`,
     sourceId: address.id,
     kind: 'address',
     title: address.label,
     subtitle: address.distributionPoint ?? 'Bez punktu dystrybucyjnego',
-    statusLabel: address.hasReservePhoto ? 'Zapas jest' : 'Brak zapasu',
-    summary: address.hasReservePhoto ? 'Zapas uzupelniony' : 'Zapas do uzupelnienia',
-    stage: address.hasReservePhoto ? 'done' : 'todo',
+    statusLabel: address.isNotApplicable ? 'Nie dotyczy' : address.hasReservePhoto ? 'Zapas jest' : 'Brak zapasu',
+    summary: address.isNotApplicable
+      ? 'Adres oznaczony jako nie dotyczy'
+      : address.hasReservePhoto
+        ? 'Zapas uzupelniony'
+        : 'Zapas do uzupelnienia',
+    stage: isDone ? 'done' : 'todo',
   };
 }
 
