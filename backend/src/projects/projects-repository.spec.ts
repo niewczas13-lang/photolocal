@@ -1264,4 +1264,100 @@ describe('ProjectsRepository', () => {
       status: 'WELDED',
     });
   });
+
+  it('returns and refreshes background infrastructure map features', () => {
+    const { db, repository } = createRepository();
+
+    const project = repository.createProject({
+      name: 'INFRA',
+      projectDefinition: null,
+      projectType: 'SI',
+      splitterTopology: 'SINGLE',
+      splitterTopologySource: 'AUTO',
+      splitterCount: 1,
+      gpkgFileName: 'infra.gpkg',
+      baseFolder: 'C:/photos/INFRA',
+      addresses: [],
+      dacToAddressCableCount: 0,
+      adssToAddressCableCount: 0,
+      checklistNodes: [],
+      polygons: [],
+      trunkCables: [],
+      infraNodes: [],
+      infrastructureFeatures: [
+        {
+          featureType: 'duct',
+          sourceLayer: 'Odcinki Kanalizacji',
+          label: 'K-1',
+          elementType: 'Kanalizacja pierwotna',
+          owner: 'ORANGE',
+          geojson: { type: 'LineString', coordinates: [[21.1, 51.4], [21.2, 51.5]] },
+        },
+      ],
+    });
+
+    let map = repository.getProjectMap(project.id);
+    expect(map.infrastructureFeatures).toHaveLength(1);
+    expect(map.infrastructureFeatures[0]).toMatchObject({
+      featureType: 'duct',
+      sourceLayer: 'Odcinki Kanalizacji',
+      label: 'K-1',
+      owner: 'ORANGE',
+    });
+
+    repository.recalculateChecklist({
+      projectId: project.id,
+      projectDefinition: null,
+      projectType: 'SI',
+      splitterTopology: 'SINGLE',
+      splitterTopologySource: 'AUTO',
+      splitterCount: 1,
+      gpkgFileName: 'infra-2.gpkg',
+      addresses: [],
+      dacToAddressCableCount: 0,
+      adssToAddressCableCount: 0,
+      checklistNodes: [],
+      polygons: [],
+      trunkCables: [],
+      infraNodes: [],
+      infrastructureFeatures: [
+        {
+          featureType: 'manhole',
+          sourceLayer: 'Studnia',
+          label: 'ST-1',
+          elementType: 'Studnia kablowa',
+          owner: null,
+          geojson: { type: 'Point', coordinates: [21.3, 51.6] },
+        },
+        {
+          featureType: 'pole',
+          sourceLayer: 'Slup',
+          label: 'SLP-1',
+          elementType: 'Slup',
+          owner: null,
+          geojson: { type: 'Point', coordinates: [21.31, 51.61] },
+        },
+      ],
+    });
+
+    map = repository.getProjectMap(project.id);
+    db.close();
+
+    expect(map.infrastructureFeatures).toHaveLength(2);
+    expect(map.infrastructureFeatures).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          featureType: 'manhole',
+          sourceLayer: 'Studnia',
+          label: 'ST-1',
+          geojson: { type: 'Point', coordinates: [21.3, 51.6] },
+        }),
+        expect.objectContaining({
+          featureType: 'pole',
+          sourceLayer: 'Slup',
+          label: 'SLP-1',
+        }),
+      ]),
+    );
+  });
 });

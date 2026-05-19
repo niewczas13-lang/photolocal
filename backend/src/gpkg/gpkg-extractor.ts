@@ -7,6 +7,7 @@ import type {
   CableRoutingType,
   GpkgExtractionResult,
   MapInfraNodeInput,
+  MapInfrastructureFeatureInput,
   MapPolygonInput,
   MapTrunkCableInput,
   MufaEntry,
@@ -265,6 +266,7 @@ function getCableRoutingType(
 
 function normalizeColumnName(value: string): string {
   return value
+    .replace(/[łŁ]/g, (char) => (char === 'Ł' ? 'L' : 'l'))
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .replace(/[^a-z0-9]+/gi, '_')
@@ -345,6 +347,67 @@ function extractProjectedConduitSegments(db: Database.Database): number[][][] {
   }
 
   return segments;
+}
+
+function infrastructureFeatureType(tableName: string): MapInfrastructureFeatureInput['featureType'] | null {
+  const normalizedName = normalizeColumnName(tableName);
+  if (
+    normalizedName.includes('odcinki_kanalizacji') ||
+    normalizedName.includes('rurociagi_mikrokanalizacja')
+  ) {
+    return 'duct';
+  }
+  if (normalizedName.includes('slup')) return 'pole';
+  if (normalizedName.includes('studnia') || normalizedName.includes('studnie') || normalizedName.includes('szachty')) {
+    return 'manhole';
+  }
+  return null;
+}
+
+function firstStringField(row: Record<string, unknown>, fields: string[]): string | null {
+  for (const field of fields) {
+    const value = row[field];
+    if (typeof value === 'string' && value.trim()) return value.trim();
+    if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  }
+
+  return null;
+}
+
+function geometryMatchesInfrastructureType(
+  geojson: Record<string, unknown>,
+  featureType: MapInfrastructureFeatureInput['featureType'],
+): boolean {
+  if (featureType === 'duct') return geojson.type === 'LineString' || geojson.type === 'MultiLineString';
+  return geojson.type === 'Point' || geojson.type === 'MultiPoint';
+}
+
+function extractInfrastructureFeatures(db: Database.Database): MapInfrastructureFeatureInput[] {
+  const features: MapInfrastructureFeatureInput[] = [];
+
+  for (const tableName of getUserTableNames(db)) {
+    const featureType = infrastructureFeatureType(tableName);
+    if (!featureType || !tableHasColumns(db, tableName, ['geom'])) continue;
+
+    const rows = db.prepare(`SELECT * FROM ${q(tableName)}`).all() as Array<Record<string, unknown>>;
+    for (const row of rows) {
+      if (!(row.geom instanceof Buffer)) continue;
+      const geojson = parseGpkgGeoJSON(row.geom);
+      if (!geojson || !geometryMatchesInfrastructureType(geojson, featureType)) continue;
+      reprojectGeometry(geojson);
+
+      features.push({
+        featureType,
+        sourceLayer: tableName,
+        label: firstStringField(row, ['oznaczenie', 'nazwa_slupa', 'nazwa', 'odcinek', 'id_odc', 'did']),
+        elementType: firstStringField(row, ['typ_elementu', 'typ_kanalizacji', 'model', 'typ_profilu']),
+        owner: firstStringField(row, ['wlasciciel', 'inwestor']),
+        geojson,
+      });
+    }
+  }
+
+  return features;
 }
 
 function findExistingTables(db: Database.Database, candidates: string[]): string[] {
@@ -487,6 +550,7 @@ function extractMapGeometry(db: Database.Database): {
   trunkCables: MapTrunkCableInput[];
   infraNodes: MapInfraNodeInput[];
   passiveInfraNodes: MapInfraNodeInput[];
+  infrastructureFeatures: MapInfrastructureFeatureInput[];
 } {
   const polygons: MapPolygonInput[] = [];
   const polygonTables = ['Rejonizacja', 'rejonizacja', 'REJONIZACJA'];
@@ -710,6 +774,7 @@ function extractMapGeometry(db: Database.Database): {
     })),
     infraNodes: [...infraNodeMap.values()],
     passiveInfraNodes: [...passiveInfraNodeMap.values()],
+    infrastructureFeatures: extractInfrastructureFeatures(db),
   };
 }
 
@@ -960,6 +1025,7 @@ export function extractGpkg(filePath: string): GpkgExtractionResult {
       trunkCables: mapGeometry.trunkCables,
       infraNodes: mapGeometry.infraNodes,
       passiveInfraNodes: mapGeometry.passiveInfraNodes,
+      infrastructureFeatures: mapGeometry.infrastructureFeatures,
       dacToAddressCableEntries: cables.dacToAddressCableEntries,
       adssToAddressCableEntries: cables.adssToAddressCableEntries,
       splitterCount,

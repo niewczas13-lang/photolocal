@@ -104,6 +104,7 @@ function mapData(overrides: Partial<ProjectMapData> = {}): ProjectMapData {
       },
     ],
     notes: [],
+    infrastructureFeatures: [],
     ...overrides,
   };
 }

@@ -109,6 +109,17 @@ CREATE TABLE IF NOT EXISTS map_infra_nodes (
   UNIQUE(project_id, node_type, name)
 );
 
+CREATE TABLE IF NOT EXISTS map_infrastructure_features (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  feature_type TEXT NOT NULL CHECK (feature_type IN ('duct', 'pole', 'manhole')),
+  source_layer TEXT NOT NULL,
+  label TEXT,
+  element_type TEXT,
+  owner TEXT,
+  geojson TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS map_notes (
   id TEXT PRIMARY KEY,
   project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -219,6 +230,7 @@ CREATE INDEX IF NOT EXISTS idx_photos_checklist_node_id ON photos(checklist_node
 CREATE INDEX IF NOT EXISTS idx_map_polygons_project_id ON map_polygons(project_id);
 CREATE INDEX IF NOT EXISTS idx_map_trunk_cables_project_id ON map_trunk_cables(project_id);
 CREATE INDEX IF NOT EXISTS idx_map_infra_nodes_project_id ON map_infra_nodes(project_id);
+CREATE INDEX IF NOT EXISTS idx_map_infrastructure_features_project_id ON map_infrastructure_features(project_id);
 CREATE INDEX IF NOT EXISTS idx_map_notes_project_id ON map_notes(project_id);
 CREATE INDEX IF NOT EXISTS idx_map_address_candidates_project_id ON map_address_candidates(project_id);
 CREATE INDEX IF NOT EXISTS idx_map_address_candidates_status ON map_address_candidates(status);

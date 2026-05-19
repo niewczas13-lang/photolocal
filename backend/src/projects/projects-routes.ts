@@ -42,6 +42,7 @@ import type {
   MapCableStatus,
   MapNoteTargetType,
   MapInfraNodeInput,
+  MapInfrastructureFeatureInput,
   MapNodeStatus,
   MapPolygonInput,
   MapTrunkCableInput,
@@ -65,6 +66,7 @@ interface PreparedChecklistFromGpkg {
   polygons: MapPolygonInput[];
   trunkCables: MapTrunkCableInput[];
   infraNodes: MapInfraNodeInput[];
+  infrastructureFeatures: MapInfrastructureFeatureInput[];
 }
 
 function toTree(rows: any[]) {
@@ -141,6 +143,7 @@ function prepareChecklistFromGpkg(input: {
     polygons: extracted.polygons,
     trunkCables: extracted.trunkCables,
     infraNodes: extracted.infraNodes,
+    infrastructureFeatures: extracted.infrastructureFeatures,
   };
 }
 
@@ -956,6 +959,7 @@ export async function registerProjectRoutes(
         polygons: prepared.polygons,
         trunkCables: prepared.trunkCables,
         infraNodes: prepared.infraNodes,
+        infrastructureFeatures: prepared.infrastructureFeatures,
       });
 
       return {
@@ -1254,6 +1258,7 @@ export async function registerProjectRoutes(
         polygons: extracted.polygons,
         trunkCables: extracted.trunkCables,
         infraNodes: extracted.infraNodes,
+        infrastructureFeatures: extracted.infrastructureFeatures,
       });
 
       return project;

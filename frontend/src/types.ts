@@ -82,6 +82,7 @@ export interface ChecklistNodeDetail {
 export type ProjectMapCableStatus = 'PENDING' | 'DUCT_READY' | 'PULLED' | 'WELDED' | 'SUSPENDED';
 export type ProjectMapNodeStatus = 'PENDING' | 'WELDED';
 export type ProjectMapCableRoutingType = 'underground' | 'aerial' | 'existing_duct';
+export type ProjectMapInfrastructureFeatureType = 'duct' | 'pole' | 'manhole';
 export type ProjectMapNoteTargetType = 'cable' | 'node' | 'address' | 'polygon' | 'free';
 export type ProjectMapAddressStatus = 'PENDING' | 'COMPLETE' | 'NOT_APPLICABLE';
 export type ProjectMapAddressCandidateStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
@@ -172,6 +173,16 @@ export interface ProjectMapInfraNode {
   photos: ProjectMapPhoto[];
 }
 
+export interface ProjectMapInfrastructureFeature {
+  id: string;
+  featureType: ProjectMapInfrastructureFeatureType;
+  sourceLayer: string;
+  label: string | null;
+  elementType: string | null;
+  owner: string | null;
+  geojson: GeoJSON.LineString | GeoJSON.MultiLineString | GeoJSON.Point | GeoJSON.MultiPoint | Record<string, unknown>;
+}
+
 export interface ProjectMapNotePhoto {
   id: string;
   noteId: string;
@@ -207,6 +218,7 @@ export interface ProjectMapData {
   polygons: ProjectMapPolygon[];
   trunkCables: ProjectMapCable[];
   infraNodes: ProjectMapInfraNode[];
+  infrastructureFeatures: ProjectMapInfrastructureFeature[];
   notes: ProjectMapNote[];
 }
 

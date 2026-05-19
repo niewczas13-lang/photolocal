@@ -9,6 +9,7 @@ import type {
   MapAddressCandidateStatus,
   MapCableStatus,
   MapInfraNodeInput,
+  MapInfrastructureFeatureInput,
   MapNoteTargetType,
   MapNodeStatus,
   MapPolygonInput,
@@ -146,6 +147,7 @@ export interface CreateProjectInput {
   polygons?: MapPolygonInput[];
   trunkCables?: MapTrunkCableInput[];
   infraNodes?: MapInfraNodeInput[];
+  infrastructureFeatures?: MapInfrastructureFeatureInput[];
 }
 
 export interface RecalculateChecklistInput {
@@ -163,6 +165,7 @@ export interface RecalculateChecklistInput {
   polygons?: MapPolygonInput[];
   trunkCables?: MapTrunkCableInput[];
   infraNodes?: MapInfraNodeInput[];
+  infrastructureFeatures?: MapInfrastructureFeatureInput[];
 }
 
 export interface RecalculateChecklistResult {
@@ -421,6 +424,7 @@ export class ProjectsRepository {
     polygons: MapPolygonInput[],
     trunkCables: MapTrunkCableInput[],
     infraNodes: MapInfraNodeInput[],
+    infrastructureFeatures: MapInfrastructureFeatureInput[] = [],
   ): void {
     const polygonKeys = new Set(polygons.map((polygon) => polygon.osdName));
     const existingPolygonRows = this.db
@@ -547,6 +551,25 @@ export class ProjectsRepository {
         node.lat,
         node.lng,
         status,
+      );
+    }
+
+    this.db.prepare(`DELETE FROM map_infrastructure_features WHERE project_id = ?`).run(projectId);
+    const insertInfrastructureFeature = this.db.prepare(
+      `INSERT INTO map_infrastructure_features (
+        id, project_id, feature_type, source_layer, label, element_type, owner, geojson
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    for (const feature of infrastructureFeatures) {
+      insertInfrastructureFeature.run(
+        randomUUID(),
+        projectId,
+        feature.featureType,
+        feature.sourceLayer,
+        feature.label,
+        feature.elementType,
+        feature.owner,
+        JSON.stringify(feature.geojson),
       );
     }
   }
@@ -686,7 +709,13 @@ export class ProjectsRepository {
         );
       }
 
-      this.replaceMapFeatures(id, input.polygons ?? [], input.trunkCables ?? [], input.infraNodes ?? []);
+      this.replaceMapFeatures(
+        id,
+        input.polygons ?? [],
+        input.trunkCables ?? [],
+        input.infraNodes ?? [],
+        input.infrastructureFeatures ?? [],
+      );
     });
 
     tx();
@@ -1433,12 +1462,47 @@ export class ProjectsRepository {
       };
     });
 
+    const infrastructureRows = this.db
+      .prepare(
+        `SELECT
+          id,
+          feature_type AS featureType,
+          source_layer AS sourceLayer,
+          label,
+          element_type AS elementType,
+          owner,
+          geojson
+        FROM map_infrastructure_features
+        WHERE project_id = ?
+        ORDER BY feature_type ASC, label COLLATE NOCASE ASC, id ASC`,
+      )
+      .all(projectId) as Array<{
+      id: string;
+      featureType: 'duct' | 'pole' | 'manhole';
+      sourceLayer: string;
+      label: string | null;
+      elementType: string | null;
+      owner: string | null;
+      geojson: string;
+    }>;
+
+    const infrastructureFeatures = infrastructureRows.map((feature) => ({
+      id: feature.id,
+      featureType: feature.featureType,
+      sourceLayer: feature.sourceLayer,
+      label: feature.label,
+      elementType: feature.elementType,
+      owner: feature.owner,
+      geojson: parseGeojson(feature.geojson),
+    }));
+
     return {
       addresses,
       addressCandidates: this.listMapAddressCandidates(projectId),
       polygons,
       trunkCables,
       infraNodes,
+      infrastructureFeatures,
       notes: this.listMapNotes(projectId),
     };
   }
@@ -1920,6 +1984,7 @@ export class ProjectsRepository {
         input.polygons ?? [],
         input.trunkCables ?? [],
         input.infraNodes ?? [],
+        input.infrastructureFeatures ?? [],
       );
     });
 

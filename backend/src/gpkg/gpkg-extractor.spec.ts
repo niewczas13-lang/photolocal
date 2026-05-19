@@ -467,6 +467,100 @@ describe('GPKG extractor helpers', () => {
     });
   });
 
+  it('extracts duct, pole, and manhole infrastructure as background map features', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'photo-local-gpkg-background-infra-map-'));
+    const gpkgPath = join(dir, 'sample.gpkg');
+    const db = new Database(gpkgPath);
+
+    db.exec(`
+      CREATE TABLE PA (
+        id_posesja_opl TEXT,
+        nazwa_miejsc TEXT,
+        nazwa_ul TEXT,
+        nr_domu TEXT,
+        nr_dzialki TEXT,
+        geom BLOB
+      );
+      CREATE TABLE "Odcinki Kanalizacji" (
+        typ_elementu TEXT,
+        oznaczenie TEXT,
+        wlasciciel TEXT,
+        geom BLOB
+      );
+      CREATE TABLE "Słup" (
+        nazwa_slupa TEXT,
+        wlasciciel TEXT,
+        geom BLOB
+      );
+      CREATE TABLE "Studnia" (
+        oznaczenie TEXT,
+        typ_elementu TEXT,
+        wlasciciel TEXT,
+        geom BLOB
+      );
+    `);
+
+    db.prepare('INSERT INTO PA VALUES (?, ?, ?, ?, ?, ?)').run(
+      'pa-1',
+      'Ostrzeszewo',
+      'Testowa',
+      '1',
+      null,
+      pointGeometry(574000, 424000),
+    );
+    db.prepare('INSERT INTO "Odcinki Kanalizacji" VALUES (?, ?, ?, ?)').run(
+      'Kanalizacja pierwotna',
+      'OSTRZESZEWO/OK/001',
+      'ORANGE POLSKA S.A.',
+      lineGeometry([
+        [574000, 424000],
+        [574100, 424100],
+      ]),
+    );
+    db.prepare('INSERT INTO "Słup" VALUES (?, ?, ?)').run(
+      'OSTRZESZEWO/SLP0001',
+      'ORANGE POLSKA S.A.',
+      pointGeometry(574050, 424050),
+    );
+    db.prepare('INSERT INTO "Studnia" VALUES (?, ?, ?, ?)').run(
+      'OSTRZESZEWO/ST0001',
+      'Studnia kablowa',
+      'ORANGE POLSKA S.A.',
+      pointGeometry(574070, 424070),
+    );
+    db.close();
+
+    const result = extractGpkg(gpkgPath);
+
+    expect(result.infrastructureFeatures).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          featureType: 'duct',
+          sourceLayer: 'Odcinki Kanalizacji',
+          label: 'OSTRZESZEWO/OK/001',
+          elementType: 'Kanalizacja pierwotna',
+          owner: 'ORANGE POLSKA S.A.',
+          geojson: expect.objectContaining({ type: 'LineString' }),
+        }),
+        expect.objectContaining({
+          featureType: 'pole',
+          sourceLayer: 'Słup',
+          label: 'OSTRZESZEWO/SLP0001',
+          owner: 'ORANGE POLSKA S.A.',
+          geojson: expect.objectContaining({ type: 'Point' }),
+        }),
+        expect.objectContaining({
+          featureType: 'manhole',
+          sourceLayer: 'Studnia',
+          label: 'OSTRZESZEWO/ST0001',
+          elementType: 'Studnia kablowa',
+          owner: 'ORANGE POLSKA S.A.',
+          geojson: expect.objectContaining({ type: 'Point' }),
+        }),
+      ]),
+    );
+  });
+
   it('extracts route and installation cable lengths for map popups', () => {
     const dir = mkdtempSync(join(tmpdir(), 'photo-local-gpkg-cable-lengths-'));
     const gpkgPath = join(dir, 'sample.gpkg');

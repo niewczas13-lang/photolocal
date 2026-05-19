@@ -1308,6 +1308,11 @@
   background: repeating-linear-gradient(90deg, #92400e 0 8px, #22c55e 8px 16px, transparent 16px 24px);
 }
 
+.project-map-line--infra {
+  height: 2px;
+  background: repeating-linear-gradient(90deg, #64748b 0 4px, transparent 4px 11px);
+}
+
 .project-map-dot {
   border-radius: 999px;
 }
@@ -1334,6 +1339,11 @@
 
 .project-map-dot--blue {
   background: #3b82f6;
+}
+
+.project-map-dot--infra {
+  border: 1px solid #475569;
+  background: #e2e8f0;
 }
 
 .project-map-legend-square {

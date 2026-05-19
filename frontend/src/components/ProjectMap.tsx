@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import L, { type LatLngExpression, type PathOptions } from 'leaflet';
-import { GeoJSON, MapContainer, Marker, Polyline, Popup, TileLayer, useMap, useMapEvents } from 'react-leaflet';
+import { CircleMarker, GeoJSON, MapContainer, Marker, Polyline, Popup, TileLayer, useMap, useMapEvents } from 'react-leaflet';
 import {
   Cable,
   Circle,
   Home,
   ImagePlus,
+  Layers,
   ListChecks,
   Map,
   MapPinPlus,
@@ -45,6 +46,7 @@ import type {
   ProjectMapCandidateReserveLocation,
   ProjectMapData,
   ProjectMapInfraNode,
+  ProjectMapInfrastructureFeature,
   ProjectMapNote,
   ProjectMapNoteTargetType,
   ProjectMapNodeStatus,
@@ -146,6 +148,34 @@ function markerIcon(kind: 'address' | 'OSD' | 'OPP' | 'ZS', tone: MarkerTone): L
   });
 }
 
+function infrastructureLinePositions(feature: ProjectMapInfrastructureFeature): LatLngExpression[][] {
+  const geometry = geometryFromGeojson(feature.geojson);
+  if (!geometry) return [];
+
+  if (geometry.type === 'LineString') {
+    return [geometry.coordinates.map(toLatLng).filter(Boolean) as LatLngExpression[]];
+  }
+
+  if (geometry.type === 'MultiLineString') {
+    return geometry.coordinates.map((line) => line.map(toLatLng).filter(Boolean) as LatLngExpression[]);
+  }
+
+  return [];
+}
+
+function infrastructurePointPosition(feature: ProjectMapInfrastructureFeature): LatLngExpression | null {
+  const geometry = geometryFromGeojson(feature.geojson);
+  if (!geometry) return null;
+
+  if (geometry.type === 'Point') return toLatLng(geometry.coordinates);
+  if (geometry.type === 'MultiPoint') {
+    const first = geometry.coordinates[0];
+    return first ? toLatLng(first) : null;
+  }
+
+  return null;
+}
+
 function addressCandidateIcon(): L.DivIcon {
   return L.divIcon({
     className: 'project-map-candidate-marker',
@@ -234,6 +264,45 @@ function polygonStyle(polygon: ProjectMapPolygon): PathOptions {
     opacity: 0.8,
     weight: 2,
   };
+}
+
+function infrastructureLineStyle(): PathOptions {
+  return {
+    color: '#64748b',
+    dashArray: '4 7',
+    opacity: 0.45,
+    weight: 2,
+  };
+}
+
+function infrastructurePointStyle(featureType: ProjectMapInfrastructureFeature['featureType']): PathOptions {
+  return {
+    color: featureType === 'pole' ? '#334155' : '#475569',
+    fillColor: featureType === 'pole' ? '#0f172a' : '#e2e8f0',
+    fillOpacity: featureType === 'pole' ? 0.75 : 0.9,
+    opacity: 0.75,
+    weight: 1.5,
+  };
+}
+
+function infrastructureFeatureLabel(feature: ProjectMapInfrastructureFeature): string {
+  if (feature.featureType === 'duct') return 'Kanalizacja';
+  if (feature.featureType === 'pole') return 'Slup';
+  return 'Studnia';
+}
+
+function InfrastructurePopup({ feature }: { feature: ProjectMapInfrastructureFeature }) {
+  return (
+    <div className="project-map-popup">
+      <div className="project-map-popup__title">
+        {feature.label ?? infrastructureFeatureLabel(feature)}
+      </div>
+      <div className="project-map-popup__meta">{infrastructureFeatureLabel(feature)}</div>
+      <div className="project-map-popup__meta">Warstwa: {feature.sourceLayer}</div>
+      {feature.elementType && <div className="project-map-popup__meta">Typ: {feature.elementType}</div>}
+      {feature.owner && <div className="project-map-popup__meta">Wlasciciel: {feature.owner}</div>}
+    </div>
+  );
 }
 
 function MapNotePhotoInput({
@@ -716,6 +785,7 @@ export default function ProjectMap({ projectId, view, onViewChange }: ProjectMap
   const [busyId, setBusyId] = useState<string | null>(null);
   const [addingFreeNote, setAddingFreeNote] = useState(false);
   const [addingAddress, setAddingAddress] = useState(false);
+  const [showInfrastructure, setShowInfrastructure] = useState(false);
   const [draftNotePosition, setDraftNotePosition] = useState<{ lat: number; lng: number } | null>(null);
 
   const refresh = useCallback(async () => {
@@ -879,8 +949,11 @@ export default function ProjectMap({ projectId, view, onViewChange }: ProjectMap
       ...data.infraNodes.map((node) => [node.lat, node.lng] as LatLngExpression),
       ...data.trunkCables.flatMap((cable) => collectGeometryPositions(cable.geojson)),
       ...data.polygons.flatMap((polygon) => collectGeometryPositions(polygon.geojson)),
+      ...(showInfrastructure
+        ? data.infrastructureFeatures.flatMap((feature) => collectGeometryPositions(feature.geojson))
+        : []),
     ];
-  }, [data]);
+  }, [data, showInfrastructure]);
 
   const totals = useMemo(() => {
     if (!data) {
@@ -981,6 +1054,14 @@ export default function ProjectMap({ projectId, view, onViewChange }: ProjectMap
           </div>
           {view === 'map' && (
             <>
+              <Button
+                variant={showInfrastructure ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setShowInfrastructure((current) => !current)}
+              >
+                <Layers size={14} className="mr-2" />
+                Infrastruktura
+              </Button>
               <Button
                 variant={addingAddress ? 'default' : 'outline'}
                 size="sm"
@@ -1086,6 +1167,38 @@ export default function ProjectMap({ projectId, view, onViewChange }: ProjectMap
                   }}
                 />
               )}
+
+              {showInfrastructure &&
+                data.infrastructureFeatures.map((feature) => {
+                  if (feature.featureType === 'duct') {
+                    return infrastructureLinePositions(feature).map((positions, index) => (
+                      <Polyline
+                        key={`infra-${feature.id}-${index}`}
+                        positions={positions}
+                        pathOptions={infrastructureLineStyle()}
+                      >
+                        <Popup>
+                          <InfrastructurePopup feature={feature} />
+                        </Popup>
+                      </Polyline>
+                    ));
+                  }
+
+                  const position = infrastructurePointPosition(feature);
+                  if (!position) return null;
+                  return (
+                    <CircleMarker
+                      key={`infra-${feature.id}`}
+                      center={position}
+                      radius={feature.featureType === 'pole' ? 4 : 5}
+                      pathOptions={infrastructurePointStyle(feature.featureType)}
+                    >
+                      <Popup>
+                        <InfrastructurePopup feature={feature} />
+                      </Popup>
+                    </CircleMarker>
+                  );
+                })}
 
               {data.polygons.map((polygon) => {
                 if (!isGeoJsonObject(polygon.geojson)) return null;
@@ -1230,6 +1343,12 @@ export default function ProjectMap({ projectId, view, onViewChange }: ProjectMap
             <span><span className="project-map-line project-map-line--aerial" /> kabel napowietrzny</span>
             <span><span className="project-map-line project-map-line--duct" /> istniejaca kanalizacja</span>
             <span><span className="project-map-line project-map-line--done" /> gotowe</span>
+            {showInfrastructure && (
+              <>
+                <span><span className="project-map-line project-map-line--infra" /> kanalizacja / rurociag</span>
+                <span><span className="project-map-dot project-map-dot--infra" /> slup / studnia</span>
+              </>
+            )}
             <span><Triangle size={13} className="project-map-legend-icon project-map-legend-icon--osd" /> OSD</span>
             <span><Circle size={13} className="project-map-legend-icon project-map-legend-icon--opp" /> OPP</span>
             <span><span className="project-map-legend-square project-map-legend-square--zs" /> ZS</span>

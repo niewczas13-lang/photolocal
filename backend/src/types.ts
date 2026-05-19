@@ -6,6 +6,7 @@ export type ChecklistNodeType = 'STATIC' | 'DISTRIBUTION' | 'ADDRESS' | 'CABLE_R
 export type ChecklistNodeSource = 'GPKG' | 'MANUAL' | 'SYSTEM';
 export type CableRoutingType = 'underground' | 'aerial' | 'existing_duct';
 export type MapNoteTargetType = 'cable' | 'node' | 'address' | 'polygon' | 'free';
+export type MapInfrastructureFeatureType = 'duct' | 'pole' | 'manhole';
 
 export interface MufaEntry {
   wezel: string;
@@ -57,6 +58,15 @@ export interface MapInfraNodeInput {
   label: string | null;
   lat: number;
   lng: number;
+}
+
+export interface MapInfrastructureFeatureInput {
+  featureType: MapInfrastructureFeatureType;
+  sourceLayer: string;
+  label: string | null;
+  elementType: string | null;
+  owner: string | null;
+  geojson: Record<string, unknown>;
 }
 
 export type MapCableStatus = 'PENDING' | 'DUCT_READY' | 'PULLED' | 'WELDED' | 'SUSPENDED';
@@ -150,6 +160,16 @@ export interface ProjectMapInfraNode {
   photos: ProjectMapPhoto[];
 }
 
+export interface ProjectMapInfrastructureFeature {
+  id: string;
+  featureType: MapInfrastructureFeatureType;
+  sourceLayer: string;
+  label: string | null;
+  elementType: string | null;
+  owner: string | null;
+  geojson: Record<string, unknown>;
+}
+
 export interface ProjectMapNotePhoto {
   id: string;
   noteId: string;
@@ -185,6 +205,7 @@ export interface ProjectMapRecord {
   polygons: ProjectMapPolygon[];
   trunkCables: ProjectMapCable[];
   infraNodes: ProjectMapInfraNode[];
+  infrastructureFeatures: ProjectMapInfrastructureFeature[];
   notes: ProjectMapNote[];
 }
 
@@ -197,6 +218,7 @@ export interface GpkgExtractionResult {
   trunkCables: MapTrunkCableInput[];
   infraNodes: MapInfraNodeInput[];
   passiveInfraNodes: MapInfraNodeInput[];
+  infrastructureFeatures: MapInfrastructureFeatureInput[];
   dacToAddressCableEntries: string[];
   adssToAddressCableEntries: string[];
   splitterCount: number;
