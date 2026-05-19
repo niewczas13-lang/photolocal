@@ -522,6 +522,75 @@ describe('GPKG extractor helpers', () => {
     });
   });
 
+  it('marks underground cable rows as existing duct when they follow underscore duct infrastructure', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'photo-local-gpkg-existing-duct-geometry-'));
+    const gpkgPath = join(dir, 'sample.gpkg');
+    const db = new Database(gpkgPath);
+
+    db.exec(`
+      CREATE TABLE PA (
+        id_posesja_opl TEXT,
+        nazwa_miejsc TEXT,
+        nazwa_ul TEXT,
+        nr_domu TEXT,
+        nr_dzialki TEXT,
+        geom BLOB
+      );
+      CREATE TABLE "Kable Swiatlowodowe" (
+        model_kabla TEXT,
+        typ_elementu TEXT,
+        od TEXT,
+        do TEXT,
+        odcinek_kabla TEXT,
+        geom BLOB
+      );
+      CREATE TABLE "_Odcinki Kanalizacji" (
+        typ_elementu TEXT,
+        oznaczenie TEXT,
+        geom BLOB
+      );
+    `);
+
+    const ductRoute = lineGeometry([
+      [574000, 424000],
+      [574100, 424100],
+    ]);
+    const cableRoute = lineGeometry([
+      [574000, 424000],
+      [574100, 424100],
+      [574200, 424100],
+    ]);
+    db.prepare('INSERT INTO PA VALUES (?, ?, ?, ?, ?, ?)').run(
+      'pa-1',
+      'Bartag',
+      'Testowa',
+      '1',
+      null,
+      pointGeometry(574000, 424000),
+    );
+    db.prepare('INSERT INTO "_Odcinki Kanalizacji" VALUES (?, ?, ?)').run(
+      'Kanalizacja pierwotna',
+      'BARTAG/KAN/026',
+      ductRoute,
+    );
+    db.prepare('INSERT INTO "Kable Swiatlowodowe" VALUES (?, ?, ?, ?, ?, ?)').run(
+      'MI-MKF 12J G.652D [ZN-05_[W1]_1x12(12)]',
+      'Kabel doziemny',
+      'BARTAG/OPP0002',
+      'BARTAG/OSD0026',
+      'OKH0030735-DBA/026',
+      cableRoute,
+    );
+    db.close();
+
+    const result = extractGpkg(gpkgPath);
+
+    expect(result.trunkCables[0]).toMatchObject({
+      rawName: 'OKH0030735-DBA/026',
+      routingType: 'existing_duct',
+    });
+  });
+
   it('extracts pole infrastructure from _Obiekty instead of conceptual pole layers', () => {
     const dir = mkdtempSync(join(tmpdir(), 'photo-local-gpkg-obiekty-poles-'));
     const gpkgPath = join(dir, 'sample.gpkg');
@@ -582,6 +651,56 @@ describe('GPKG extractor helpers', () => {
     ]);
   });
 
+  it('extracts manhole infrastructure from _Obiekty rows', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'photo-local-gpkg-obiekty-manholes-'));
+    const gpkgPath = join(dir, 'sample.gpkg');
+    const db = new Database(gpkgPath);
+
+    db.exec(`
+      CREATE TABLE PA (
+        id_posesja_opl TEXT,
+        nazwa_miejsc TEXT,
+        nazwa_ul TEXT,
+        nr_domu TEXT,
+        nr_dzialki TEXT,
+        geom BLOB
+      );
+      CREATE TABLE "_Obiekty" (
+        oznaczenie TEXT,
+        typ_elementu TEXT,
+        wlasciciel TEXT,
+        geom BLOB
+      );
+    `);
+
+    db.prepare('INSERT INTO PA VALUES (?, ?, ?, ?, ?, ?)').run(
+      'pa-1',
+      'Bartag',
+      'Testowa',
+      '1',
+      null,
+      pointGeometry(574000, 424000),
+    );
+    db.prepare('INSERT INTO "_Obiekty" VALUES (?, ?, ?, ?)').run(
+      'BARTAG/ST0026',
+      'Studnia kablowa',
+      'ORANGE POLSKA S.A.',
+      pointGeometry(574070, 424070),
+    );
+    db.close();
+
+    const result = extractGpkg(gpkgPath);
+    const manholes = result.infrastructureFeatures.filter((feature) => feature.featureType === 'manhole');
+
+    expect(manholes).toEqual([
+      expect.objectContaining({
+        sourceLayer: '_Obiekty',
+        label: 'BARTAG/ST0026',
+        elementType: 'Studnia kablowa',
+      }),
+    ]);
+  });
+
   it('extracts duct, pole, and manhole infrastructure as background map features', () => {
     const dir = mkdtempSync(join(tmpdir(), 'photo-local-gpkg-background-infra-map-'));
     const gpkgPath = join(dir, 'sample.gpkg');
@@ -596,19 +715,19 @@ describe('GPKG extractor helpers', () => {
         nr_dzialki TEXT,
         geom BLOB
       );
-      CREATE TABLE "Odcinki Kanalizacji" (
+      CREATE TABLE "_Odcinki Kanalizacji" (
+        typ_elementu TEXT,
+        oznaczenie TEXT,
+        wlasciciel TEXT,
+        geom BLOB
+      );
+      CREATE TABLE "_K Odcinki Kanalizacji" (
         typ_elementu TEXT,
         oznaczenie TEXT,
         wlasciciel TEXT,
         geom BLOB
       );
       CREATE TABLE "_Obiekty" (
-        oznaczenie TEXT,
-        typ_elementu TEXT,
-        wlasciciel TEXT,
-        geom BLOB
-      );
-      CREATE TABLE "Studnia" (
         oznaczenie TEXT,
         typ_elementu TEXT,
         wlasciciel TEXT,
@@ -624,7 +743,7 @@ describe('GPKG extractor helpers', () => {
       null,
       pointGeometry(574000, 424000),
     );
-    db.prepare('INSERT INTO "Odcinki Kanalizacji" VALUES (?, ?, ?, ?)').run(
+    db.prepare('INSERT INTO "_Odcinki Kanalizacji" VALUES (?, ?, ?, ?)').run(
       'Kanalizacja pierwotna',
       'OSTRZESZEWO/OK/001',
       'ORANGE POLSKA S.A.',
@@ -633,13 +752,22 @@ describe('GPKG extractor helpers', () => {
         [574100, 424100],
       ]),
     );
+    db.prepare('INSERT INTO "_K Odcinki Kanalizacji" VALUES (?, ?, ?, ?)').run(
+      'Koncepcyjna kanalizacja',
+      'OSTRZESZEWO/K/001',
+      'ORANGE POLSKA S.A.',
+      lineGeometry([
+        [574200, 424200],
+        [574300, 424300],
+      ]),
+    );
     db.prepare('INSERT INTO "_Obiekty" VALUES (?, ?, ?, ?)').run(
       'OSTRZESZEWO/SLP0001',
       'Słup elektroenergetyczny',
       'ORANGE POLSKA S.A.',
       pointGeometry(574050, 424050),
     );
-    db.prepare('INSERT INTO "Studnia" VALUES (?, ?, ?, ?)').run(
+    db.prepare('INSERT INTO "_Obiekty" VALUES (?, ?, ?, ?)').run(
       'OSTRZESZEWO/ST0001',
       'Studnia kablowa',
       'ORANGE POLSKA S.A.',
@@ -649,11 +777,18 @@ describe('GPKG extractor helpers', () => {
 
     const result = extractGpkg(gpkgPath);
 
+    expect(result.infrastructureFeatures).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          sourceLayer: '_K Odcinki Kanalizacji',
+        }),
+      ]),
+    );
     expect(result.infrastructureFeatures).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           featureType: 'duct',
-          sourceLayer: 'Odcinki Kanalizacji',
+          sourceLayer: '_Odcinki Kanalizacji',
           label: 'OSTRZESZEWO/OK/001',
           elementType: 'Kanalizacja pierwotna',
           owner: 'ORANGE POLSKA S.A.',
@@ -669,7 +804,7 @@ describe('GPKG extractor helpers', () => {
         }),
         expect.objectContaining({
           featureType: 'manhole',
-          sourceLayer: 'Studnia',
+          sourceLayer: '_Obiekty',
           label: 'OSTRZESZEWO/ST0001',
           elementType: 'Studnia kablowa',
           owner: 'ORANGE POLSKA S.A.',

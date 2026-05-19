@@ -210,6 +210,29 @@ function cableRunsAlongProjectedConduit(
   return cableSegments.some((segment) => lineRunsAlongProjectedConduit(segment, projectedConduitSegments));
 }
 
+function lineHasSegmentAlongConduit(line: number[][], conduitSegments: number[][][]): boolean {
+  const toleranceMeters = 2;
+  for (let index = 1; index < line.length; index += 1) {
+    const previous = line[index - 1];
+    const current = line[index];
+    const middle = [(previous[0] + current[0]) / 2, (previous[1] + current[1]) / 2];
+    const samplePoints = [previous, middle, current];
+    if (samplePoints.every((point) => distancePointToLineSegments(point, conduitSegments) <= toleranceMeters)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function cablePartlyRunsAlongConduit(
+  cableSegments: number[][][],
+  conduitSegments: number[][][],
+): boolean {
+  if (conduitSegments.length === 0) return false;
+  return cableSegments.some((segment) => lineHasSegmentAlongConduit(segment, conduitSegments));
+}
+
 function addNullableLengths(left: number | null | undefined, right: number | null | undefined): number | null {
   if (left == null) return right == null ? null : right;
   if (right == null) return left;
@@ -313,6 +336,11 @@ function isExistingLayerTable(tableName: string): boolean {
   return tableName.trim().startsWith('_');
 }
 
+function isConceptualLayerTable(tableName: string): boolean {
+  const normalizedName = normalizeColumnName(tableName).replace(/^_+/, '');
+  return normalizedName === 'k' || normalizedName.startsWith('k_');
+}
+
 function isGpkgInternalTable(tableName: string): boolean {
   const normalized = tableName.trim().toLowerCase();
   return (
@@ -338,11 +366,24 @@ function isProjectedConduitTable(tableName: string): boolean {
   );
 }
 
-function extractProjectedConduitSegments(db: Database.Database): number[][][] {
+function isExistingDuctTable(tableName: string): boolean {
+  if (!isExistingLayerTable(tableName)) return false;
+  if (isConceptualLayerTable(tableName)) return false;
+  const normalizedName = normalizeColumnName(tableName);
+  return (
+    normalizedName.includes('odcinki_kanalizacji') ||
+    normalizedName.includes('rurociagi_mikrokanalizacja')
+  );
+}
+
+function extractConduitSegments(
+  db: Database.Database,
+  tablePredicate: (tableName: string) => boolean,
+): number[][][] {
   const segments: number[][][] = [];
 
   for (const tableName of getUserTableNames(db)) {
-    if (!isProjectedConduitTable(tableName) || !tableHasColumns(db, tableName, ['geom'])) continue;
+    if (!tablePredicate(tableName) || !tableHasColumns(db, tableName, ['geom'])) continue;
 
     const rows = db.prepare(`SELECT geom FROM ${q(tableName)}`).all() as Array<Record<string, unknown>>;
     for (const row of rows) {
@@ -354,6 +395,14 @@ function extractProjectedConduitSegments(db: Database.Database): number[][][] {
   }
 
   return segments;
+}
+
+function extractProjectedConduitSegments(db: Database.Database): number[][][] {
+  return extractConduitSegments(db, isProjectedConduitTable);
+}
+
+function extractExistingDuctSegments(db: Database.Database): number[][][] {
+  return extractConduitSegments(db, isExistingDuctTable);
 }
 
 function isObjectsInfrastructureTable(tableName: string): boolean {
@@ -374,10 +423,31 @@ function rowLooksLikePole(row: Record<string, unknown>): boolean {
   return normalizeCableRoutingText(description).includes('slup');
 }
 
+function rowLooksLikeManhole(row: Record<string, unknown>): boolean {
+  const description = [
+    row.typ_elementu,
+    row.typ_obiektu,
+    row.rodzaj,
+    row.model,
+    row.opis,
+  ]
+    .filter((value): value is string => typeof value === 'string')
+    .join(' ');
+  const normalizedDescription = normalizeCableRoutingText(description);
+
+  return (
+    normalizedDescription.includes('studnia') ||
+    normalizedDescription.includes('studzien') ||
+    normalizedDescription.includes('szacht')
+  );
+}
+
 function infrastructureFeatureType(
   tableName: string,
   row: Record<string, unknown>,
 ): MapInfrastructureFeatureInput['featureType'] | null {
+  if (!isExistingLayerTable(tableName)) return null;
+  if (isConceptualLayerTable(tableName)) return null;
   const normalizedName = normalizeColumnName(tableName);
   if (
     normalizedName.includes('odcinki_kanalizacji') ||
@@ -385,7 +455,10 @@ function infrastructureFeatureType(
   ) {
     return 'duct';
   }
-  if (isObjectsInfrastructureTable(tableName) && rowLooksLikePole(row)) return 'pole';
+  if (isObjectsInfrastructureTable(tableName)) {
+    if (rowLooksLikePole(row)) return 'pole';
+    if (rowLooksLikeManhole(row)) return 'manhole';
+  }
   if (normalizedName.includes('studnia') || normalizedName.includes('studnie') || normalizedName.includes('szachty')) {
     return 'manhole';
   }
@@ -629,6 +702,7 @@ function extractMapGeometry(db: Database.Database): {
   ].find((tableName) => tableExists(db, tableName));
 
   const projectedConduitSegments = extractProjectedConduitSegments(db);
+  const existingDuctSegments = extractExistingDuctSegments(db);
 
   if (cableTable) {
     const rows = db.prepare(`SELECT * FROM ${q(cableTable)}`).all() as Array<Record<string, unknown>>;
@@ -661,9 +735,11 @@ function extractMapGeometry(db: Database.Database): {
           : toNode;
       const rawName = row.odcinek_kabla == null ? null : String(row.odcinek_kabla).trim() || null;
       const baseRoutingType = getCableRoutingType(row, cableType, rawName);
-      const routingType =
-        baseRoutingType === 'existing_duct' &&
-        cableRunsAlongProjectedConduit(projectedSegments, projectedConduitSegments)
+      const runsAlongExistingDuct = cablePartlyRunsAlongConduit(projectedSegments, existingDuctSegments);
+      const runsAlongProjectedConduit = cableRunsAlongProjectedConduit(projectedSegments, projectedConduitSegments);
+      const routingType = runsAlongExistingDuct
+        ? 'existing_duct'
+        : baseRoutingType === 'existing_duct' && runsAlongProjectedConduit
           ? 'underground'
           : baseRoutingType;
       const cableKey = getTrunkCableKey({ rawName, fromNode, toNode, cableType });

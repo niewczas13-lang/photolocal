@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  INFRASTRUCTURE_MAP_PANE,
+  INFRASTRUCTURE_PANE_STYLE,
   getInfrastructureLineStyle,
   getInfrastructurePointIconSpec,
 } from './map-infrastructure-style';
@@ -29,5 +31,10 @@ describe('infrastructure map styling', () => {
 
     expect(icon.html).toContain('project-map-infra-manhole');
     expect(icon.iconSize).toEqual([14, 14]);
+  });
+
+  it('uses a low map pane so infrastructure stays under project layers', () => {
+    expect(INFRASTRUCTURE_MAP_PANE).toBe('project-map-infrastructure');
+    expect(INFRASTRUCTURE_PANE_STYLE.zIndex).toBeLessThan(400);
   });
 });

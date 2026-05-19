@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import L, { type LatLngExpression, type PathOptions } from 'leaflet';
-import { GeoJSON, MapContainer, Marker, Polyline, Popup, TileLayer, useMap, useMapEvents } from 'react-leaflet';
+import { GeoJSON, MapContainer, Marker, Pane, Polyline, Popup, TileLayer, useMap, useMapEvents } from 'react-leaflet';
 import {
   Cable,
   Circle,
@@ -26,6 +26,8 @@ import { cn } from '../lib/utils';
 import { getMapBoundsPositions } from '../map-bounds';
 import { formatCableLength } from '../map-format';
 import {
+  INFRASTRUCTURE_MAP_PANE,
+  INFRASTRUCTURE_PANE_STYLE,
   getInfrastructureLineStyle,
   getInfrastructurePointIconSpec,
 } from '../map-infrastructure-style';
@@ -1149,36 +1151,41 @@ export default function ProjectMap({ projectId, view, onViewChange }: ProjectMap
                 />
               )}
 
-              {showInfrastructure &&
-                data.infrastructureFeatures.map((feature) => {
-                  if (feature.featureType === 'duct') {
-                    return infrastructureLinePositions(feature).map((positions, index) => (
-                      <Polyline
-                        key={`infra-${feature.id}-${index}`}
-                        positions={positions}
-                        pathOptions={getInfrastructureLineStyle()}
+              {showInfrastructure && (
+                <Pane name={INFRASTRUCTURE_MAP_PANE} style={INFRASTRUCTURE_PANE_STYLE}>
+                  {data.infrastructureFeatures.map((feature) => {
+                    if (feature.featureType === 'duct') {
+                      return infrastructureLinePositions(feature).map((positions, index) => (
+                        <Polyline
+                          key={`infra-${feature.id}-${index}`}
+                          positions={positions}
+                          pathOptions={getInfrastructureLineStyle()}
+                          pane={INFRASTRUCTURE_MAP_PANE}
+                        >
+                          <Popup>
+                            <InfrastructurePopup feature={feature} />
+                          </Popup>
+                        </Polyline>
+                      ));
+                    }
+
+                    const position = infrastructurePointPosition(feature);
+                    if (!position) return null;
+                    return (
+                      <Marker
+                        key={`infra-${feature.id}`}
+                        position={position}
+                        icon={infrastructurePointIcon(feature.featureType)}
+                        pane={INFRASTRUCTURE_MAP_PANE}
                       >
                         <Popup>
                           <InfrastructurePopup feature={feature} />
                         </Popup>
-                      </Polyline>
-                    ));
-                  }
-
-                  const position = infrastructurePointPosition(feature);
-                  if (!position) return null;
-                  return (
-                    <Marker
-                      key={`infra-${feature.id}`}
-                      position={position}
-                      icon={infrastructurePointIcon(feature.featureType)}
-                    >
-                      <Popup>
-                        <InfrastructurePopup feature={feature} />
-                      </Popup>
-                    </Marker>
-                  );
-                })}
+                      </Marker>
+                    );
+                  })}
+                </Pane>
+              )}
 
               {data.polygons.map((polygon) => {
                 if (!isGeoJsonObject(polygon.geojson)) return null;
