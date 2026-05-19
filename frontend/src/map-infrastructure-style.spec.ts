@@ -18,13 +18,21 @@ describe('infrastructure map styling', () => {
     });
   });
 
-  it('uses a small electric pole icon instead of a large point marker', () => {
-    const icon = getInfrastructurePointIconSpec('pole');
+  it('uses a small plain pole icon instead of a large point marker', () => {
+    const icon = getInfrastructurePointIconSpec('pole', 'ORANGE POLSKA S.A.');
 
     expect(icon.className).toContain('project-map-infra-point-icon');
     expect(icon.html).toContain('project-map-infra-pole');
-    expect(icon.html).toContain('project-map-infra-pole__label');
-    expect(icon.iconSize).toEqual([18, 26]);
+    expect(icon.html).not.toContain('project-map-infra-pole__label');
+    expect(icon.iconSize).toEqual([12, 20]);
+  });
+
+  it('adds E to energy-owned pole icons only', () => {
+    const energyPole = getInfrastructurePointIconSpec('pole', 'ENERGA-OPERATOR S.A.');
+    const telecomPole = getInfrastructurePointIconSpec('pole', 'ORANGE POLSKA S.A.');
+
+    expect(energyPole.html).toContain('project-map-infra-pole__label');
+    expect(telecomPole.html).not.toContain('project-map-infra-pole__label');
   });
 
   it('keeps manholes visually smaller than the old infrastructure dots', () => {

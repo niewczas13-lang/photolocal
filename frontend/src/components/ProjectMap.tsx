@@ -184,8 +184,8 @@ function infrastructurePointPosition(feature: ProjectMapInfrastructureFeature): 
   return null;
 }
 
-function infrastructurePointIcon(featureType: ProjectMapInfrastructureFeature['featureType']): L.DivIcon {
-  return L.divIcon(getInfrastructurePointIconSpec(featureType));
+function infrastructurePointIcon(feature: ProjectMapInfrastructureFeature): L.DivIcon {
+  return L.divIcon(getInfrastructurePointIconSpec(feature.featureType, feature.owner));
 }
 
 function addressCandidateIcon(): L.DivIcon {
@@ -1176,7 +1176,7 @@ export default function ProjectMap({ projectId, view, onViewChange }: ProjectMap
                       <Marker
                         key={`infra-${feature.id}`}
                         position={position}
-                        icon={infrastructurePointIcon(feature.featureType)}
+                        icon={infrastructurePointIcon(feature)}
                         pane={INFRASTRUCTURE_MAP_PANE}
                       >
                         <Popup pane={INFRASTRUCTURE_POPUP_PANE}>
@@ -1336,7 +1336,6 @@ export default function ProjectMap({ projectId, view, onViewChange }: ProjectMap
                 <span><span className="project-map-line project-map-line--infra" /> kanalizacja / rurociag</span>
                 <span>
                   <span className="project-map-infra-pole project-map-infra-pole--legend">
-                    <span className="project-map-infra-pole__label">E</span>
                     <span className="project-map-infra-pole__stem"></span>
                   </span>
                   <span className="project-map-infra-manhole project-map-infra-manhole--legend"></span>

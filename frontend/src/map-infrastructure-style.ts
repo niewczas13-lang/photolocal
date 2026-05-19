@@ -14,6 +14,17 @@ export interface InfrastructurePointIconSpec {
   popupAnchor: [number, number];
 }
 
+function isEnergyOwner(owner: string | null | undefined): boolean {
+  if (!owner) return false;
+  const normalizedOwner = owner
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+
+  if (normalizedOwner.includes('orange')) return false;
+  return /\b(energa|enea|pge|tauron|e[- ]?on|innogy|energetycz|dystrybucj)\b/.test(normalizedOwner);
+}
+
 export function getInfrastructureLineStyle(): PathOptions {
   return {
     color: '#334155',
@@ -25,18 +36,22 @@ export function getInfrastructureLineStyle(): PathOptions {
 
 export function getInfrastructurePointIconSpec(
   featureType: ProjectMapInfrastructureFeatureType,
+  owner?: string | null,
 ): InfrastructurePointIconSpec {
   if (featureType === 'pole') {
+    const labelHtml = isEnergyOwner(owner)
+      ? '<span class="project-map-infra-pole__label">E</span>'
+      : '';
     return {
       className: 'project-map-infra-point-icon',
       html:
         '<span class="project-map-infra-pole">' +
-        '<span class="project-map-infra-pole__label">E</span>' +
+        labelHtml +
         '<span class="project-map-infra-pole__stem"></span>' +
         '</span>',
-      iconSize: [18, 26],
-      iconAnchor: [9, 22],
-      popupAnchor: [0, -22],
+      iconSize: [12, 20],
+      iconAnchor: [6, 18],
+      popupAnchor: [0, -18],
     };
   }
 

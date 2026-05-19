@@ -317,6 +317,8 @@
   --map-marker-border: #991b1b;
   position: relative;
   display: block;
+  width: 24px;
+  height: 24px;
   filter: drop-shadow(0 2px 4px rgb(0 0 0 / 0.28));
 }
 
@@ -331,10 +333,9 @@
 }
 
 .project-map-marker__shape--address {
-  width: 11px;
-  height: 9px;
-  margin-top: 10px;
-  margin-left: 6px;
+  width: 16px;
+  height: 15px;
+  margin: 5px 4px 4px;
   border: 1px solid var(--map-marker-border);
   border-radius: 2px;
   background: var(--map-marker-color);
@@ -342,14 +343,15 @@
 
 .project-map-marker__shape--address::before {
   position: absolute;
-  top: -6px;
-  left: 2px;
-  width: 7px;
-  height: 7px;
+  top: -5px;
+  left: 3px;
+  width: 10px;
+  height: 10px;
   content: "";
   transform: rotate(45deg);
   border-top: 1px solid var(--map-marker-border);
   border-left: 1px solid var(--map-marker-border);
+  border-top-left-radius: 2px;
   background: var(--map-marker-color);
 }
 
@@ -1321,8 +1323,8 @@
 .project-map-infra-pole {
   display: block;
   position: relative;
-  width: 18px;
-  height: 26px;
+  width: 12px;
+  height: 20px;
 }
 
 .project-map-infra-pole__label {
@@ -1330,17 +1332,17 @@
   top: 0;
   left: 0;
   color: #1f2937;
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 700;
   line-height: 1;
 }
 
 .project-map-infra-pole__stem {
   position: absolute;
-  top: 5px;
-  left: 10px;
+  top: 4px;
+  left: 6px;
   width: 2px;
-  height: 19px;
+  height: 15px;
   border-radius: 999px;
   background: #111827;
   box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.55);
@@ -1352,7 +1354,7 @@
   position: absolute;
   left: -2px;
   width: 6px;
-  height: 2px;
+  height: 1px;
   border-radius: 999px;
   background: #111827;
 }
