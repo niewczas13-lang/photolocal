@@ -54,6 +54,17 @@ function mapData(overrides: Partial<ProjectMapData> = {}): ProjectMapData {
         routingType: 'aerial',
         status: 'SUSPENDED',
       },
+      {
+        id: 'cable-3',
+        cableType: 'MI-MKF 12J',
+        fromNode: 'OSTRZESZEWO/ZS0003',
+        toNode: 'OSTRZESZEWO/OPP0003',
+        osdName: 'OSTRZESZEWO/OPP0003',
+        geojson: { type: 'LineString', coordinates: [] },
+        rawName: 'OKH0030737-IST/001',
+        routingType: 'existing_duct',
+        status: 'PENDING',
+      },
     ],
     infraNodes: [
       {
@@ -77,6 +88,7 @@ function mapData(overrides: Partial<ProjectMapData> = {}): ProjectMapData {
         hasPhoto: false,
       },
     ],
+    notes: [],
     ...overrides,
   };
 }
@@ -103,6 +115,13 @@ describe('map task list', () => {
           summary: 'Kabel podwieszony',
         }),
         expect.objectContaining({
+          id: 'cable-cable-3',
+          kind: 'cable',
+          statusLabel: 'Do zrobienia',
+          stage: 'todo',
+          summary: 'Mikrorurka lub kabel do zaciagniecia w istniejacej kanalizacji',
+        }),
+        expect.objectContaining({
           id: 'node-node-1',
           kind: 'node',
           title: 'O_OSTRZESZEWO/OPP0002',
@@ -127,6 +146,7 @@ describe('map task list', () => {
 
     expect(filterMapTasks(rows, 'all')).toHaveLength(rows.length);
     expect(filterMapTasks(rows, 'todo').map((row) => row.id)).toEqual([
+      'cable-cable-3',
       'node-node-2',
       'address-address-1',
     ]);

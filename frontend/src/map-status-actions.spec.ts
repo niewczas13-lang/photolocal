@@ -21,6 +21,16 @@ describe('map status actions', () => {
     ]);
   });
 
+  it('keeps two work steps for cables in existing ducts', () => {
+    const actions = getCableStatusActions({ status: 'PENDING', routingType: 'existing_duct' });
+
+    expect(actions.map(({ status, label, kind, isActive }) => ({ status, label, kind, isActive }))).toEqual([
+      { status: 'DUCT_READY', label: 'Mikrorurka', kind: 'progress', isActive: false },
+      { status: 'PULLED', label: 'Zaciagniete', kind: 'complete', isActive: false },
+      { status: 'PENDING', label: 'Reset', kind: 'reset', isActive: false },
+    ]);
+  });
+
   it('shows node completion separately from reset', () => {
     const actions = getNodeStatusActions('WELDED');
 

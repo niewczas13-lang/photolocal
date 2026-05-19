@@ -148,6 +148,73 @@ describe('projects routes', () => {
     expect(nodeStatusResponse.json().infraNodes[0]).toMatchObject({ id: nodeId, status: 'WELDED' });
   });
 
+  it('creates map notes and stores uploaded note photos', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'photo-local-map-note-route-'));
+    process.env.PHOTO_LOCAL_DB = join(dir, 'test.sqlite');
+    process.env.PHOTO_BASE_DIR = join(dir, 'photos');
+
+    const { app, db } = await buildApp();
+    const repository = new ProjectsRepository(db);
+    const project = repository.createProject({
+      name: 'MAPA',
+      projectDefinition: null,
+      projectType: 'SI',
+      splitterTopology: 'SINGLE',
+      splitterTopologySource: 'AUTO',
+      splitterCount: 1,
+      gpkgFileName: 'mapa.gpkg',
+      baseFolder: join(dir, 'photos', 'MAPA'),
+      addresses: [],
+      dacToAddressCableCount: 0,
+      adssToAddressCableCount: 0,
+      checklistNodes: [],
+    });
+
+    const noteResponse = await app.inject({
+      method: 'POST',
+      url: `/api/projects/${project.id}/map/notes`,
+      headers: { 'content-type': 'application/json' },
+      payload: JSON.stringify({
+        targetType: 'free',
+        targetLabel: 'Notatka mapy',
+        body: 'Niedroznosc przy studni',
+        lat: 51.45,
+        lng: 21.15,
+      }),
+    });
+    const noteId = noteResponse.json().notes[0].id as string;
+    const boundary = '----photo-local-map-note-photo-test';
+    const png = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=',
+      'base64',
+    );
+    const payload = Buffer.concat([
+      Buffer.from(
+        `--${boundary}\r\nContent-Disposition: form-data; name="photo"; filename="niedroznosc.png"\r\nContent-Type: image/png\r\n\r\n`,
+      ),
+      png,
+      Buffer.from(`\r\n--${boundary}--\r\n`),
+    ]);
+    const photoResponse = await app.inject({
+      method: 'POST',
+      url: `/api/projects/${project.id}/map/notes/${noteId}/photos`,
+      headers: { 'content-type': `multipart/form-data; boundary=${boundary}` },
+      payload,
+    });
+    const mapResponse = await app.inject({ method: 'GET', url: `/api/projects/${project.id}/map` });
+    await app.close();
+
+    expect(noteResponse.statusCode).toBe(200);
+    expect(photoResponse.statusCode).toBe(200);
+    expect(photoResponse.json()).toMatchObject({ storedFileName: 'NOTATKA_MAPY_foto1.jpeg' });
+    expect(existsSync(photoResponse.json().storagePath)).toBe(true);
+    expect(mapResponse.json().notes[0]).toMatchObject({
+      id: noteId,
+      body: 'Niedroznosc przy studni',
+      photoCount: 1,
+    });
+  });
+
   it('stores an uploaded photo against a checklist node', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'photo-local-upload-'));
     process.env.PHOTO_LOCAL_DB = join(dir, 'test.sqlite');

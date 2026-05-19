@@ -11,6 +11,10 @@ describe('map styling', () => {
       color: '#2563eb',
       dashArray: '8 6',
     });
+    expect(getCableLineStyle('PENDING', 'existing_duct')).toMatchObject({
+      color: '#0f766e',
+      dashArray: '10 4 2 4',
+    });
     expect(getCableLineStyle('DUCT_READY', 'underground')).toMatchObject({
       color: '#ca8a04',
       dashArray: undefined,

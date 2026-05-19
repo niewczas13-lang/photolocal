@@ -34,6 +34,7 @@ import { loadConfig } from '../config.js';
 import type {
   ChecklistNodeType,
   MapCableStatus,
+  MapNoteTargetType,
   MapInfraNodeInput,
   MapNodeStatus,
   MapPolygonInput,
@@ -43,6 +44,7 @@ import type {
 } from '../types.js';
 import { isReserveLocation, processPhoto, resolvePhotoTarget, type ReserveLocation } from '../photos/photo-processor.js';
 import { runProjectOperation } from '../utils/project-operation-queue.js';
+import { safeFolderName } from '../utils/path-names.js';
 
 interface PreparedChecklistFromGpkg {
   projectDefinition: string | null;
@@ -148,6 +150,21 @@ function isMapCableStatus(value: unknown): value is MapCableStatus {
 
 function isMapNodeStatus(value: unknown): value is MapNodeStatus {
   return value === 'PENDING' || value === 'WELDED';
+}
+
+function isMapNoteTargetType(value: unknown): value is MapNoteTargetType {
+  return (
+    value === 'cable' ||
+    value === 'node' ||
+    value === 'address' ||
+    value === 'polygon' ||
+    value === 'free'
+  );
+}
+
+function toNullableFiniteNumber(value: unknown): number | null {
+  const numberValue = Number(value);
+  return Number.isFinite(numberValue) ? numberValue : null;
 }
 
 export async function registerProjectRoutes(app: FastifyInstance, db: Database.Database): Promise<void> {
@@ -464,6 +481,131 @@ export async function registerProjectRoutes(app: FastifyInstance, db: Database.D
     } catch (error) {
       return reply.status(404).send({ error: error instanceof Error ? error.message : 'Map node not found' });
     }
+  });
+
+  app.post('/api/projects/:projectId/map/notes', async (request, reply) => {
+    const { projectId } = request.params as { projectId: string };
+    const body = request.body as {
+      targetType?: unknown;
+      targetId?: unknown;
+      targetLabel?: unknown;
+      body?: unknown;
+      lat?: unknown;
+      lng?: unknown;
+    };
+    const project = repository.getProject(projectId);
+
+    if (!project) return reply.status(404).send({ error: 'Project not found' });
+    if (!isMapNoteTargetType(body.targetType)) return reply.status(400).send({ error: 'Invalid note target type' });
+    if (typeof body.body !== 'string' || body.body.trim() === '') {
+      return reply.status(400).send({ error: 'Map note body is required' });
+    }
+
+    try {
+      repository.addMapNote({
+        projectId,
+        targetType: body.targetType,
+        targetId: typeof body.targetId === 'string' && body.targetId.trim() ? body.targetId.trim() : null,
+        targetLabel: typeof body.targetLabel === 'string' && body.targetLabel.trim() ? body.targetLabel.trim() : null,
+        body: body.body,
+        lat: toNullableFiniteNumber(body.lat),
+        lng: toNullableFiniteNumber(body.lng),
+      });
+      return repository.getProjectMap(projectId);
+    } catch (error) {
+      return reply.status(400).send({ error: error instanceof Error ? error.message : 'Failed to create map note' });
+    }
+  });
+
+  app.patch('/api/projects/:projectId/map/notes/:noteId', async (request, reply) => {
+    const { projectId, noteId } = request.params as { projectId: string; noteId: string };
+    const body = request.body as { body?: unknown; lat?: unknown; lng?: unknown };
+    const project = repository.getProject(projectId);
+
+    if (!project) return reply.status(404).send({ error: 'Project not found' });
+    if (typeof body.body !== 'string' || body.body.trim() === '') {
+      return reply.status(400).send({ error: 'Map note body is required' });
+    }
+
+    try {
+      repository.updateMapNote(projectId, noteId, {
+        body: body.body,
+        lat: toNullableFiniteNumber(body.lat),
+        lng: toNullableFiniteNumber(body.lng),
+      });
+      return repository.getProjectMap(projectId);
+    } catch (error) {
+      return reply.status(404).send({ error: error instanceof Error ? error.message : 'Map note not found' });
+    }
+  });
+
+  app.delete('/api/projects/:projectId/map/notes/:noteId', async (request, reply) => {
+    const { projectId, noteId } = request.params as { projectId: string; noteId: string };
+    const project = repository.getProject(projectId);
+
+    if (!project) return reply.status(404).send({ error: 'Project not found' });
+
+    try {
+      repository.deleteMapNote(projectId, noteId);
+      return repository.getProjectMap(projectId);
+    } catch (error) {
+      return reply.status(404).send({ error: error instanceof Error ? error.message : 'Map note not found' });
+    }
+  });
+
+  app.post('/api/projects/:projectId/map/notes/:noteId/photos', async (request, reply) => {
+    const { projectId, noteId } = request.params as { projectId: string; noteId: string };
+    const project = repository.getProject(projectId);
+    const note = repository.getMapNote(projectId, noteId);
+
+    if (!project || !note) return reply.status(404).send({ error: 'Project or map note not found' });
+
+    let sourceFileName: string | null = null;
+    let sourceBuffer: Buffer | null = null;
+
+    for await (const part of request.parts()) {
+      if (part.type === 'file') {
+        sourceFileName = part.filename;
+        sourceBuffer = await part.toBuffer();
+      }
+    }
+
+    if (!sourceFileName || !sourceBuffer) return reply.status(400).send({ error: 'No photo uploaded' });
+
+    const photoId = randomUUID();
+    const processed = await processPhoto(sourceBuffer);
+    const noteFolderName = safeFolderName(note.targetLabel || note.body.slice(0, 40) || 'Notatka mapy');
+    const relativeFolder = `Notatki_mapy/${noteFolderName}_${note.id.slice(0, 8)}/Zdjecia`;
+    const storedFileName = `${noteFolderName}_foto${note.photoCount + 1}.jpeg`;
+    const storagePath = join(project.baseFolder, relativeFolder, storedFileName);
+    const thumbnailPath = join(project.baseFolder, '.thumbnails', `${photoId}.webp`);
+
+    await mkdir(dirname(storagePath), { recursive: true });
+    await mkdir(dirname(thumbnailPath), { recursive: true });
+    await writeFile(storagePath, processed.buffer);
+    await writeFile(thumbnailPath, processed.thumbnail);
+
+    repository.addMapNotePhoto({
+      id: photoId,
+      projectId,
+      noteId,
+      sourceFileName,
+      storedFileName,
+      storagePath,
+      thumbnailPath,
+      mimeType: processed.mimeType,
+      fileSize: processed.fileSize,
+      lat: processed.lat,
+      lng: processed.lng,
+      capturedAt: processed.capturedAt,
+    });
+
+    return {
+      id: photoId,
+      storedFileName,
+      storagePath,
+      thumbnailPath,
+    };
   });
 
   app.post('/api/projects/:projectId/checklist/nodes', async (request, reply) => {

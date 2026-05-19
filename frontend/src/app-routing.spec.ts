@@ -19,6 +19,11 @@ describe('app routing', () => {
       projectId: 'project-1',
       view: 'tasks',
     });
+    expect(parseRouteFromHash('#/mapa/projects/project-1/notes')).toEqual({
+      mode: 'map',
+      projectId: 'project-1',
+      view: 'notes',
+    });
   });
 
   it('keeps PhotoLocal project tabs photo-only when a stale map hash is opened', () => {
@@ -39,6 +44,7 @@ describe('app routing', () => {
     expect(photoProjectRoute('project-1', 'review')).toBe('/projects/project-1/review');
     expect(mapProjectRoute('project-1')).toBe('/mapa/projects/project-1');
     expect(mapProjectRoute('project-1', 'tasks')).toBe('/mapa/projects/project-1/tasks');
+    expect(mapProjectRoute('project-1', 'notes')).toBe('/mapa/projects/project-1/notes');
     expect(mapProjectRoute(null)).toBe('/mapa');
   });
 });

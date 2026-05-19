@@ -60,7 +60,7 @@ export default function App() {
             <h1 className="text-xl font-bold tracking-tight">BOT ROMAN</h1>
             {selectedProject && (
               <span className="text-sm text-muted-foreground">
-                {isMapMode ? (mapView === 'tasks' ? 'Lista zadan' : 'Mapa + zadania') : 'Zdjecia'}
+                {isMapMode ? (mapView === 'tasks' ? 'Lista zadan' : mapView === 'notes' ? 'Notatki' : 'Mapa + zadania') : 'Zdjecia'}
               </span>
             )}
           </div>

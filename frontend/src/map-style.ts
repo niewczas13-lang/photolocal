@@ -24,17 +24,24 @@ export function getCableLineStyle(
   routingType: ProjectMapCableRoutingType,
 ): CableLineStyle {
   const isAerial = routingType === 'aerial';
-  const dashArray = isAerial ? '8 6' : undefined;
+  const isExistingDuct = routingType === 'existing_duct';
+  const dashArray = isAerial ? '8 6' : isExistingDuct ? '10 4 2 4' : undefined;
+  const weight = isAerial ? 4 : 5;
 
   if (status === 'DUCT_READY') {
-    return { color: '#ca8a04', dashArray, opacity: 0.9, weight: isAerial ? 4 : 5 };
+    return { color: '#ca8a04', dashArray, opacity: 0.9, weight };
   }
 
   if (status === 'PULLED' || status === 'WELDED' || status === 'SUSPENDED') {
-    return { color: '#15803d', dashArray, opacity: 0.92, weight: isAerial ? 4 : 5 };
+    return { color: '#15803d', dashArray, opacity: 0.92, weight };
   }
 
-  return { color: isAerial ? '#2563eb' : '#b45309', dashArray, opacity: 0.9, weight: isAerial ? 4 : 5 };
+  return {
+    color: isAerial ? '#2563eb' : isExistingDuct ? '#0f766e' : '#b45309',
+    dashArray,
+    opacity: 0.9,
+    weight,
+  };
 }
 
 export function isCableReady(status: ProjectMapCableStatus): boolean {

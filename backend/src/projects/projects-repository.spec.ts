@@ -723,6 +723,81 @@ describe('ProjectsRepository', () => {
     });
   });
 
+  it('stores map notes with optional targets and note photos', () => {
+    const { db, repository } = createRepository();
+
+    const project = repository.createProject({
+      name: 'NOTATKI',
+      projectDefinition: null,
+      projectType: 'SI',
+      splitterTopology: 'SINGLE',
+      splitterTopologySource: 'AUTO',
+      splitterCount: 1,
+      gpkgFileName: 'notatki.gpkg',
+      baseFolder: 'C:/photos/NOTATKI',
+      addresses: [],
+      dacToAddressCableCount: 0,
+      adssToAddressCableCount: 0,
+      checklistNodes: [],
+      trunkCables: [
+        {
+          cableType: 'MI-MKF 48J',
+          fromNode: 'ZS0001',
+          toNode: 'OSD0001',
+          osdName: 'OSD0001',
+          geojson: { type: 'LineString', coordinates: [[21.1, 51.4], [21.2, 51.5]] },
+          rawName: 'TK-1',
+          routingType: 'existing_duct',
+        },
+      ],
+    });
+    const cableId = repository.getProjectMap(project.id).trunkCables[0].id;
+
+    const note = repository.addMapNote({
+      projectId: project.id,
+      targetType: 'cable',
+      targetId: cableId,
+      targetLabel: 'TK-1',
+      body: 'Niedroznosc w studni',
+      lat: 51.45,
+      lng: 21.15,
+    });
+    repository.addMapNotePhoto({
+      id: 'note-photo-1',
+      projectId: project.id,
+      noteId: note.id,
+      sourceFileName: 'notatka.jpg',
+      storedFileName: 'notatka-001.jpg',
+      storagePath: 'C:/photos/NOTATKI/Notatki_mapy/TK-1/Zdjecia/notatka-001.jpg',
+      thumbnailPath: null,
+      mimeType: 'image/jpeg',
+      fileSize: 123,
+      lat: null,
+      lng: null,
+      capturedAt: null,
+    });
+
+    const map = repository.getProjectMap(project.id);
+    db.close();
+
+    expect(map.trunkCables[0]).toMatchObject({ routingType: 'existing_duct' });
+    expect(map.notes).toHaveLength(1);
+    expect(map.notes[0]).toMatchObject({
+      id: note.id,
+      targetType: 'cable',
+      targetId: cableId,
+      targetLabel: 'TK-1',
+      body: 'Niedroznosc w studni',
+      lat: 51.45,
+      lng: 21.15,
+      photoCount: 1,
+    });
+    expect(map.notes[0].photos[0]).toMatchObject({
+      sourceFileName: 'notatka.jpg',
+      storedFileName: 'notatka-001.jpg',
+    });
+  });
+
   it('keeps different trunk cables between the same map nodes', () => {
     const { db, repository } = createRepository();
 

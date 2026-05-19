@@ -283,6 +283,59 @@ describe('GPKG extractor helpers', () => {
     });
   });
 
+  it('marks cables in existing ducts as a distinct map route type', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'photo-local-gpkg-existing-duct-map-'));
+    const gpkgPath = join(dir, 'sample.gpkg');
+    const db = new Database(gpkgPath);
+
+    db.exec(`
+      CREATE TABLE PA (
+        id_posesja_opl TEXT,
+        nazwa_miejsc TEXT,
+        nazwa_ul TEXT,
+        nr_domu TEXT,
+        nr_dzialki TEXT,
+        geom BLOB
+      );
+      CREATE TABLE "Kable Swiatlowodowe" (
+        model_kabla TEXT,
+        typ_elementu TEXT,
+        od TEXT,
+        do TEXT,
+        odcinek_kabla TEXT,
+        geom BLOB
+      );
+    `);
+
+    db.prepare('INSERT INTO PA VALUES (?, ?, ?, ?, ?, ?)').run(
+      'pa-1',
+      'Radom',
+      'Testowa',
+      '1',
+      null,
+      pointGeometry(574000, 424000),
+    );
+    db.prepare('INSERT INTO "Kable Swiatlowodowe" VALUES (?, ?, ?, ?, ?, ?)').run(
+      'MI-MKF 12J G.652D',
+      'Kabel w kanalizacji',
+      'RADOM/ZS00001',
+      'RADOM/OPP0001',
+      'OKH-ISTN-KAN/001',
+      lineGeometry([
+        [574000, 424000],
+        [574100, 424100],
+      ]),
+    );
+    db.close();
+
+    const result = extractGpkg(gpkgPath);
+
+    expect(result.trunkCables[0]).toMatchObject({
+      rawName: 'OKH-ISTN-KAN/001',
+      routingType: 'existing_duct',
+    });
+  });
+
   it('keeps map areas distinct when two localities use the same OPP number', () => {
     const dir = mkdtempSync(join(tmpdir(), 'photo-local-gpkg-duplicate-opp-map-'));
     const gpkgPath = join(dir, 'sample.gpkg');

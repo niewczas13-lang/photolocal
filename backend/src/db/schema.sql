@@ -85,7 +85,7 @@ CREATE TABLE IF NOT EXISTS map_trunk_cables (
   project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
   cable_key TEXT NOT NULL,
   cable_type TEXT NOT NULL,
-  route_type TEXT NOT NULL DEFAULT 'underground' CHECK (route_type IN ('underground', 'aerial')),
+  route_type TEXT NOT NULL DEFAULT 'underground' CHECK (route_type IN ('underground', 'aerial', 'existing_duct')),
   from_node TEXT NOT NULL,
   to_node TEXT NOT NULL,
   osd_name TEXT NOT NULL,
@@ -105,6 +105,35 @@ CREATE TABLE IF NOT EXISTS map_infra_nodes (
   lng REAL NOT NULL,
   status TEXT NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'WELDED')),
   UNIQUE(project_id, node_type, name)
+);
+
+CREATE TABLE IF NOT EXISTS map_notes (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  target_type TEXT NOT NULL CHECK (target_type IN ('cable', 'node', 'address', 'polygon', 'free')),
+  target_id TEXT,
+  target_label TEXT,
+  body TEXT NOT NULL DEFAULT '',
+  lat REAL,
+  lng REAL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS map_note_photos (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  note_id TEXT NOT NULL REFERENCES map_notes(id) ON DELETE CASCADE,
+  source_file_name TEXT NOT NULL,
+  stored_file_name TEXT NOT NULL,
+  storage_path TEXT NOT NULL,
+  thumbnail_path TEXT,
+  mime_type TEXT NOT NULL DEFAULT 'image/jpeg',
+  file_size INTEGER,
+  lat REAL,
+  lng REAL,
+  captured_at TEXT,
+  uploaded_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS chat_photo_batches (
@@ -166,6 +195,8 @@ CREATE INDEX IF NOT EXISTS idx_photos_checklist_node_id ON photos(checklist_node
 CREATE INDEX IF NOT EXISTS idx_map_polygons_project_id ON map_polygons(project_id);
 CREATE INDEX IF NOT EXISTS idx_map_trunk_cables_project_id ON map_trunk_cables(project_id);
 CREATE INDEX IF NOT EXISTS idx_map_infra_nodes_project_id ON map_infra_nodes(project_id);
+CREATE INDEX IF NOT EXISTS idx_map_notes_project_id ON map_notes(project_id);
+CREATE INDEX IF NOT EXISTS idx_map_note_photos_note_id ON map_note_photos(note_id);
 CREATE INDEX IF NOT EXISTS idx_chat_photo_batches_project_id ON chat_photo_batches(project_id);
 CREATE INDEX IF NOT EXISTS idx_chat_photo_batches_status ON chat_photo_batches(status);
 CREATE INDEX IF NOT EXISTS idx_chat_photo_files_batch_id ON chat_photo_files(batch_id);

@@ -1,10 +1,25 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import L, { type LatLngExpression, type PathOptions } from 'leaflet';
-import { GeoJSON, MapContainer, Marker, Polyline, Popup, TileLayer, useMap } from 'react-leaflet';
-import { Cable, Circle, Home, ListChecks, Map, RefreshCw, Triangle } from 'lucide-react';
+import { GeoJSON, MapContainer, Marker, Polyline, Popup, TileLayer, useMap, useMapEvents } from 'react-leaflet';
+import {
+  Cable,
+  Circle,
+  Home,
+  ImagePlus,
+  ListChecks,
+  Map,
+  MessageSquarePlus,
+  RefreshCw,
+  Save,
+  StickyNote,
+  Trash2,
+  Triangle,
+  X,
+} from 'lucide-react';
 import type { Feature, GeoJsonObject, Geometry } from 'geojson';
 
 import { api } from '../api';
+import type { MapView } from '../app-routing';
 import { cn } from '../lib/utils';
 import {
   getCableStatusActions,
@@ -25,18 +40,30 @@ import type {
   ProjectMapCableStatus,
   ProjectMapData,
   ProjectMapInfraNode,
+  ProjectMapNote,
+  ProjectMapNoteTargetType,
   ProjectMapNodeStatus,
   ProjectMapPolygon,
 } from '../types';
 import { MapStatusActionButton } from './MapStatusControls';
+import ProjectMapNotes from './ProjectMapNotes';
 import ProjectMapTasks from './ProjectMapTasks';
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
 
 interface ProjectMapProps {
   projectId: string;
-  view: 'map' | 'tasks';
-  onViewChange: (view: 'map' | 'tasks') => void;
+  view: MapView;
+  onViewChange: (view: MapView) => void;
+}
+
+interface CreateMapNoteInput {
+  targetType: ProjectMapNoteTargetType;
+  targetId: string | null;
+  targetLabel: string | null;
+  body: string;
+  lat: number | null;
+  lng: number | null;
 }
 
 function getErrorMessage(error: unknown): string {
@@ -112,6 +139,60 @@ function markerIcon(kind: 'address' | 'OSD' | 'OPP' | 'ZS', tone: MarkerTone): L
   });
 }
 
+function noteMarkerIcon(): L.DivIcon {
+  return L.divIcon({
+    className: 'project-map-note-marker',
+    html: '<span class="project-map-note-marker__pin"></span>',
+    iconSize: [24, 24],
+    iconAnchor: [12, 22],
+    popupAnchor: [0, -20],
+  });
+}
+
+function cableRouteLabel(routingType: ProjectMapCable['routingType']): string {
+  if (routingType === 'aerial') return 'napowietrzny';
+  if (routingType === 'existing_duct') return 'istniejaca kanalizacja';
+  return 'doziemny';
+}
+
+function asLatLngPoint(position: LatLngExpression): { lat: number; lng: number } | null {
+  if (Array.isArray(position)) {
+    const [lat, lng] = position;
+    return Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null;
+  }
+
+  const point = position as { lat?: unknown; lng?: unknown };
+  return typeof point.lat === 'number' && typeof point.lng === 'number'
+    ? { lat: point.lat, lng: point.lng }
+    : null;
+}
+
+function averagePosition(positions: LatLngExpression[]): { lat: number; lng: number } | null {
+  const points = positions.map(asLatLngPoint).filter(Boolean) as Array<{ lat: number; lng: number }>;
+  if (points.length === 0) return null;
+  const total = points.reduce(
+    (sum, point) => ({ lat: sum.lat + point.lat, lng: sum.lng + point.lng }),
+    { lat: 0, lng: 0 },
+  );
+  return { lat: total.lat / points.length, lng: total.lng / points.length };
+}
+
+function cableNotePosition(cable: ProjectMapCable): { lat: number; lng: number } | null {
+  return averagePosition(linePositions(cable).flat());
+}
+
+function polygonNotePosition(polygon: ProjectMapPolygon): { lat: number; lng: number } | null {
+  return averagePosition(collectGeometryPositions(polygon.geojson));
+}
+
+function notesForTarget(
+  notes: ProjectMapNote[],
+  targetType: ProjectMapNoteTargetType,
+  targetId: string,
+): ProjectMapNote[] {
+  return notes.filter((note) => note.targetType === targetType && note.targetId === targetId);
+}
+
 function FitBounds({ positions }: { positions: LatLngExpression[] }) {
   const map = useMap();
   const key = useMemo(() => JSON.stringify(positions), [positions]);
@@ -138,23 +219,226 @@ function polygonStyle(polygon: ProjectMapPolygon): PathOptions {
   };
 }
 
+function MapNotePhotoInput({
+  noteId,
+  disabled,
+  onUpload,
+}: {
+  noteId: string;
+  disabled: boolean;
+  onUpload: (noteId: string, file: File) => void;
+}) {
+  return (
+    <label className={`project-map-note-upload ${disabled ? 'project-map-note-upload--disabled' : ''}`}>
+      <ImagePlus size={14} />
+      Zdjecie
+      <input
+        type="file"
+        accept="image/*"
+        disabled={disabled}
+        onChange={(event) => {
+          const file = event.currentTarget.files?.[0];
+          if (file) onUpload(noteId, file);
+          event.currentTarget.value = '';
+        }}
+      />
+    </label>
+  );
+}
+
+function MapNoteForm({
+  label,
+  initialBody = '',
+  onSave,
+  onCancel,
+  busy,
+}: {
+  label: string;
+  initialBody?: string;
+  onSave: (body: string) => void;
+  onCancel?: () => void;
+  busy: boolean;
+}) {
+  const [body, setBody] = useState(initialBody);
+
+  useEffect(() => {
+    setBody(initialBody);
+  }, [initialBody]);
+
+  return (
+    <div className="project-map-note-form">
+      <div className="project-map-note-form__label">{label}</div>
+      <textarea
+        className="project-map-note-textarea"
+        value={body}
+        rows={3}
+        placeholder="Wpisz notatke..."
+        onChange={(event) => setBody(event.target.value)}
+      />
+      <div className="project-map-note-form__actions">
+        <Button type="button" size="sm" onClick={() => onSave(body)} disabled={busy || body.trim() === ''}>
+          <Save size={14} />
+          Zapisz
+        </Button>
+        {onCancel && (
+          <Button type="button" size="sm" variant="outline" onClick={onCancel} disabled={busy}>
+            <X size={14} />
+            Anuluj
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function MapNotePopup({
+  note,
+  busy,
+  onUpdate,
+  onDelete,
+  onUpload,
+}: {
+  note: ProjectMapNote;
+  busy: boolean;
+  onUpdate: (noteId: string, body: string, lat: number | null, lng: number | null) => void;
+  onDelete: (noteId: string) => void;
+  onUpload: (noteId: string, file: File) => void;
+}) {
+  const [body, setBody] = useState(note.body);
+
+  useEffect(() => {
+    setBody(note.body);
+  }, [note.body]);
+
+  return (
+    <div className="project-map-popup project-map-note-popup">
+      <div className="project-map-popup__title">{note.targetLabel ?? 'Notatka mapy'}</div>
+      <textarea
+        className="project-map-note-textarea"
+        value={body}
+        rows={4}
+        onChange={(event) => setBody(event.target.value)}
+      />
+      {note.photos.length > 0 && (
+        <div className="project-map-note-photos">
+          {note.photos.map((photo) => (
+            <span key={photo.id}>{photo.storedFileName}</span>
+          ))}
+        </div>
+      )}
+      <div className="project-map-note-actions">
+        <Button
+          type="button"
+          size="sm"
+          onClick={() => onUpdate(note.id, body, note.lat, note.lng)}
+          disabled={busy || body.trim() === ''}
+        >
+          <Save size={14} />
+          Zapisz
+        </Button>
+        <MapNotePhotoInput noteId={note.id} disabled={busy} onUpload={onUpload} />
+        <Button type="button" size="sm" variant="outline" onClick={() => onDelete(note.id)} disabled={busy}>
+          <Trash2 size={14} />
+          Usun
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function MapNoteTargetPanel({
+  notes,
+  targetLabel,
+  onCreate,
+  busy,
+}: {
+  notes: ProjectMapNote[];
+  targetLabel: string;
+  onCreate: (body: string) => void;
+  busy: boolean;
+}) {
+  return (
+    <div className="project-map-target-notes">
+      {notes.length > 0 && (
+        <div className="project-map-target-notes__list">
+          {notes.map((note) => (
+            <div key={note.id} className="project-map-target-notes__item">
+              <StickyNote size={13} />
+              <span>{note.body}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      <MapNoteForm label={`Notatka: ${targetLabel}`} onSave={onCreate} busy={busy} />
+    </div>
+  );
+}
+
+function MapClickNoteCreator({
+  enabled,
+  onPick,
+}: {
+  enabled: boolean;
+  onPick: (lat: number, lng: number) => void;
+}) {
+  useMapEvents({
+    click(event) {
+      if (!enabled) return;
+      onPick(event.latlng.lat, event.latlng.lng);
+    },
+  });
+
+  return null;
+}
+
+function DraftNoteMarker({
+  position,
+  busy,
+  onSave,
+  onCancel,
+}: {
+  position: { lat: number; lng: number };
+  busy: boolean;
+  onSave: (body: string) => void;
+  onCancel: () => void;
+}) {
+  const markerRef = useRef<L.Marker | null>(null);
+
+  useEffect(() => {
+    markerRef.current?.openPopup();
+  }, [position.lat, position.lng]);
+
+  return (
+    <Marker ref={markerRef} position={[position.lat, position.lng]} icon={noteMarkerIcon()}>
+      <Popup closeOnClick={false}>
+        <MapNoteForm label="Nowa notatka mapy" onSave={onSave} onCancel={onCancel} busy={busy} />
+      </Popup>
+    </Marker>
+  );
+}
+
 function CablePopup({
   cable,
+  notes,
   onStatusChange,
+  onCreateNote,
   busy,
 }: {
   cable: ProjectMapCable;
+  notes: ProjectMapNote[];
   onStatusChange: (cableId: string, status: ProjectMapCableStatus) => void;
+  onCreateNote: (input: CreateMapNoteInput) => void;
   busy: boolean;
 }) {
-  const isAerial = cable.routingType === 'aerial';
   const actions = getCableStatusActions({ status: cable.status, routingType: cable.routingType });
+  const label = cable.rawName ?? `${cable.fromNode} - ${cable.toNode}`;
+  const notePosition = cableNotePosition(cable);
 
   return (
     <div className="project-map-popup">
-      <div className="project-map-popup__title">{cable.rawName ?? `${cable.fromNode} - ${cable.toNode}`}</div>
+      <div className="project-map-popup__title">{label}</div>
       <div className="project-map-popup__meta">
-        {cable.cableType} · {isAerial ? 'napowietrzny' : 'doziemny'}
+        {cable.cableType} · {cableRouteLabel(cable.routingType)}
       </div>
       <div className="project-map-popup__status-row">
         <Badge variant="outline">{STATUS_LABELS[cable.status]}</Badge>
@@ -169,24 +453,44 @@ function CablePopup({
           />
         ))}
       </div>
+      <MapNoteTargetPanel
+        notes={notes}
+        targetLabel={label}
+        busy={busy}
+        onCreate={(body) =>
+          onCreateNote({
+            targetType: 'cable',
+            targetId: cable.id,
+            targetLabel: label,
+            body,
+            lat: notePosition?.lat ?? null,
+            lng: notePosition?.lng ?? null,
+          })
+        }
+      />
     </div>
   );
 }
 
 function NodePopup({
   node,
+  notes,
   onStatusChange,
+  onCreateNote,
   busy,
 }: {
   node: ProjectMapInfraNode;
+  notes: ProjectMapNote[];
   onStatusChange: (nodeId: string, status: ProjectMapNodeStatus) => void;
+  onCreateNote: (input: CreateMapNoteInput) => void;
   busy: boolean;
 }) {
   const actions = getNodeStatusActions(node.status);
+  const label = node.label ?? node.name;
 
   return (
     <div className="project-map-popup">
-      <div className="project-map-popup__title">{node.label ?? node.name}</div>
+      <div className="project-map-popup__title">{label}</div>
       <div className="project-map-popup__meta">{node.nodeType}</div>
       <div className="project-map-popup__status-row">
         <Badge variant={node.status === 'WELDED' || node.hasPhoto ? 'default' : 'outline'}>
@@ -203,11 +507,36 @@ function NodePopup({
           />
         ))}
       </div>
+      <MapNoteTargetPanel
+        notes={notes}
+        targetLabel={label}
+        busy={busy}
+        onCreate={(body) =>
+          onCreateNote({
+            targetType: 'node',
+            targetId: node.id,
+            targetLabel: label,
+            body,
+            lat: node.lat,
+            lng: node.lng,
+          })
+        }
+      />
     </div>
   );
 }
 
-function AddressPopup({ address }: { address: ProjectMapAddress }) {
+function AddressPopup({
+  address,
+  notes,
+  onCreateNote,
+  busy,
+}: {
+  address: ProjectMapAddress;
+  notes: ProjectMapNote[];
+  onCreateNote: (input: CreateMapNoteInput) => void;
+  busy: boolean;
+}) {
   return (
     <div className="project-map-popup">
       <div className="project-map-popup__title">{address.label}</div>
@@ -215,6 +544,21 @@ function AddressPopup({ address }: { address: ProjectMapAddress }) {
       <Badge variant={address.hasReservePhoto ? 'default' : 'outline'}>
         {address.hasReservePhoto ? 'Zapas ze zdjeciem' : 'Brak zdjecia zapasu'}
       </Badge>
+      <MapNoteTargetPanel
+        notes={notes}
+        targetLabel={address.label}
+        busy={busy}
+        onCreate={(body) =>
+          onCreateNote({
+            targetType: 'address',
+            targetId: address.id,
+            targetLabel: address.label,
+            body,
+            lat: address.lat,
+            lng: address.lng,
+          })
+        }
+      />
     </div>
   );
 }
@@ -224,6 +568,8 @@ export default function ProjectMap({ projectId, view, onViewChange }: ProjectMap
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [addingFreeNote, setAddingFreeNote] = useState(false);
+  const [draftNotePosition, setDraftNotePosition] = useState<{ lat: number; lng: number } | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -265,6 +611,57 @@ export default function ProjectMap({ projectId, view, onViewChange }: ProjectMap
     }
   };
 
+  const createMapNote = async (input: CreateMapNoteInput) => {
+    setBusyId('note');
+    setError(null);
+    try {
+      setData(await api.createMapNote(projectId, input));
+      return true;
+    } catch (err) {
+      setError(getErrorMessage(err));
+      return false;
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const updateMapNote = async (noteId: string, body: string, lat: number | null, lng: number | null) => {
+    setBusyId(noteId);
+    setError(null);
+    try {
+      setData(await api.updateMapNote(projectId, noteId, { body, lat, lng }));
+    } catch (err) {
+      setError(getErrorMessage(err));
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const deleteMapNote = async (noteId: string) => {
+    setBusyId(noteId);
+    setError(null);
+    try {
+      setData(await api.deleteMapNote(projectId, noteId));
+    } catch (err) {
+      setError(getErrorMessage(err));
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const uploadMapNotePhoto = async (noteId: string, file: File) => {
+    setBusyId(noteId);
+    setError(null);
+    try {
+      await api.uploadMapNotePhoto(projectId, noteId, file);
+      setData(await api.getProjectMap(projectId));
+    } catch (err) {
+      setError(getErrorMessage(err));
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   const boundsPositions = useMemo(() => {
     if (!data) return [];
     return [
@@ -276,7 +673,17 @@ export default function ProjectMap({ projectId, view, onViewChange }: ProjectMap
   }, [data]);
 
   const totals = useMemo(() => {
-    if (!data) return { addressesReady: 0, addressesTotal: 0, cablesReady: 0, cablesTotal: 0, nodesReady: 0, nodesTotal: 0 };
+    if (!data) {
+      return {
+        addressesReady: 0,
+        addressesTotal: 0,
+        cablesReady: 0,
+        cablesTotal: 0,
+        nodesReady: 0,
+        nodesTotal: 0,
+        notesTotal: 0,
+      };
+    }
     return {
       addressesReady: data.addresses.filter((address) => address.hasReservePhoto).length,
       addressesTotal: data.addresses.length,
@@ -284,6 +691,7 @@ export default function ProjectMap({ projectId, view, onViewChange }: ProjectMap
       cablesTotal: data.trunkCables.length,
       nodesReady: data.infraNodes.filter((node) => isNodeReady(node.status, node.hasPhoto)).length,
       nodesTotal: data.infraNodes.length,
+      notesTotal: data.notes.length,
     };
   }, [data]);
 
@@ -310,6 +718,7 @@ export default function ProjectMap({ projectId, view, onViewChange }: ProjectMap
           <span><Home size={15} /> Adresy {totals.addressesReady}/{totals.addressesTotal}</span>
           <span><Cable size={15} /> Kable {totals.cablesReady}/{totals.cablesTotal}</span>
           <span><Triangle size={15} /> Punkty {totals.nodesReady}/{totals.nodesTotal}</span>
+          <span><StickyNote size={15} /> Notatki {totals.notesTotal}</span>
         </div>
         <div className="project-map-toolbar__actions">
           <div className="project-map-view-switch" aria-label="Widok mapy">
@@ -333,7 +742,30 @@ export default function ProjectMap({ projectId, view, onViewChange }: ProjectMap
               <ListChecks size={14} />
               Lista zadan
             </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className={cn('project-map-view-switch__button', view === 'notes' && 'project-map-view-switch__button--active')}
+              onClick={() => onViewChange('notes')}
+            >
+              <StickyNote size={14} />
+              Notatki
+            </Button>
           </div>
+          {view === 'map' && (
+            <Button
+              variant={addingFreeNote ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => {
+                setAddingFreeNote((current) => !current);
+                setDraftNotePosition(null);
+              }}
+            >
+              <MessageSquarePlus size={14} className="mr-2" />
+              Dodaj notatke
+            </Button>
+          )}
           <Button variant="outline" size="sm" onClick={() => void refresh()} disabled={loading}>
             <RefreshCw size={14} className="mr-2" />
             Odswiez
@@ -350,33 +782,88 @@ export default function ProjectMap({ projectId, view, onViewChange }: ProjectMap
           onCableStatusChange={updateCableStatus}
           onNodeStatusChange={updateNodeStatus}
         />
+      ) : view === 'notes' ? (
+        <ProjectMapNotes
+          notes={data.notes}
+          busyId={busyId}
+          onUpdateNote={(noteId, body, lat, lng) => void updateMapNote(noteId, body, lat, lng)}
+          onDeleteNote={(noteId) => void deleteMapNote(noteId)}
+          onUploadNotePhoto={(noteId, file) => void uploadMapNotePhoto(noteId, file)}
+        />
       ) : (
         <>
           <div className="project-map-canvas">
+            {addingFreeNote && !draftNotePosition && (
+              <div className="project-map-note-hint">Kliknij miejsce na mapie dla nowej notatki.</div>
+            )}
             <MapContainer center={[52.05, 19.4]} zoom={7} className="project-map-leaflet">
               <TileLayer
                 attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
                 url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
               />
               <FitBounds positions={boundsPositions} />
+              <MapClickNoteCreator
+                enabled={addingFreeNote}
+                onPick={(lat, lng) => setDraftNotePosition({ lat, lng })}
+              />
+              {draftNotePosition && (
+                <DraftNoteMarker
+                  position={draftNotePosition}
+                  busy={busyId === 'note'}
+                  onCancel={() => setDraftNotePosition(null)}
+                  onSave={(body) => {
+                    void createMapNote({
+                      targetType: 'free',
+                      targetId: null,
+                      targetLabel: 'Notatka mapy',
+                      body,
+                      lat: draftNotePosition.lat,
+                      lng: draftNotePosition.lng,
+                    }).then((saved) => {
+                      if (saved) {
+                        setDraftNotePosition(null);
+                        setAddingFreeNote(false);
+                      }
+                    });
+                  }}
+                />
+              )}
 
-              {data.polygons.map((polygon) =>
-                isGeoJsonObject(polygon.geojson) ? (
+              {data.polygons.map((polygon) => {
+                if (!isGeoJsonObject(polygon.geojson)) return null;
+                const label = polygon.label ?? polygon.osdName;
+                const notePosition = polygonNotePosition(polygon);
+                return (
                   <GeoJSON key={polygon.id} data={polygon.geojson} style={() => polygonStyle(polygon)}>
                     <Popup>
                       <div className="project-map-popup">
-                        <div className="project-map-popup__title">{polygon.label ?? polygon.osdName}</div>
+                        <div className="project-map-popup__title">{label}</div>
                         <div className="project-map-popup__meta">
                           Adresy ze zdjeciem: {polygon.addressWithReservePhoto}/{polygon.addressTotal}
                         </div>
                         <div className="project-map-popup__meta">
                           HH: {polygon.households ?? '-'} PA: {polygon.paCount ?? '-'}
                         </div>
+                        <MapNoteTargetPanel
+                          notes={notesForTarget(data.notes, 'polygon', polygon.id)}
+                          targetLabel={label}
+                          busy={busyId === 'note'}
+                          onCreate={(body) =>
+                            void createMapNote({
+                              targetType: 'polygon',
+                              targetId: polygon.id,
+                              targetLabel: label,
+                              body,
+                              lat: notePosition?.lat ?? null,
+                              lng: notePosition?.lng ?? null,
+                            })
+                          }
+                        />
                       </div>
                     </Popup>
                   </GeoJSON>
-                ) : null,
-              )}
+                );
+              })}
 
               {data.trunkCables.map((cable) =>
                 linePositions(cable).map((positions, index) => (
@@ -386,7 +873,13 @@ export default function ProjectMap({ projectId, view, onViewChange }: ProjectMap
                     pathOptions={getCableLineStyle(cable.status, cable.routingType)}
                   >
                     <Popup>
-                      <CablePopup cable={cable} onStatusChange={updateCableStatus} busy={busyId === cable.id} />
+                      <CablePopup
+                        cable={cable}
+                        notes={notesForTarget(data.notes, 'cable', cable.id)}
+                        onStatusChange={updateCableStatus}
+                        onCreateNote={(input) => void createMapNote(input)}
+                        busy={busyId === cable.id || busyId === 'note'}
+                      />
                     </Popup>
                   </Polyline>
                 )),
@@ -399,7 +892,13 @@ export default function ProjectMap({ projectId, view, onViewChange }: ProjectMap
                   icon={markerIcon(node.nodeType, getMarkerTone(node))}
                 >
                   <Popup>
-                    <NodePopup node={node} onStatusChange={updateNodeStatus} busy={busyId === node.id} />
+                    <NodePopup
+                      node={node}
+                      notes={notesForTarget(data.notes, 'node', node.id)}
+                      onStatusChange={updateNodeStatus}
+                      onCreateNote={(input) => void createMapNote(input)}
+                      busy={busyId === node.id || busyId === 'note'}
+                    />
                   </Popup>
                 </Marker>
               ))}
@@ -411,10 +910,31 @@ export default function ProjectMap({ projectId, view, onViewChange }: ProjectMap
                   icon={markerIcon('address', address.hasReservePhoto ? 'done' : 'addressPending')}
                 >
                   <Popup>
-                    <AddressPopup address={address} />
+                    <AddressPopup
+                      address={address}
+                      notes={notesForTarget(data.notes, 'address', address.id)}
+                      onCreateNote={(input) => void createMapNote(input)}
+                      busy={busyId === 'note'}
+                    />
                   </Popup>
                 </Marker>
               ))}
+
+              {data.notes.map((note) =>
+                note.lat == null || note.lng == null ? null : (
+                  <Marker key={`note-${note.id}`} position={[note.lat, note.lng]} icon={noteMarkerIcon()}>
+                    <Popup>
+                      <MapNotePopup
+                        note={note}
+                        busy={busyId === note.id}
+                        onUpdate={(noteId, body, lat, lng) => void updateMapNote(noteId, body, lat, lng)}
+                        onDelete={(noteId) => void deleteMapNote(noteId)}
+                        onUpload={(noteId, file) => void uploadMapNotePhoto(noteId, file)}
+                      />
+                    </Popup>
+                  </Marker>
+                ),
+              )}
             </MapContainer>
           </div>
 
@@ -422,7 +942,7 @@ export default function ProjectMap({ projectId, view, onViewChange }: ProjectMap
             <span><span className="project-map-dot project-map-dot--red" /> adres bez zapasu</span>
             <span><span className="project-map-line project-map-line--underground" /> kabel doziemny</span>
             <span><span className="project-map-line project-map-line--aerial" /> kabel napowietrzny</span>
-            <span><span className="project-map-line project-map-line--duct" /> rurociag</span>
+            <span><span className="project-map-line project-map-line--duct" /> istniejaca kanalizacja</span>
             <span><span className="project-map-line project-map-line--done" /> gotowe</span>
             <span><Triangle size={13} className="project-map-legend-icon project-map-legend-icon--osd" /> OSD</span>
             <span><Circle size={13} className="project-map-legend-icon project-map-legend-icon--opp" /> OPP</span>

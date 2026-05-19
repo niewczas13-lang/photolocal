@@ -7,9 +7,12 @@ import type {
   CableRoutingType,
   MapCableStatus,
   MapInfraNodeInput,
+  MapNoteTargetType,
   MapNodeStatus,
   MapPolygonInput,
   MapTrunkCableInput,
+  ProjectMapNote,
+  ProjectMapNotePhoto,
   ProjectMapRecord,
   ProjectRecord,
   ProjectType,
@@ -33,6 +36,37 @@ export interface AddPhotoInput {
   lng: number | null;
   capturedAt: string | null;
   reserveLocation: string | null;
+}
+
+export interface AddMapNoteInput {
+  projectId: string;
+  targetType: MapNoteTargetType;
+  targetId: string | null;
+  targetLabel: string | null;
+  body: string;
+  lat: number | null;
+  lng: number | null;
+}
+
+export interface UpdateMapNoteInput {
+  body: string;
+  lat?: number | null;
+  lng?: number | null;
+}
+
+export interface AddMapNotePhotoInput {
+  id: string;
+  projectId: string;
+  noteId: string;
+  sourceFileName: string;
+  storedFileName: string;
+  storagePath: string;
+  thumbnailPath: string | null;
+  mimeType: string;
+  fileSize: number;
+  lat: number | null;
+  lng: number | null;
+  capturedAt: string | null;
 }
 
 export interface ChecklistPhotoRecord {
@@ -146,7 +180,13 @@ function getMapCableKey(cable: Pick<MapTrunkCableInput, 'rawName' | 'fromNode' |
 }
 
 function getCableRoutingType(cable: Pick<MapTrunkCableInput, 'routingType' | 'cableType' | 'rawName'>): CableRoutingType {
-  if (cable.routingType === 'aerial' || cable.routingType === 'underground') return cable.routingType;
+  if (
+    cable.routingType === 'aerial' ||
+    cable.routingType === 'underground' ||
+    cable.routingType === 'existing_duct'
+  ) {
+    return cable.routingType;
+  }
   return /ADSS/i.test(`${cable.cableType} ${cable.rawName ?? ''}`) ? 'aerial' : 'underground';
 }
 
@@ -162,6 +202,36 @@ function buildAddressLabel(address: {
 function parseGeojson(value: string): Record<string, unknown> {
   const parsed = JSON.parse(value) as unknown;
   return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : {};
+}
+
+function mapNotePhotoRow(row: {
+  id: string;
+  noteId: string;
+  sourceFileName: string;
+  storedFileName: string;
+  storagePath: string;
+  thumbnailPath: string | null;
+  mimeType: string;
+  fileSize: number | null;
+  lat: number | null;
+  lng: number | null;
+  capturedAt: string | null;
+  uploadedAt: string;
+}): ProjectMapNotePhoto {
+  return {
+    id: row.id,
+    noteId: row.noteId,
+    sourceFileName: row.sourceFileName,
+    storedFileName: row.storedFileName,
+    storagePath: row.storagePath,
+    thumbnailPath: row.thumbnailPath,
+    mimeType: row.mimeType,
+    fileSize: row.fileSize,
+    lat: row.lat == null ? null : Number(row.lat),
+    lng: row.lng == null ? null : Number(row.lng),
+    capturedAt: row.capturedAt,
+    uploadedAt: row.uploadedAt,
+  };
 }
 
 export class ProjectsRepository {
@@ -688,7 +758,7 @@ export class ProjectsRepository {
       };
     });
 
-    return { addresses, polygons, trunkCables, infraNodes };
+    return { addresses, polygons, trunkCables, infraNodes, notes: this.listMapNotes(projectId) };
   }
 
   updateCableStatus(projectId: string, cableId: string, status: MapCableStatus): void {
@@ -705,6 +775,188 @@ export class ProjectsRepository {
       .run(status, projectId, nodeId);
     if (result.changes === 0) throw new Error('Map node not found');
     this.db.prepare(`UPDATE projects SET updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(projectId);
+  }
+
+  listMapNotes(projectId: string): ProjectMapNote[] {
+    const photoRows = this.db
+      .prepare(
+        `SELECT
+          id,
+          note_id AS noteId,
+          source_file_name AS sourceFileName,
+          stored_file_name AS storedFileName,
+          storage_path AS storagePath,
+          thumbnail_path AS thumbnailPath,
+          mime_type AS mimeType,
+          file_size AS fileSize,
+          lat,
+          lng,
+          captured_at AS capturedAt,
+          uploaded_at AS uploadedAt
+        FROM map_note_photos
+        WHERE project_id = ?
+        ORDER BY uploaded_at ASC, id ASC`,
+      )
+      .all(projectId) as Array<{
+      id: string;
+      noteId: string;
+      sourceFileName: string;
+      storedFileName: string;
+      storagePath: string;
+      thumbnailPath: string | null;
+      mimeType: string;
+      fileSize: number | null;
+      lat: number | null;
+      lng: number | null;
+      capturedAt: string | null;
+      uploadedAt: string;
+    }>;
+    const photosByNoteId = new Map<string, ProjectMapNotePhoto[]>();
+    for (const row of photoRows) {
+      const photos = photosByNoteId.get(row.noteId) ?? [];
+      photos.push(mapNotePhotoRow(row));
+      photosByNoteId.set(row.noteId, photos);
+    }
+
+    const noteRows = this.db
+      .prepare(
+        `SELECT
+          id,
+          target_type AS targetType,
+          target_id AS targetId,
+          target_label AS targetLabel,
+          body,
+          lat,
+          lng,
+          created_at AS createdAt,
+          updated_at AS updatedAt
+        FROM map_notes
+        WHERE project_id = ?
+        ORDER BY updated_at DESC, created_at DESC, id ASC`,
+      )
+      .all(projectId) as Array<{
+      id: string;
+      targetType: MapNoteTargetType;
+      targetId: string | null;
+      targetLabel: string | null;
+      body: string;
+      lat: number | null;
+      lng: number | null;
+      createdAt: string;
+      updatedAt: string;
+    }>;
+
+    return noteRows.map((note) => {
+      const photos = photosByNoteId.get(note.id) ?? [];
+      return {
+        id: note.id,
+        targetType: note.targetType,
+        targetId: note.targetId,
+        targetLabel: note.targetLabel,
+        body: note.body,
+        lat: note.lat == null ? null : Number(note.lat),
+        lng: note.lng == null ? null : Number(note.lng),
+        photoCount: photos.length,
+        photos,
+        createdAt: note.createdAt,
+        updatedAt: note.updatedAt,
+      };
+    });
+  }
+
+  getMapNote(projectId: string, noteId: string): ProjectMapNote | null {
+    return this.listMapNotes(projectId).find((note) => note.id === noteId) ?? null;
+  }
+
+  addMapNote(input: AddMapNoteInput): ProjectMapNote {
+    const body = input.body.trim();
+    if (!body) throw new Error('Map note body is required');
+
+    const id = randomUUID();
+    this.db
+      .prepare(
+        `INSERT INTO map_notes (
+          id, project_id, target_type, target_id, target_label, body, lat, lng
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        id,
+        input.projectId,
+        input.targetType,
+        input.targetId,
+        input.targetLabel?.trim() || null,
+        body,
+        input.lat,
+        input.lng,
+      );
+    this.db.prepare(`UPDATE projects SET updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(input.projectId);
+
+    const created = this.getMapNote(input.projectId, id);
+    if (!created) throw new Error(`Created map note ${id} not found`);
+    return created;
+  }
+
+  updateMapNote(projectId: string, noteId: string, input: UpdateMapNoteInput): ProjectMapNote {
+    const body = input.body.trim();
+    if (!body) throw new Error('Map note body is required');
+
+    const result = this.db
+      .prepare(
+        `UPDATE map_notes
+         SET body = ?,
+           lat = COALESCE(?, lat),
+           lng = COALESCE(?, lng),
+           updated_at = CURRENT_TIMESTAMP
+         WHERE project_id = ? AND id = ?`,
+      )
+      .run(body, input.lat ?? null, input.lng ?? null, projectId, noteId);
+    if (result.changes === 0) throw new Error('Map note not found');
+    this.db.prepare(`UPDATE projects SET updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(projectId);
+
+    const updated = this.getMapNote(projectId, noteId);
+    if (!updated) throw new Error(`Updated map note ${noteId} not found`);
+    return updated;
+  }
+
+  deleteMapNote(projectId: string, noteId: string): void {
+    const result = this.db
+      .prepare(`DELETE FROM map_notes WHERE project_id = ? AND id = ?`)
+      .run(projectId, noteId);
+    if (result.changes === 0) throw new Error('Map note not found');
+    this.db.prepare(`UPDATE projects SET updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(projectId);
+  }
+
+  addMapNotePhoto(input: AddMapNotePhotoInput): ProjectMapNotePhoto {
+    const note = this.getMapNote(input.projectId, input.noteId);
+    if (!note) throw new Error('Map note not found');
+
+    this.db
+      .prepare(
+        `INSERT INTO map_note_photos (
+          id, project_id, note_id, source_file_name, stored_file_name,
+          storage_path, thumbnail_path, mime_type, file_size, lat, lng, captured_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        input.id,
+        input.projectId,
+        input.noteId,
+        input.sourceFileName,
+        input.storedFileName,
+        input.storagePath,
+        input.thumbnailPath,
+        input.mimeType,
+        input.fileSize,
+        input.lat,
+        input.lng,
+        input.capturedAt,
+      );
+    this.db.prepare(`UPDATE map_notes SET updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(input.noteId);
+    this.db.prepare(`UPDATE projects SET updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(input.projectId);
+
+    const saved = this.getMapNote(input.projectId, input.noteId)?.photos.find((photo) => photo.id === input.id);
+    if (!saved) throw new Error(`Created map note photo ${input.id} not found`);
+    return saved;
   }
 
   renameProject(projectId: string, newName: string): void {

@@ -161,7 +161,8 @@ function getCableRoutingType(
 ): CableRoutingType {
   const elementType = row.typ_elementu == null ? '' : String(row.typ_elementu);
   if (/Kabel napowietrzny/i.test(elementType)) return 'aerial';
-  if (/Kabel doziemny|Kabel w kanalizacji/i.test(elementType)) return 'underground';
+  if (/Kabel w kanalizacji|kanalizacj|ruroci[aą]g/i.test(elementType)) return 'existing_duct';
+  if (/Kabel doziemny/i.test(elementType)) return 'underground';
   return /ADSS/i.test(`${cableType} ${rawName ?? ''}`) ? 'aerial' : 'underground';
 }
 

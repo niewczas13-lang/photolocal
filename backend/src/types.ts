@@ -4,7 +4,8 @@ export type SplitterTopologySource = 'AUTO' | 'MANUAL';
 export type ChecklistNodeStatus = 'OPEN' | 'COMPLETE' | 'NOT_APPLICABLE';
 export type ChecklistNodeType = 'STATIC' | 'DISTRIBUTION' | 'ADDRESS' | 'CABLE_RESERVE';
 export type ChecklistNodeSource = 'GPKG' | 'MANUAL' | 'SYSTEM';
-export type CableRoutingType = 'underground' | 'aerial';
+export type CableRoutingType = 'underground' | 'aerial' | 'existing_duct';
+export type MapNoteTargetType = 'cable' | 'node' | 'address' | 'polygon' | 'free';
 
 export interface MufaEntry {
   wezel: string;
@@ -107,11 +108,41 @@ export interface ProjectMapInfraNode {
   hasPhoto: boolean;
 }
 
+export interface ProjectMapNotePhoto {
+  id: string;
+  noteId: string;
+  sourceFileName: string;
+  storedFileName: string;
+  storagePath: string;
+  thumbnailPath: string | null;
+  mimeType: string;
+  fileSize: number | null;
+  lat: number | null;
+  lng: number | null;
+  capturedAt: string | null;
+  uploadedAt: string;
+}
+
+export interface ProjectMapNote {
+  id: string;
+  targetType: MapNoteTargetType;
+  targetId: string | null;
+  targetLabel: string | null;
+  body: string;
+  lat: number | null;
+  lng: number | null;
+  photoCount: number;
+  photos: ProjectMapNotePhoto[];
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface ProjectMapRecord {
   addresses: ProjectMapAddress[];
   polygons: ProjectMapPolygon[];
   trunkCables: ProjectMapCable[];
   infraNodes: ProjectMapInfraNode[];
+  notes: ProjectMapNote[];
 }
 
 export interface GpkgExtractionResult {

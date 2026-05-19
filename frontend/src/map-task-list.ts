@@ -81,6 +81,14 @@ function getCableStatusDetails(cable: ProjectMapCable): {
   stage: MapTaskStage;
 } {
   if (cable.status === 'DUCT_READY') {
+    if (cable.routingType === 'existing_duct') {
+      return {
+        statusLabel: 'Mikrorurka gotowa',
+        summary: 'Mikrorurka wciagnieta, kabel do zaciagniecia',
+        stage: 'progress',
+      };
+    }
+
     return {
       statusLabel: 'Rurociag gotowy',
       summary: 'Rurociag wybudowany, kabel do zaciagniecia',
@@ -106,19 +114,30 @@ function getCableStatusDetails(cable: ProjectMapCable): {
 
   return {
     statusLabel: 'Do zrobienia',
-    summary: cable.routingType === 'aerial' ? 'Kabel do podwieszenia' : 'Rurociag i kabel do wykonania',
+    summary:
+      cable.routingType === 'aerial'
+        ? 'Kabel do podwieszenia'
+        : cable.routingType === 'existing_duct'
+          ? 'Mikrorurka lub kabel do zaciagniecia w istniejacej kanalizacji'
+          : 'Rurociag i kabel do wykonania',
     stage: 'todo',
   };
 }
 
 function cableTask(cable: ProjectMapCable): MapTaskRow {
   const details = getCableStatusDetails(cable);
+  const routeLabel =
+    cable.routingType === 'aerial'
+      ? 'napowietrzny'
+      : cable.routingType === 'existing_duct'
+        ? 'istniejaca kanalizacja'
+        : 'doziemny';
   return {
     id: `cable-${cable.id}`,
     sourceId: cable.id,
     kind: 'cable',
     title: cable.rawName ?? `${cable.fromNode} - ${cable.toNode}`,
-    subtitle: `${cable.fromNode} -> ${cable.toNode} · ${cable.routingType === 'aerial' ? 'napowietrzny' : 'doziemny'}`,
+    subtitle: `${cable.fromNode} -> ${cable.toNode} · ${routeLabel}`,
     cableStatus: cable.status,
     routingType: cable.routingType,
     ...details,

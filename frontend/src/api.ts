@@ -17,6 +17,8 @@ import type {
   ProjectMapCable,
   ProjectMapData,
   ProjectMapInfraNode,
+  ProjectMapNote,
+  ProjectMapNoteTargetType,
   ProjectSummary,
   ReserveLocation,
   SharedFolderListResult,
@@ -106,6 +108,47 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status }),
     }),
+  createMapNote: (
+    projectId: string,
+    input: {
+      targetType: ProjectMapNoteTargetType;
+      targetId: string | null;
+      targetLabel: string | null;
+      body: string;
+      lat: number | null;
+      lng: number | null;
+    },
+  ) =>
+    request<ProjectMapData>(`/api/projects/${projectId}/map/notes`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
+    }),
+  updateMapNote: (
+    projectId: string,
+    noteId: string,
+    input: Pick<ProjectMapNote, 'body' | 'lat' | 'lng'>,
+  ) =>
+    request<ProjectMapData>(`/api/projects/${projectId}/map/notes/${noteId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
+    }),
+  deleteMapNote: (projectId: string, noteId: string) =>
+    request<ProjectMapData>(`/api/projects/${projectId}/map/notes/${noteId}`, {
+      method: 'DELETE',
+    }),
+  uploadMapNotePhoto: (projectId: string, noteId: string, file: File) => {
+    const formData = new FormData();
+    formData.append('photo', file);
+    return request<{ id: string; storedFileName: string; storagePath: string; thumbnailPath: string | null }>(
+      `/api/projects/${projectId}/map/notes/${noteId}/photos`,
+      {
+        method: 'POST',
+        body: formData,
+      },
+    );
+  },
   createChecklistNode: (
     projectId: string,
     input: {

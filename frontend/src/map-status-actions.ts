@@ -26,6 +26,20 @@ export function getCableStatusActions(input: {
   status: ProjectMapCableStatus;
   routingType: ProjectMapCableRoutingType;
 }): MapStatusAction<ProjectMapCableStatus>[] {
+  const ductAction =
+    input.routingType === 'existing_duct'
+      ? {
+          status: 'DUCT_READY' as const,
+          label: 'Mikrorurka',
+          kind: 'progress' as const,
+          ariaLabel: 'Oznacz mikrorurke jako zaciagnieta',
+        }
+      : {
+          status: 'DUCT_READY' as const,
+          label: 'Rurociag',
+          kind: 'progress' as const,
+          ariaLabel: 'Oznacz rurociag jako gotowy',
+        };
   const workflowActions: Array<Omit<MapStatusAction<ProjectMapCableStatus>, 'isActive'>> =
     input.routingType === 'aerial'
       ? [
@@ -37,12 +51,7 @@ export function getCableStatusActions(input: {
           },
         ]
       : [
-          {
-            status: 'DUCT_READY',
-            label: 'Rurociag',
-            kind: 'progress',
-            ariaLabel: 'Oznacz rurociag jako gotowy',
-          },
+          ductAction,
           {
             status: 'PULLED',
             label: 'Zaciagniete',

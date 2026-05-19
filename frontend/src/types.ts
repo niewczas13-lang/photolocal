@@ -81,7 +81,8 @@ export interface ChecklistNodeDetail {
 
 export type ProjectMapCableStatus = 'PENDING' | 'DUCT_READY' | 'PULLED' | 'WELDED' | 'SUSPENDED';
 export type ProjectMapNodeStatus = 'PENDING' | 'WELDED';
-export type ProjectMapCableRoutingType = 'underground' | 'aerial';
+export type ProjectMapCableRoutingType = 'underground' | 'aerial' | 'existing_duct';
+export type ProjectMapNoteTargetType = 'cable' | 'node' | 'address' | 'polygon' | 'free';
 
 export interface ProjectMapAddress {
   id: string;
@@ -131,11 +132,41 @@ export interface ProjectMapInfraNode {
   hasPhoto: boolean;
 }
 
+export interface ProjectMapNotePhoto {
+  id: string;
+  noteId: string;
+  sourceFileName: string;
+  storedFileName: string;
+  storagePath: string;
+  thumbnailPath: string | null;
+  mimeType: string;
+  fileSize: number | null;
+  lat: number | null;
+  lng: number | null;
+  capturedAt: string | null;
+  uploadedAt: string;
+}
+
+export interface ProjectMapNote {
+  id: string;
+  targetType: ProjectMapNoteTargetType;
+  targetId: string | null;
+  targetLabel: string | null;
+  body: string;
+  lat: number | null;
+  lng: number | null;
+  photoCount: number;
+  photos: ProjectMapNotePhoto[];
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface ProjectMapData {
   addresses: ProjectMapAddress[];
   polygons: ProjectMapPolygon[];
   trunkCables: ProjectMapCable[];
   infraNodes: ProjectMapInfraNode[];
+  notes: ProjectMapNote[];
 }
 
 export type ChatBatchStatus =

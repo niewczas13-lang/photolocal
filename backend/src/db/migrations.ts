@@ -42,6 +42,7 @@ function migrateMapTrunkCableIdentity(db: Database.Database, schema: string): vo
     !row?.sql ||
     (row.sql.includes('cable_key') &&
       row.sql.includes('route_type') &&
+      row.sql.includes('existing_duct') &&
       row.sql.includes('SUSPENDED') &&
       row.sql.includes('UNIQUE(project_id, cable_key)'))
   ) {
@@ -57,7 +58,7 @@ function migrateMapTrunkCableIdentity(db: Database.Database, schema: string): vo
     : "'PENDING'";
   const rawNameExpression = columns.has('raw_name') ? "COALESCE(raw_name, '')" : "''";
   const routeTypeExpression = columns.has('route_type')
-    ? "CASE WHEN route_type IN ('underground', 'aerial') THEN route_type ELSE 'underground' END"
+    ? "CASE WHEN route_type IN ('underground', 'aerial', 'existing_duct') THEN route_type ELSE 'underground' END"
     : `CASE WHEN cable_type LIKE '%ADSS%' OR ${rawNameExpression} LIKE '%ADSS%' THEN 'aerial' ELSE 'underground' END`;
 
   db.exec(`
