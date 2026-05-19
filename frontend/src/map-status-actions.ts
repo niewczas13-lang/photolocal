@@ -14,6 +14,14 @@ export const STATUS_LABELS: Record<ProjectMapCableStatus | ProjectMapNodeStatus,
   SUSPENDED: 'Podwieszony',
 };
 
+export function getCableStatusLabel(
+  status: ProjectMapCableStatus,
+  routingType: ProjectMapCableRoutingType,
+): string {
+  if (status === 'PULLED' && routingType === 'existing_duct') return 'Wdmuchniety kabel';
+  return STATUS_LABELS[status];
+}
+
 export interface MapStatusAction<TStatus extends string> {
   status: TStatus;
   label: string;
@@ -54,9 +62,12 @@ export function getCableStatusActions(input: {
           ductAction,
           {
             status: 'PULLED',
-            label: 'Zaciagniete',
+            label: getCableStatusLabel('PULLED', input.routingType),
             kind: 'complete',
-            ariaLabel: 'Oznacz kabel jako zaciagniety',
+            ariaLabel:
+              input.routingType === 'existing_duct'
+                ? 'Oznacz kabel jako wdmuchniety'
+                : 'Oznacz kabel jako zaciagniety',
           },
         ];
 

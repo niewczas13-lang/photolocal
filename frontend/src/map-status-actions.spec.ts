@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { getCableStatusActions, getNodeStatusActions } from './map-status-actions';
+import { getCableStatusActions, getCableStatusLabel, getNodeStatusActions } from './map-status-actions';
 
 describe('map status actions', () => {
   it('shows underground cable work steps and a clear reset action', () => {
@@ -26,9 +26,14 @@ describe('map status actions', () => {
 
     expect(actions.map(({ status, label, kind, isActive }) => ({ status, label, kind, isActive }))).toEqual([
       { status: 'DUCT_READY', label: 'Mikrorurka', kind: 'progress', isActive: false },
-      { status: 'PULLED', label: 'Zaciagniete', kind: 'complete', isActive: false },
+      { status: 'PULLED', label: 'Wdmuchniety kabel', kind: 'complete', isActive: false },
       { status: 'PENDING', label: 'Reset', kind: 'reset', isActive: false },
     ]);
+  });
+
+  it('names pulled cables in microducts as blown-in cables', () => {
+    expect(getCableStatusLabel('PULLED', 'existing_duct')).toBe('Wdmuchniety kabel');
+    expect(getCableStatusLabel('PULLED', 'underground')).toBe('Zaciagniete');
   });
 
   it('shows node completion separately from reset', () => {

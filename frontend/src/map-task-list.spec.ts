@@ -263,4 +263,37 @@ describe('map task list', () => {
       ]),
     );
   });
+
+  it('describes pulled cables in microducts as blown-in cables', () => {
+    const rows = getMapTaskRows(
+      mapData({
+        trunkCables: [
+          {
+            id: 'microduct-cable',
+            cableType: 'MI-MKF 12J',
+            fromNode: 'A/ZS0001',
+            toNode: 'A/OPP0001',
+            osdName: 'A/OPP0001',
+            geojson: { type: 'LineString', coordinates: [] },
+            rawName: 'OKH-MIKRO',
+            routingType: 'existing_duct',
+            status: 'PULLED',
+            routeLengthMeters: null,
+            installationLengthMeters: null,
+          },
+        ],
+        addresses: [],
+        infraNodes: [],
+      }),
+    );
+
+    expect(rows).toEqual([
+      expect.objectContaining({
+        id: 'cable-microduct-cable',
+        statusLabel: 'Wdmuchniety kabel',
+        summary: 'Kabel wdmuchniety do mikrorurki',
+        stage: 'done',
+      }),
+    ]);
+  });
 });

@@ -25,6 +25,7 @@ import { cn } from '../lib/utils';
 import { formatCableLength } from '../map-format';
 import {
   getCableStatusActions,
+  getCableStatusLabel,
   getNodeStatusActions,
   STATUS_LABELS,
 } from '../map-status-actions';
@@ -513,7 +514,7 @@ function CablePopup({
         </span>
       </div>
       <div className="project-map-popup__status-row">
-        <Badge variant="outline">{STATUS_LABELS[cable.status]}</Badge>
+        <Badge variant="outline">{getCableStatusLabel(cable.status, cable.routingType)}</Badge>
       </div>
       <div className="project-map-popup__actions">
         {actions.map((action) => (

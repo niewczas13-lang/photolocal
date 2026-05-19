@@ -97,6 +97,14 @@ function getCableStatusDetails(cable: ProjectMapCable): {
   }
 
   if (cable.status === 'PULLED' || cable.status === 'WELDED') {
+    if (cable.status === 'PULLED' && cable.routingType === 'existing_duct') {
+      return {
+        statusLabel: 'Wdmuchniety kabel',
+        summary: 'Kabel wdmuchniety do mikrorurki',
+        stage: 'done',
+      };
+    }
+
     return {
       statusLabel: 'Zaciagniete',
       summary: 'Kabel zaciagniety',
