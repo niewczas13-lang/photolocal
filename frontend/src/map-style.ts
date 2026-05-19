@@ -15,33 +15,69 @@ export interface MarkerToneStyle {
 export interface CableLineStyle {
   color: string;
   dashArray?: string;
+  dashOffset?: string;
   opacity: number;
   weight: number;
+}
+
+const CABLE_DASH = '8 16';
+const CABLE_OVERLAY_DASH_OFFSET = '8';
+const AERIAL_BLUE = '#2563eb';
+const EXISTING_DUCT_PURPLE = '#7c3aed';
+const UNDERGROUND_BROWN = '#92400e';
+const PROGRESS_ORANGE = '#f97316';
+const READY_GREEN = '#22c55e';
+
+function getCableBaseColor(routingType: ProjectMapCableRoutingType): string {
+  if (routingType === 'aerial') return AERIAL_BLUE;
+  if (routingType === 'existing_duct') return EXISTING_DUCT_PURPLE;
+  return UNDERGROUND_BROWN;
+}
+
+function getCableOverlayColor(
+  status: ProjectMapCableStatus,
+  routingType: ProjectMapCableRoutingType,
+): string | null {
+  if (routingType === 'aerial') {
+    return status === 'SUSPENDED' || status === 'PULLED' || status === 'WELDED' ? READY_GREEN : null;
+  }
+
+  if (status === 'DUCT_READY') return PROGRESS_ORANGE;
+  if (status === 'PULLED' || status === 'WELDED') return READY_GREEN;
+  return null;
+}
+
+export function getCableLineStyles(
+  status: ProjectMapCableStatus,
+  routingType: ProjectMapCableRoutingType,
+): CableLineStyle[] {
+  const weight = routingType === 'aerial' ? 4 : 5;
+  const baseStyle: CableLineStyle = {
+    color: getCableBaseColor(routingType),
+    dashArray: CABLE_DASH,
+    opacity: 0.9,
+    weight,
+  };
+  const overlayColor = getCableOverlayColor(status, routingType);
+
+  if (!overlayColor) return [baseStyle];
+
+  return [
+    baseStyle,
+    {
+      ...baseStyle,
+      color: overlayColor,
+      dashOffset: CABLE_OVERLAY_DASH_OFFSET,
+      opacity: 0.94,
+    },
+  ];
 }
 
 export function getCableLineStyle(
   status: ProjectMapCableStatus,
   routingType: ProjectMapCableRoutingType,
 ): CableLineStyle {
-  const isAerial = routingType === 'aerial';
-  const isExistingDuct = routingType === 'existing_duct';
-  const dashArray = isAerial ? '8 6' : isExistingDuct ? '10 4 2 4' : undefined;
-  const weight = isAerial ? 4 : 5;
-
-  if (status === 'DUCT_READY') {
-    return { color: '#ca8a04', dashArray, opacity: 0.9, weight };
-  }
-
-  if (status === 'PULLED' || status === 'WELDED' || status === 'SUSPENDED') {
-    return { color: '#15803d', dashArray, opacity: 0.92, weight };
-  }
-
-  return {
-    color: isAerial ? '#2563eb' : isExistingDuct ? '#0f766e' : '#b45309',
-    dashArray,
-    opacity: 0.9,
-    weight,
-  };
+  return getCableLineStyles(status, routingType)[0];
 }
 
 export function isCableReady(status: ProjectMapCableStatus): boolean {

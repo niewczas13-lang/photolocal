@@ -30,7 +30,7 @@ import {
   STATUS_LABELS,
 } from '../map-status-actions';
 import {
-  getCableLineStyle,
+  getCableLineStyles,
   getMarkerTone,
   getMarkerToneStyle,
   isCableReady,
@@ -1115,23 +1115,25 @@ export default function ProjectMap({ projectId, view, onViewChange }: ProjectMap
               })}
 
               {data.trunkCables.map((cable) =>
-                linePositions(cable).map((positions, index) => (
-                  <Polyline
-                    key={`${cable.id}-${index}`}
-                    positions={positions}
-                    pathOptions={getCableLineStyle(cable.status, cable.routingType)}
-                  >
-                    <Popup>
-                      <CablePopup
-                        cable={cable}
-                        notes={notesForTarget(data.notes, 'cable', cable.id)}
-                        onStatusChange={updateCableStatus}
-                        onCreateNote={(input) => void createMapNote(input)}
-                        busy={busyId === cable.id || busyId === 'note'}
-                      />
-                    </Popup>
-                  </Polyline>
-                )),
+                linePositions(cable).flatMap((positions, index) =>
+                  getCableLineStyles(cable.status, cable.routingType).map((style, styleIndex) => (
+                    <Polyline
+                      key={`${cable.id}-${index}-${styleIndex}`}
+                      positions={positions}
+                      pathOptions={style}
+                    >
+                      <Popup>
+                        <CablePopup
+                          cable={cable}
+                          notes={notesForTarget(data.notes, 'cable', cable.id)}
+                          onStatusChange={updateCableStatus}
+                          onCreateNote={(input) => void createMapNote(input)}
+                          busy={busyId === cable.id || busyId === 'note'}
+                        />
+                      </Popup>
+                    </Polyline>
+                  )),
+                ),
               )}
 
               {data.infraNodes.map((node) => (

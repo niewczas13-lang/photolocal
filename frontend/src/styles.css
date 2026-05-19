@@ -562,17 +562,29 @@
 }
 
 .project-map-status-button {
+  width: 100%;
+  min-width: 0;
   height: 34px;
+  flex-shrink: 1;
   justify-content: flex-start;
   gap: 6px;
+  overflow: hidden;
   border-radius: 7px;
   padding: 0 9px;
+  white-space: normal;
   color: #334155;
   background: #ffffff;
   box-shadow: 0 1px 2px rgb(15 23 42 / 0.08);
 }
 
+.project-map-status-button span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .project-map-status-button svg {
+  flex: 0 0 auto;
   opacity: 0.82;
 }
 
@@ -1226,7 +1238,7 @@
 
 .project-map-task__actions {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   align-content: center;
   gap: 6px;
 }
@@ -1279,23 +1291,21 @@
 .project-map-line {
   display: inline-block;
   width: 24px;
-  height: 0;
-  border-top: 4px solid #b45309;
+  height: 4px;
   border-radius: 999px;
+  background: repeating-linear-gradient(90deg, #92400e 0 8px, transparent 8px 24px);
 }
 
 .project-map-line--aerial {
-  border-top-color: #2563eb;
-  border-top-style: dashed;
+  background: repeating-linear-gradient(90deg, #2563eb 0 8px, transparent 8px 24px);
 }
 
 .project-map-line--duct {
-  border-top-color: #0f766e;
-  border-top-style: dashed;
+  background: repeating-linear-gradient(90deg, #7c3aed 0 8px, transparent 8px 24px);
 }
 
 .project-map-line--done {
-  border-top-color: #15803d;
+  background: repeating-linear-gradient(90deg, #92400e 0 8px, #22c55e 8px 16px, transparent 16px 24px);
 }
 
 .project-map-dot {
