@@ -139,6 +139,10 @@ function lineSegmentsFromGeojson(geojson: Record<string, unknown>): number[][][]
   return [];
 }
 
+function cloneLineSegments(segments: number[][][]): number[][][] {
+  return segments.map((line) => line.map((point) => [...point]));
+}
+
 function lineSegmentsLengthMeters(segments: number[][][]): number | null {
   let total = 0;
   for (const segment of segments) {
@@ -150,6 +154,59 @@ function lineSegmentsLengthMeters(segments: number[][][]): number | null {
   }
 
   return total > 0 ? Math.round(total * 10) / 10 : null;
+}
+
+function distancePointToLineSegment(point: number[], start: number[], end: number[]): number {
+  const dx = end[0] - start[0];
+  const dy = end[1] - start[1];
+  if (dx === 0 && dy === 0) {
+    return Math.hypot(point[0] - start[0], point[1] - start[1]);
+  }
+
+  const t = Math.max(
+    0,
+    Math.min(1, ((point[0] - start[0]) * dx + (point[1] - start[1]) * dy) / (dx * dx + dy * dy)),
+  );
+  return Math.hypot(point[0] - (start[0] + t * dx), point[1] - (start[1] + t * dy));
+}
+
+function distancePointToLineSegments(point: number[], segments: number[][][]): number {
+  let minDistance = Number.POSITIVE_INFINITY;
+  for (const line of segments) {
+    for (let index = 1; index < line.length; index += 1) {
+      minDistance = Math.min(minDistance, distancePointToLineSegment(point, line[index - 1], line[index]));
+    }
+  }
+
+  return minDistance;
+}
+
+function sampleLinePoints(line: number[][]): number[][] {
+  const points = [...line];
+  for (let index = 1; index < line.length; index += 1) {
+    const previous = line[index - 1];
+    const current = line[index];
+    points.push([(previous[0] + current[0]) / 2, (previous[1] + current[1]) / 2]);
+  }
+
+  return points;
+}
+
+function lineRunsAlongProjectedConduit(line: number[][], projectedConduitSegments: number[][][]): boolean {
+  const toleranceMeters = 2;
+  const samplePoints = sampleLinePoints(line);
+  return (
+    samplePoints.length > 0 &&
+    samplePoints.every((point) => distancePointToLineSegments(point, projectedConduitSegments) <= toleranceMeters)
+  );
+}
+
+function cableRunsAlongProjectedConduit(
+  cableSegments: number[][][],
+  projectedConduitSegments: number[][][],
+): boolean {
+  if (projectedConduitSegments.length === 0) return false;
+  return cableSegments.some((segment) => lineRunsAlongProjectedConduit(segment, projectedConduitSegments));
 }
 
 function addNullableLengths(left: number | null | undefined, right: number | null | undefined): number | null {
@@ -245,6 +302,49 @@ function isExistingPassiveDevice(value: unknown): boolean {
 
 function isExistingLayerTable(tableName: string): boolean {
   return tableName.trim().startsWith('_');
+}
+
+function isGpkgInternalTable(tableName: string): boolean {
+  const normalized = tableName.trim().toLowerCase();
+  return (
+    normalized.startsWith('sqlite_') ||
+    normalized.startsWith('gpkg_') ||
+    normalized.startsWith('rtree_')
+  );
+}
+
+function getUserTableNames(db: Database.Database): string[] {
+  const rows = db
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
+    .all() as Array<{ name: string }>;
+  return rows.map((row) => row.name).filter((name) => !isGpkgInternalTable(name));
+}
+
+function isProjectedConduitTable(tableName: string): boolean {
+  if (isExistingLayerTable(tableName)) return false;
+  const normalizedName = normalizeColumnName(tableName);
+  return (
+    normalizedName.includes('odcinki_kanalizacji') ||
+    normalizedName.includes('rurociagi_mikrokanalizacja')
+  );
+}
+
+function extractProjectedConduitSegments(db: Database.Database): number[][][] {
+  const segments: number[][][] = [];
+
+  for (const tableName of getUserTableNames(db)) {
+    if (!isProjectedConduitTable(tableName) || !tableHasColumns(db, tableName, ['geom'])) continue;
+
+    const rows = db.prepare(`SELECT geom FROM ${q(tableName)}`).all() as Array<Record<string, unknown>>;
+    for (const row of rows) {
+      if (!(row.geom instanceof Buffer)) continue;
+      const geojson = parseGpkgGeoJSON(row.geom);
+      if (!geojson) continue;
+      segments.push(...lineSegmentsFromGeojson(geojson));
+    }
+  }
+
+  return segments;
 }
 
 function findExistingTables(db: Database.Database, candidates: string[]): string[] {
@@ -435,6 +535,8 @@ function extractMapGeometry(db: Database.Database): {
     'Kable ĹšwiatĹ‚owodowe',
   ].find((tableName) => tableExists(db, tableName));
 
+  const projectedConduitSegments = extractProjectedConduitSegments(db);
+
   if (cableTable) {
     const rows = db.prepare(`SELECT * FROM ${q(cableTable)}`).all() as Array<Record<string, unknown>>;
     for (const row of rows) {
@@ -450,7 +552,7 @@ function extractMapGeometry(db: Database.Database): {
 
       const geojson = parseGpkgGeoJSON(row.geom);
       if (!geojson) continue;
-      const projectedSegments = lineSegmentsFromGeojson(geojson);
+      const projectedSegments = cloneLineSegments(lineSegmentsFromGeojson(geojson));
       const routeLengthMeters = lineSegmentsLengthMeters(projectedSegments);
       const installationLengthMeters = getInstallationLengthMeters(row);
       reprojectGeometry(geojson);
@@ -465,7 +567,12 @@ function extractMapGeometry(db: Database.Database): {
           ? fromNode
           : toNode;
       const rawName = row.odcinek_kabla == null ? null : String(row.odcinek_kabla).trim() || null;
-      const routingType = getCableRoutingType(row, cableType, rawName);
+      const baseRoutingType = getCableRoutingType(row, cableType, rawName);
+      const routingType =
+        baseRoutingType === 'existing_duct' &&
+        cableRunsAlongProjectedConduit(projectedSegments, projectedConduitSegments)
+          ? 'underground'
+          : baseRoutingType;
       const cableKey = getTrunkCableKey({ rawName, fromNode, toNode, cableType });
       const existingCable = trunkCableMap.get(cableKey);
 

@@ -403,6 +403,70 @@ describe('GPKG extractor helpers', () => {
     );
   });
 
+  it('uses projected conduit geometry to keep duct-described cables as underground work', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'photo-local-gpkg-projected-conduit-map-'));
+    const gpkgPath = join(dir, 'sample.gpkg');
+    const db = new Database(gpkgPath);
+
+    db.exec(`
+      CREATE TABLE PA (
+        id_posesja_opl TEXT,
+        nazwa_miejsc TEXT,
+        nazwa_ul TEXT,
+        nr_domu TEXT,
+        nr_dzialki TEXT,
+        geom BLOB
+      );
+      CREATE TABLE "Kable Swiatlowodowe" (
+        model_kabla TEXT,
+        typ_elementu TEXT,
+        od TEXT,
+        do TEXT,
+        odcinek_kabla TEXT,
+        geom BLOB
+      );
+      CREATE TABLE "Rurociagi_Mikrokanalizacja" (
+        typ_elementu TEXT,
+        odcinek TEXT,
+        geom BLOB
+      );
+    `);
+
+    const route = lineGeometry([
+      [574000, 424000],
+      [574100, 424100],
+    ]);
+    db.prepare('INSERT INTO PA VALUES (?, ?, ?, ?, ?, ?)').run(
+      'pa-1',
+      'Ostrzeszewo',
+      'Testowa',
+      '1',
+      null,
+      pointGeometry(574000, 424000),
+    );
+    db.prepare('INSERT INTO "Rurociagi_Mikrokanalizacja" VALUES (?, ?, ?)').run(
+      'r',
+      'OSTRZESZEWO/OPP0002-OSTRZESZEWO/OSD0001_RK/001',
+      route,
+    );
+    db.prepare('INSERT INTO "Kable Swiatlowodowe" VALUES (?, ?, ?, ?, ?, ?)').run(
+      'MI-MKF 12J G.652D',
+      'Kabel w kanalizacji',
+      'OSTRZESZEWO/OPP0002',
+      'OSTRZESZEWO/OSD0001',
+      'OKW0337263/001',
+      route,
+    );
+    db.close();
+
+    const result = extractGpkg(gpkgPath);
+
+    expect(result.trunkCables[0]).toMatchObject({
+      rawName: 'OKW0337263/001',
+      routingType: 'underground',
+    });
+  });
+
   it('extracts route and installation cable lengths for map popups', () => {
     const dir = mkdtempSync(join(tmpdir(), 'photo-local-gpkg-cable-lengths-'));
     const gpkgPath = join(dir, 'sample.gpkg');
