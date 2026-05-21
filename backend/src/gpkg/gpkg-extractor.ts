@@ -1226,9 +1226,39 @@ function canonicalInfraNodeName(value: string | null): string | null {
 
 export function extractSplicePlaceholder(): void {} // keep lint happy
 
+function normalizeProjectDefinitionCandidate(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const match = /^([A-Z])\/?(\d{6,10})$/i.exec(value.trim());
+  if (!match) return null;
+  return `${match[1].toUpperCase()}${match[2]}`;
+}
+
 function extractProjectDefinition(db: Database.Database): string | null {
-  // Pattern: letter/digits e.g. X/04009120 or F/04001314
-  const codePattern = /^[A-Z]\/(\d{6,10})$/;
+  if (tableExists(db, 'npd_suite_metadane')) {
+    try {
+      const rows = db.prepare(`SELECT klucz, wartosc FROM ${q('npd_suite_metadane')}`).all() as Array<
+        Record<string, unknown>
+      >;
+      const preferredKeys = [
+        'sap_definicja_projektu',
+        'definicja_projektu',
+        'kod_projektu',
+      ];
+
+      for (const preferredKey of preferredKeys) {
+        const row = rows.find(
+          (item) => typeof item.klucz === 'string' && item.klucz.trim().toLowerCase() === preferredKey,
+        );
+        const normalized = normalizeProjectDefinitionCandidate(row?.wartosc);
+        if (normalized) return normalized;
+      }
+
+      for (const row of rows) {
+        const normalized = normalizeProjectDefinitionCandidate(row.wartosc);
+        if (normalized) return normalized;
+      }
+    } catch (e) {}
+  }
 
   const candidateTables = ['_Obiekty', 'Obiekty'];
   for (const tableName of candidateTables) {
@@ -1238,9 +1268,8 @@ function extractProjectDefinition(db: Database.Database): string | null {
       for (const row of rows) {
         for (const [key, value] of Object.entries(row)) {
           if (key === 'did' || key === 'geom') continue;
-          if (typeof value === 'string' && codePattern.test(value.trim())) {
-            return value.trim();
-          }
+          const normalized = normalizeProjectDefinitionCandidate(value);
+          if (normalized) return normalized;
         }
       }
     } catch (e) {}
@@ -1256,9 +1285,8 @@ function extractProjectDefinition(db: Database.Database): string | null {
       for (const row of rows) {
         for (const [key, value] of Object.entries(row)) {
           if (key === 'did' || key === 'geom') continue;
-          if (typeof value === 'string' && codePattern.test(value.trim())) {
-            return value.trim();
-          }
+          const normalized = normalizeProjectDefinitionCandidate(value);
+          if (normalized) return normalized;
         }
       }
     }

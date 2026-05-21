@@ -49,6 +49,42 @@ describe('GPKG extractor helpers', () => {
     expect(normalizeCableAddressEntry('OSTRZESZEWO, 22')).toBe('OSTRZESZEWO 22');
   });
 
+  it('prefers NPD metadata project definition over stale object layer codes', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'photo-local-gpkg-project-definition-'));
+    const gpkgPath = join(dir, 'sample.gpkg');
+    const db = new Database(gpkgPath);
+
+    db.exec(`
+      CREATE TABLE npd_suite_metadane (
+        klucz TEXT,
+        wartosc TEXT
+      );
+      CREATE TABLE "_Obiekty" (
+        kod_projektu TEXT,
+        oznaczenie TEXT
+      );
+      CREATE TABLE PA (
+        id_posesja_opl TEXT,
+        nazwa_miejsc TEXT,
+        nazwa_ul TEXT,
+        nr_domu TEXT,
+        nr_dzialki TEXT
+      );
+      INSERT INTO npd_suite_metadane VALUES
+        ('sap_definicja_projektu', 'X/04017463'),
+        ('sap_opis', 'Q_KPO_1_TEST');
+      INSERT INTO "_Obiekty" VALUES
+        ('F/04001314', 'stary obiekt'),
+        ('X/04009120', 'inny stary obiekt');
+      INSERT INTO PA VALUES ('pa-1', 'Testowo', 'Testowa', '1', '1/1');
+    `);
+    db.close();
+
+    const result = extractGpkg(gpkgPath);
+
+    expect(result.suggestedProjectDefinition).toBe('X04017463');
+  });
+
   it('includes only ZS mufas with projected splices in the non-plan fiber layer', () => {
     const dir = mkdtempSync(join(tmpdir(), 'photo-local-gpkg-splices-'));
     const gpkgPath = join(dir, 'sample.gpkg');
