@@ -41,6 +41,7 @@ export interface MapPolygonInput {
 }
 
 export interface MapTrunkCableInput {
+  cableKey?: string;
   cableType: string;
   fromNode: string;
   toNode: string;

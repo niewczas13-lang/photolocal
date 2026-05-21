@@ -221,9 +221,24 @@ function normalizeSearchKey(value: string | null): string {
   return (value ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '');
 }
 
-function getMapCableKey(cable: Pick<MapTrunkCableInput, 'rawName' | 'fromNode' | 'toNode' | 'cableType'>): string {
+function getMapCableKey(
+  cable: Pick<MapTrunkCableInput, 'cableKey' | 'rawName' | 'fromNode' | 'toNode' | 'cableType'>,
+): string {
+  const cableKey = cable.cableKey?.trim();
+  if (cableKey) return cableKey;
   const rawName = cable.rawName?.trim();
   return rawName || `${cable.fromNode}|${cable.toNode}|${cable.cableType}`;
+}
+
+function getCableStatusInheritanceKey(input: {
+  rawName: string | null;
+  fromNode: string;
+  toNode: string;
+  cableType: string;
+}): string {
+  const rawName = input.rawName?.trim();
+  if (rawName) return `raw:${rawName.toUpperCase()}`;
+  return `nodes:${input.fromNode}|${input.toNode}|${input.cableType}`.toUpperCase();
 }
 
 function getCableRoutingType(cable: Pick<MapTrunkCableInput, 'routingType' | 'cableType' | 'rawName'>): CableRoutingType {
@@ -461,8 +476,38 @@ export class ProjectsRepository {
 
     const cableKeys = new Set(trunkCables.map(getMapCableKey));
     const existingCableRows = this.db
-      .prepare(`SELECT cable_key AS cableKey FROM map_trunk_cables WHERE project_id = ?`)
-      .all(projectId) as Array<{ cableKey: string }>;
+      .prepare(
+        `SELECT
+          cable_key AS cableKey,
+          cable_type AS cableType,
+          from_node AS fromNode,
+          to_node AS toNode,
+          raw_name AS rawName,
+          status
+        FROM map_trunk_cables
+        WHERE project_id = ?`,
+      )
+      .all(projectId) as Array<{
+      cableKey: string;
+      cableType: string;
+      fromNode: string;
+      toNode: string;
+      rawName: string | null;
+      status: MapCableStatus;
+    }>;
+    const cableStatusByKey = new Map(existingCableRows.map((row) => [row.cableKey, row.status]));
+    const inheritedCableStatusByKey = new Map<string, MapCableStatus | null>();
+    const rememberInheritedCableStatus = (inheritanceKey: string, status: MapCableStatus): void => {
+      const current = inheritedCableStatusByKey.get(inheritanceKey);
+      if (current === undefined) {
+        inheritedCableStatusByKey.set(inheritanceKey, status);
+      } else if (current !== status) {
+        inheritedCableStatusByKey.set(inheritanceKey, null);
+      }
+    };
+    for (const row of existingCableRows) {
+      rememberInheritedCableStatus(getCableStatusInheritanceKey(row), row.status);
+    }
     const deleteCable = this.db.prepare(
       `DELETE FROM map_trunk_cables WHERE project_id = ? AND cable_key = ?`,
     );
@@ -473,8 +518,8 @@ export class ProjectsRepository {
     const insertCable = this.db.prepare(
       `INSERT INTO map_trunk_cables (
         id, project_id, cable_key, cable_type, route_type, from_node, to_node, osd_name,
-        geojson, raw_name, route_length_m, installation_length_m
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        geojson, raw_name, route_length_m, installation_length_m, status
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(project_id, cable_key) DO UPDATE SET
         cable_type = excluded.cable_type,
         route_type = excluded.route_type,
@@ -487,10 +532,12 @@ export class ProjectsRepository {
         installation_length_m = excluded.installation_length_m`,
     );
     for (const cable of trunkCables) {
+      const cableKey = getMapCableKey(cable);
+      const inheritedStatus = inheritedCableStatusByKey.get(getCableStatusInheritanceKey(cable));
       insertCable.run(
         randomUUID(),
         projectId,
-        getMapCableKey(cable),
+        cableKey,
         cable.cableType,
         getCableRoutingType(cable),
         cable.fromNode,
@@ -500,6 +547,7 @@ export class ProjectsRepository {
         cable.rawName,
         cable.routeLengthMeters ?? null,
         cable.installationLengthMeters ?? null,
+        cableStatusByKey.get(cableKey) ?? inheritedStatus ?? 'PENDING',
       );
     }
 

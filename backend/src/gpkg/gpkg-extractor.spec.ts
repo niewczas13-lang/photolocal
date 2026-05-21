@@ -591,6 +591,152 @@ describe('GPKG extractor helpers', () => {
     });
   });
 
+  it('splits one cable into existing duct and underground route sections by conduit geometry', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'photo-local-gpkg-mixed-route-sections-'));
+    const gpkgPath = join(dir, 'sample.gpkg');
+    const db = new Database(gpkgPath);
+
+    db.exec(`
+      CREATE TABLE PA (
+        id_posesja_opl TEXT,
+        nazwa_miejsc TEXT,
+        nazwa_ul TEXT,
+        nr_domu TEXT,
+        nr_dzialki TEXT,
+        geom BLOB
+      );
+      CREATE TABLE "Kable Swiatlowodowe" (
+        model_kabla TEXT,
+        typ_elementu TEXT,
+        od TEXT,
+        do TEXT,
+        odcinek_kabla TEXT,
+        geom BLOB
+      );
+      CREATE TABLE "_Odcinki Kanalizacji" (
+        typ_elementu TEXT,
+        oznaczenie TEXT,
+        geom BLOB
+      );
+      CREATE TABLE "Rurociagi_Mikrokanalizacja" (
+        typ_elementu TEXT,
+        oznaczenie TEXT,
+        geom BLOB
+      );
+    `);
+
+    db.prepare('INSERT INTO PA VALUES (?, ?, ?, ?, ?, ?)').run(
+      'pa-1',
+      'Bartag',
+      'Testowa',
+      '1',
+      null,
+      pointGeometry(574000, 424000),
+    );
+    db.prepare('INSERT INTO "_Odcinki Kanalizacji" VALUES (?, ?, ?)').run(
+      'Kanalizacja pierwotna',
+      'BARTAG/KAN/001',
+      lineGeometry([
+        [574000, 424000],
+        [574100, 424000],
+      ]),
+    );
+    db.prepare('INSERT INTO "Rurociagi_Mikrokanalizacja" VALUES (?, ?, ?)').run(
+      'Projektowany rurociag',
+      'BARTAG/RK/001',
+      lineGeometry([
+        [574100, 424000],
+        [574200, 424000],
+      ]),
+    );
+    db.prepare('INSERT INTO "Kable Swiatlowodowe" VALUES (?, ?, ?, ?, ?, ?)').run(
+      'MI-MKF 12J G.652D [ZN-05_[W1]_1x12(12)]',
+      'Kabel w kanalizacji',
+      'BARTAG/ZS00033',
+      'BARTAG/OPP0049',
+      'OKH-MIX/001',
+      lineGeometry([
+        [574000, 424000],
+        [574100, 424000],
+        [574200, 424000],
+      ]),
+    );
+    db.close();
+
+    const result = extractGpkg(gpkgPath);
+    const mixedCableParts = result.trunkCables.filter((cable) => cable.rawName === 'OKH-MIX/001');
+
+    expect(mixedCableParts).toHaveLength(2);
+    expect(mixedCableParts.map((cable) => cable.routingType)).toEqual(['existing_duct', 'underground']);
+    expect(mixedCableParts.map((cable) => cable.routeLengthMeters)).toEqual([100, 100]);
+  });
+
+  it('keeps duct-described cables in existing duct when a plain non-underscore duct row overlaps', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'photo-local-gpkg-plain-duct-overlap-'));
+    const gpkgPath = join(dir, 'sample.gpkg');
+    const db = new Database(gpkgPath);
+
+    db.exec(`
+      CREATE TABLE PA (
+        id_posesja_opl TEXT,
+        nazwa_miejsc TEXT,
+        nazwa_ul TEXT,
+        nr_domu TEXT,
+        nr_dzialki TEXT,
+        geom BLOB
+      );
+      CREATE TABLE "Kable Swiatlowodowe" (
+        model_kabla TEXT,
+        typ_elementu TEXT,
+        od TEXT,
+        do TEXT,
+        odcinek_kabla TEXT,
+        geom BLOB
+      );
+      CREATE TABLE "Odcinki Kanalizacji" (
+        typ_elementu TEXT,
+        technologia TEXT,
+        oznaczenie TEXT,
+        geom BLOB
+      );
+    `);
+
+    const route = lineGeometry([
+      [574000, 424000],
+      [574100, 424000],
+    ]);
+    db.prepare('INSERT INTO PA VALUES (?, ?, ?, ?, ?, ?)').run(
+      'pa-1',
+      'Bartag',
+      'Testowa',
+      '1',
+      null,
+      pointGeometry(574000, 424000),
+    );
+    db.prepare('INSERT INTO "Odcinki Kanalizacji" VALUES (?, ?, ?, ?)').run(
+      'Rurociag',
+      '',
+      'FP-WM-MG-4x12/8',
+      route,
+    );
+    db.prepare('INSERT INTO "Kable Swiatlowodowe" VALUES (?, ?, ?, ?, ?, ?)').run(
+      'MI-MKF 12J G.652D [ZN-05_[W1]_1x12(12)]',
+      'Kabel w kanalizacji',
+      'BARTAG/ZS00033',
+      'BARTAG/OPP0049',
+      'OKH0030735-CBA/016',
+      route,
+    );
+    db.close();
+
+    const result = extractGpkg(gpkgPath);
+
+    expect(result.trunkCables[0]).toMatchObject({
+      rawName: 'OKH0030735-CBA/016',
+      routingType: 'existing_duct',
+    });
+  });
+
   it('keeps OKW cable rows as underground even when they overlap existing duct infrastructure', () => {
     const dir = mkdtempSync(join(tmpdir(), 'photo-local-gpkg-okw-underground-over-duct-'));
     const gpkgPath = join(dir, 'sample.gpkg');

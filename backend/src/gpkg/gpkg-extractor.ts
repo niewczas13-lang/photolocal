@@ -182,56 +182,7 @@ function distancePointToLineSegments(point: number[], segments: number[][][]): n
   return minDistance;
 }
 
-function sampleLinePoints(line: number[][]): number[][] {
-  const points = [...line];
-  for (let index = 1; index < line.length; index += 1) {
-    const previous = line[index - 1];
-    const current = line[index];
-    points.push([(previous[0] + current[0]) / 2, (previous[1] + current[1]) / 2]);
-  }
-
-  return points;
-}
-
-function lineRunsAlongProjectedConduit(line: number[][], projectedConduitSegments: number[][][]): boolean {
-  const toleranceMeters = 2;
-  const samplePoints = sampleLinePoints(line);
-  return (
-    samplePoints.length > 0 &&
-    samplePoints.every((point) => distancePointToLineSegments(point, projectedConduitSegments) <= toleranceMeters)
-  );
-}
-
-function cableRunsAlongProjectedConduit(
-  cableSegments: number[][][],
-  projectedConduitSegments: number[][][],
-): boolean {
-  if (projectedConduitSegments.length === 0) return false;
-  return cableSegments.some((segment) => lineRunsAlongProjectedConduit(segment, projectedConduitSegments));
-}
-
-function lineHasSegmentAlongConduit(line: number[][], conduitSegments: number[][][]): boolean {
-  const toleranceMeters = 2;
-  for (let index = 1; index < line.length; index += 1) {
-    const previous = line[index - 1];
-    const current = line[index];
-    const middle = [(previous[0] + current[0]) / 2, (previous[1] + current[1]) / 2];
-    const samplePoints = [previous, middle, current];
-    if (samplePoints.every((point) => distancePointToLineSegments(point, conduitSegments) <= toleranceMeters)) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
-function cablePartlyRunsAlongConduit(
-  cableSegments: number[][][],
-  conduitSegments: number[][][],
-): boolean {
-  if (conduitSegments.length === 0) return false;
-  return cableSegments.some((segment) => lineHasSegmentAlongConduit(segment, conduitSegments));
-}
+const CONDUIT_MATCH_TOLERANCE_METERS = 2;
 
 function addNullableLengths(left: number | null | undefined, right: number | null | undefined): number | null {
   if (left == null) return right == null ? null : right;
@@ -243,6 +194,176 @@ function geojsonFromLineSegments(segments: number[][][]): Record<string, unknown
   return segments.length === 1
     ? { type: 'LineString', coordinates: segments[0] }
     : { type: 'MultiLineString', coordinates: segments };
+}
+
+interface CableRoutePart {
+  routingType: CableRoutingType;
+  segments: number[][][];
+  routeLengthMeters: number | null;
+  installationLengthMeters: number | null;
+}
+
+function lineSegmentRunsAlongConduit(
+  previous: number[],
+  current: number[],
+  conduitSegments: number[][][],
+): boolean {
+  if (conduitSegments.length === 0) return false;
+  const middle = [(previous[0] + current[0]) / 2, (previous[1] + current[1]) / 2];
+  return [previous, middle, current].every(
+    (point) => distancePointToLineSegments(point, conduitSegments) <= CONDUIT_MATCH_TOLERANCE_METERS,
+  );
+}
+
+function getLineSegmentRoutingType(input: {
+  previous: number[];
+  current: number[];
+  baseRoutingType: CableRoutingType;
+  rawName: string | null;
+  projectedConduitSegments: number[][][];
+  existingDuctSegments: number[][][];
+}): CableRoutingType {
+  if (input.baseRoutingType === 'aerial') return 'aerial';
+  if (lineSegmentRunsAlongConduit(input.previous, input.current, input.projectedConduitSegments)) {
+    return 'underground';
+  }
+  if (
+    lineSegmentRunsAlongConduit(input.previous, input.current, input.existingDuctSegments) &&
+    !isUndergroundWorkCableReference(input.rawName)
+  ) {
+    return 'existing_duct';
+  }
+
+  return input.baseRoutingType;
+}
+
+function splitLineIntoCableRouteParts(input: {
+  line: number[][];
+  baseRoutingType: CableRoutingType;
+  rawName: string | null;
+  projectedConduitSegments: number[][][];
+  existingDuctSegments: number[][][];
+}): CableRoutePart[] {
+  if (input.line.length < 2) return [];
+
+  const parts: CableRoutePart[] = [];
+  let currentRoutingType = getLineSegmentRoutingType({
+    previous: input.line[0],
+    current: input.line[1],
+    baseRoutingType: input.baseRoutingType,
+    rawName: input.rawName,
+    projectedConduitSegments: input.projectedConduitSegments,
+    existingDuctSegments: input.existingDuctSegments,
+  });
+  let currentLine = [input.line[0], input.line[1]];
+
+  for (let index = 2; index < input.line.length; index += 1) {
+    const previous = input.line[index - 1];
+    const current = input.line[index];
+    const routingType = getLineSegmentRoutingType({
+      previous,
+      current,
+      baseRoutingType: input.baseRoutingType,
+      rawName: input.rawName,
+      projectedConduitSegments: input.projectedConduitSegments,
+      existingDuctSegments: input.existingDuctSegments,
+    });
+
+    if (routingType === currentRoutingType) {
+      currentLine.push(current);
+      continue;
+    }
+
+    const routedSegments = [currentLine];
+    parts.push({
+      routingType: currentRoutingType,
+      segments: routedSegments,
+      routeLengthMeters: lineSegmentsLengthMeters(routedSegments),
+      installationLengthMeters: null,
+    });
+    currentRoutingType = routingType;
+    currentLine = [previous, current];
+  }
+
+  const routedSegments = [currentLine];
+  parts.push({
+    routingType: currentRoutingType,
+    segments: routedSegments,
+    routeLengthMeters: lineSegmentsLengthMeters(routedSegments),
+    installationLengthMeters: null,
+  });
+
+  return parts;
+}
+
+function splitInstallationLengthMeters(
+  installationLengthMeters: number | null,
+  routeLengthMeters: number | null,
+  totalRouteLengthMeters: number | null,
+): number | null {
+  if (installationLengthMeters == null || routeLengthMeters == null || totalRouteLengthMeters == null) return null;
+  if (totalRouteLengthMeters <= 0) return null;
+  return Math.round((installationLengthMeters * routeLengthMeters * 10) / totalRouteLengthMeters) / 10;
+}
+
+function splitCableIntoRouteParts(input: {
+  segments: number[][][];
+  baseRoutingType: CableRoutingType;
+  rawName: string | null;
+  projectedConduitSegments: number[][][];
+  existingDuctSegments: number[][][];
+  installationLengthMeters: number | null;
+}): CableRoutePart[] {
+  const totalRouteLengthMeters = lineSegmentsLengthMeters(input.segments);
+  const parts = input.segments.flatMap((line) =>
+    splitLineIntoCableRouteParts({
+      line,
+      baseRoutingType: input.baseRoutingType,
+      rawName: input.rawName,
+      projectedConduitSegments: input.projectedConduitSegments,
+      existingDuctSegments: input.existingDuctSegments,
+    }),
+  );
+
+  return parts.map((part) => ({
+    ...part,
+    installationLengthMeters: splitInstallationLengthMeters(
+      input.installationLengthMeters,
+      part.routeLengthMeters,
+      totalRouteLengthMeters,
+    ),
+  }));
+}
+
+function mergeAdjacentCableRouteParts(parts: CableRoutePart[]): CableRoutePart[] {
+  const merged: CableRoutePart[] = [];
+  for (const part of parts) {
+    const previous = merged.at(-1);
+    if (previous && previous.routingType === part.routingType) {
+      previous.segments.push(...part.segments);
+      previous.routeLengthMeters = addNullableLengths(previous.routeLengthMeters, part.routeLengthMeters);
+      previous.installationLengthMeters = addNullableLengths(
+        previous.installationLengthMeters,
+        part.installationLengthMeters,
+      );
+      continue;
+    }
+
+    merged.push({
+      routingType: part.routingType,
+      segments: [...part.segments],
+      routeLengthMeters: part.routeLengthMeters,
+      installationLengthMeters: part.installationLengthMeters,
+    });
+  }
+
+  return merged;
+}
+
+function geojsonFromProjectedLineSegments(segments: number[][][]): Record<string, unknown> {
+  const geojson = geojsonFromLineSegments(cloneLineSegments(segments));
+  reprojectGeometry(geojson);
+  return geojson;
 }
 
 function getTrunkCableKey(input: {
@@ -369,10 +490,38 @@ function getUserTableNames(db: Database.Database): string[] {
 
 function isProjectedConduitTable(tableName: string): boolean {
   if (isExistingLayerTable(tableName)) return false;
+  if (isConceptualLayerTable(tableName)) return false;
   const normalizedName = normalizeColumnName(tableName);
   return (
     normalizedName.includes('odcinki_kanalizacji') ||
     normalizedName.includes('rurociagi_mikrokanalizacja')
+  );
+}
+
+function isProjectedConduitRow(tableName: string, row: Record<string, unknown>): boolean {
+  const normalizedName = normalizeColumnName(tableName);
+  if (normalizedName.startsWith('plan_')) return true;
+  if (normalizedName.includes('rurociagi_mikrokanalizacja')) return true;
+
+  const description = [
+    row.typ_elementu,
+    row.typ_kanalizacji,
+    row.modyfikacja,
+    row.uwagi,
+    row.technologia,
+    row.oznaczenie,
+    row.typ_profilu,
+    row.profil,
+    row.typy_profilow,
+  ]
+    .filter((value): value is string => typeof value === 'string')
+    .join(' ');
+  const normalizedDescription = normalizeCableRoutingText(description);
+
+  return (
+    normalizedDescription.includes('projekt') ||
+    normalizedDescription.includes('nowobud') ||
+    normalizedDescription.includes('budowan')
   );
 }
 
@@ -389,14 +538,16 @@ function isExistingDuctTable(tableName: string): boolean {
 function extractConduitSegments(
   db: Database.Database,
   tablePredicate: (tableName: string) => boolean,
+  rowPredicate: (tableName: string, row: Record<string, unknown>) => boolean = () => true,
 ): number[][][] {
   const segments: number[][][] = [];
 
   for (const tableName of getUserTableNames(db)) {
     if (!tablePredicate(tableName) || !tableHasColumns(db, tableName, ['geom'])) continue;
 
-    const rows = db.prepare(`SELECT geom FROM ${q(tableName)}`).all() as Array<Record<string, unknown>>;
+    const rows = db.prepare(`SELECT * FROM ${q(tableName)}`).all() as Array<Record<string, unknown>>;
     for (const row of rows) {
+      if (!rowPredicate(tableName, row)) continue;
       if (!(row.geom instanceof Buffer)) continue;
       const geojson = parseGpkgGeoJSON(row.geom);
       if (!geojson) continue;
@@ -408,7 +559,7 @@ function extractConduitSegments(
 }
 
 function extractProjectedConduitSegments(db: Database.Database): number[][][] {
-  return extractConduitSegments(db, isProjectedConduitTable);
+  return extractConduitSegments(db, isProjectedConduitTable, isProjectedConduitRow);
 }
 
 function extractExistingDuctSegments(db: Database.Database): number[][][] {
@@ -692,9 +843,16 @@ function extractMapGeometry(db: Database.Database): {
     if (rows.length > 0) break;
   }
 
-  const trunkCableMap = new Map<
+  const trunkCableGroups = new Map<
     string,
-    { cable: Omit<MapTrunkCableInput, 'geojson'>; segments: number[][][] }
+    {
+      baseKey: string;
+      cable: Omit<
+        MapTrunkCableInput,
+        'cableKey' | 'geojson' | 'routingType' | 'routeLengthMeters' | 'installationLengthMeters'
+      >;
+      routeParts: CableRoutePart[];
+    }
   >();
   const infraNodeMap = new Map<string, MapInfraNodeInput>();
   const passiveInfraNodeMap = new Map<string, MapInfraNodeInput>();
@@ -730,7 +888,6 @@ function extractMapGeometry(db: Database.Database): {
       const geojson = parseGpkgGeoJSON(row.geom);
       if (!geojson) continue;
       const projectedSegments = cloneLineSegments(lineSegmentsFromGeojson(geojson));
-      const routeLengthMeters = lineSegmentsLengthMeters(projectedSegments);
       const installationLengthMeters = getInstallationLengthMeters(row);
       reprojectGeometry(geojson);
       const segments = lineSegmentsFromGeojson(geojson);
@@ -745,45 +902,30 @@ function extractMapGeometry(db: Database.Database): {
           : toNode;
       const rawName = row.odcinek_kabla == null ? null : String(row.odcinek_kabla).trim() || null;
       const baseRoutingType = getCableRoutingType(row, cableType, rawName);
-      const runsAlongExistingDuct = cablePartlyRunsAlongConduit(projectedSegments, existingDuctSegments);
-      const runsAlongProjectedConduit = cableRunsAlongProjectedConduit(projectedSegments, projectedConduitSegments);
-      const inferExistingDuctFromGeometry =
-        runsAlongExistingDuct && !isUndergroundWorkCableReference(rawName);
-      const routingType = inferExistingDuctFromGeometry
-        ? 'existing_duct'
-        : baseRoutingType === 'existing_duct' && runsAlongProjectedConduit
-          ? 'underground'
-          : baseRoutingType;
       const cableKey = getTrunkCableKey({ rawName, fromNode, toNode, cableType });
-      const existingCable = trunkCableMap.get(cableKey);
+      const routeParts = splitCableIntoRouteParts({
+        segments: projectedSegments,
+        baseRoutingType,
+        rawName,
+        projectedConduitSegments,
+        existingDuctSegments,
+        installationLengthMeters,
+      });
+      const existingCableGroup = trunkCableGroups.get(cableKey);
 
-      if (existingCable) {
-        existingCable.segments.push(...segments);
-        existingCable.cable.routeLengthMeters = addNullableLengths(
-          existingCable.cable.routeLengthMeters,
-          routeLengthMeters,
-        );
-        existingCable.cable.installationLengthMeters = addNullableLengths(
-          existingCable.cable.installationLengthMeters,
-          installationLengthMeters,
-        );
-        if (routingType === 'aerial') existingCable.cable.routingType = routingType;
-        if (routingType === 'existing_duct' && existingCable.cable.routingType !== 'aerial') {
-          existingCable.cable.routingType = routingType;
-        }
+      if (existingCableGroup) {
+        existingCableGroup.routeParts.push(...routeParts);
       } else {
-        trunkCableMap.set(cableKey, {
+        trunkCableGroups.set(cableKey, {
+          baseKey: cableKey,
           cable: {
             cableType,
             fromNode,
             toNode,
             osdName,
             rawName,
-            routingType,
-            routeLengthMeters,
-            installationLengthMeters,
           },
-          segments: [...segments],
+          routeParts: [...routeParts],
         });
       }
 
@@ -885,10 +1027,17 @@ function extractMapGeometry(db: Database.Database): {
 
   return {
     polygons,
-    trunkCables: [...trunkCableMap.values()].map(({ cable, segments }) => ({
-      ...cable,
-      geojson: geojsonFromLineSegments(segments),
-    })),
+    trunkCables: [...trunkCableGroups.values()].flatMap(({ baseKey, cable, routeParts }) => {
+      const mergedRouteParts = mergeAdjacentCableRouteParts(routeParts);
+      return mergedRouteParts.map((part, index) => ({
+        ...cable,
+        cableKey: mergedRouteParts.length > 1 ? `${baseKey}|${part.routingType}|${index + 1}` : baseKey,
+        routingType: part.routingType,
+        routeLengthMeters: part.routeLengthMeters,
+        installationLengthMeters: part.installationLengthMeters,
+        geojson: geojsonFromProjectedLineSegments(part.segments),
+      }));
+    }),
     infraNodes: [...infraNodeMap.values()],
     passiveInfraNodes: [...passiveInfraNodeMap.values()],
     infrastructureFeatures: extractInfrastructureFeatures(db),

@@ -1113,6 +1113,87 @@ describe('ProjectsRepository', () => {
     ]);
   });
 
+  it('carries an existing cable status onto recalculated route sections with the same raw name', () => {
+    const { db, repository } = createRepository();
+
+    const project = repository.createProject({
+      name: 'PODZIAL',
+      projectDefinition: null,
+      projectType: 'SI',
+      splitterTopology: 'SINGLE',
+      splitterTopologySource: 'AUTO',
+      splitterCount: 1,
+      gpkgFileName: 'podzial.gpkg',
+      baseFolder: 'C:/photos/PODZIAL',
+      addresses: [],
+      dacToAddressCableCount: 0,
+      adssToAddressCableCount: 0,
+      checklistNodes: [],
+      trunkCables: [
+        {
+          cableType: 'MI-MKF 12J',
+          fromNode: 'ZS0001',
+          toNode: 'OPP0001',
+          osdName: 'OPP0001',
+          geojson: { type: 'LineString', coordinates: [[20.56, 53.76], [20.57, 53.77]] },
+          rawName: 'OKH-MIX/001',
+          routingType: 'existing_duct',
+        },
+      ],
+    });
+    const oldCable = repository.getProjectMap(project.id).trunkCables[0];
+    repository.updateCableStatus(project.id, oldCable.id, 'PULLED');
+
+    repository.recalculateChecklist({
+      projectId: project.id,
+      projectDefinition: null,
+      projectType: 'SI',
+      splitterTopology: 'SINGLE',
+      splitterTopologySource: 'AUTO',
+      splitterCount: 1,
+      gpkgFileName: 'podzial-2.gpkg',
+      addresses: [],
+      checklistNodes: [],
+      dacToAddressCableCount: 0,
+      adssToAddressCableCount: 0,
+      polygons: [],
+      trunkCables: [
+        {
+          cableKey: 'OKH-MIX/001|existing_duct|1',
+          cableType: 'MI-MKF 12J',
+          fromNode: 'ZS0001',
+          toNode: 'OPP0001',
+          osdName: 'OPP0001',
+          geojson: { type: 'LineString', coordinates: [[20.56, 53.76], [20.565, 53.765]] },
+          rawName: 'OKH-MIX/001',
+          routingType: 'existing_duct',
+        },
+        {
+          cableKey: 'OKH-MIX/001|underground|2',
+          cableType: 'MI-MKF 12J',
+          fromNode: 'ZS0001',
+          toNode: 'OPP0001',
+          osdName: 'OPP0001',
+          geojson: { type: 'LineString', coordinates: [[20.565, 53.765], [20.57, 53.77]] },
+          rawName: 'OKH-MIX/001',
+          routingType: 'underground',
+        },
+      ],
+      infraNodes: [],
+      infrastructureFeatures: [],
+    });
+
+    const map = repository.getProjectMap(project.id);
+    db.close();
+
+    expect(map.trunkCables).toHaveLength(2);
+    expect(map.trunkCables.map((cable) => cable.routingType).sort()).toEqual([
+      'existing_duct',
+      'underground',
+    ]);
+    expect(map.trunkCables.map((cable) => cable.status)).toEqual(['PULLED', 'PULLED']);
+  });
+
   it('keeps map area counts separated for the same OPP number in different localities', () => {
     const { db, repository } = createRepository();
 
