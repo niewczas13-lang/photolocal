@@ -7,6 +7,7 @@
     "dev": "tsx watch src/server.ts",
     "build": "tsc -p tsconfig.json && xcopy /Y src\\db\\schema.sql dist\\db\\",
     "start": "npm run build && node dist/server.js",
+    "serve": "node dist/server.js",
     "test": "vitest run",
     "classify:chat": "tsx src/chat-import/classify-chat-folders.ts"
   },

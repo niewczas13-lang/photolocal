@@ -27,8 +27,10 @@ export interface AppConfig {
 export function loadConfig(): AppConfig {
   const port = Number(process.env.PHOTO_LOCAL_PORT ?? 4873);
   const host = process.env.PHOTO_LOCAL_HOST ?? '0.0.0.0';
-  const dbPath = resolve(process.env.PHOTO_LOCAL_DB ?? './data/photo-local.sqlite');
-  const logPath = resolve(process.env.PHOTO_LOCAL_LOG ?? './logs/app.log');
+  const defaultDbPath = resolve(__dirname, '../data/photo-local.sqlite');
+  const defaultLogPath = resolve(__dirname, '../logs/app.log');
+  const dbPath = process.env.PHOTO_LOCAL_DB ? resolve(process.env.PHOTO_LOCAL_DB) : defaultDbPath;
+  const logPath = process.env.PHOTO_LOCAL_LOG ? resolve(process.env.PHOTO_LOCAL_LOG) : defaultLogPath;
   const frontendDistPath = resolve(__dirname, '../../frontend/dist');
   const googleChatPythonCommand = process.env.GOOGLE_CHAT_PYTHON ?? 'python';
   const googleChatScriptPath = resolve(__dirname, '../../pobierzchat/chat.py');
