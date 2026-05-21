@@ -858,6 +858,137 @@ describe('GPKG extractor helpers', () => {
     );
   });
 
+  it('splits OKW cables by explicit kanalizacja profile sections', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'photo-local-gpkg-okw-profile-split-'));
+    const gpkgPath = join(dir, 'sample.gpkg');
+    const db = new Database(gpkgPath);
+
+    db.exec(`
+      CREATE TABLE PA (
+        id_posesja_opl TEXT,
+        nazwa_miejsc TEXT,
+        nazwa_ul TEXT,
+        nr_domu TEXT,
+        nr_dzialki TEXT,
+        geom BLOB
+      );
+      CREATE TABLE "Kable Swiatlowodowe" (
+        model_kabla TEXT,
+        typ_elementu TEXT,
+        od TEXT,
+        do TEXT,
+        odcinek_kabla TEXT,
+        dl_instalacyjna REAL,
+        geom BLOB
+      );
+      CREATE TABLE "_Odcinki Kanalizacji" (
+        typ_elementu TEXT,
+        odcinek TEXT,
+        geom BLOB
+      );
+      CREATE TABLE "Odcinki Kanalizacji" (
+        id_odc TEXT,
+        typ_elementu TEXT,
+        odcinek TEXT,
+        geom BLOB
+      );
+      CREATE TABLE "Profile Kanalizacji" (
+        odcinek_kanalizacji TEXT,
+        id_odc TEXT,
+        odcinek_podrzedny TEXT,
+        typ_elementu_podrzednego TEXT,
+        profil TEXT,
+        geom BLOB
+      );
+    `);
+
+    db.prepare('INSERT INTO PA VALUES (?, ?, ?, ?, ?, ?)').run(
+      'pa-1',
+      'Klebark Maly',
+      'Testowa',
+      '1',
+      null,
+      pointGeometry(574000, 424000),
+    );
+    db.prepare('INSERT INTO "_Odcinki Kanalizacji" VALUES (?, ?, ?)').run(
+      'Kanalizacja pierwotna',
+      'KLEBARK/IST/001',
+      lineGeometry([
+        [574000, 424000],
+        [574100, 424000],
+      ]),
+    );
+    db.prepare('INSERT INTO "Odcinki Kanalizacji" VALUES (?, ?, ?, ?)').run(
+      'P000000101',
+      'Rurociag',
+      'KLEBARK/RUR/001',
+      lineGeometry([
+        [574100, 424000],
+        [574200, 424000],
+      ]),
+    );
+    db.prepare('INSERT INTO "Odcinki Kanalizacji" VALUES (?, ?, ?, ?)').run(
+      'P000000102',
+      'Kanalizacja wtorna',
+      'KLEBARK/KAN-WT/001',
+      lineGeometry([
+        [574200, 424000],
+        [574300, 424000],
+      ]),
+    );
+    db.prepare('INSERT INTO "_Odcinki Kanalizacji" VALUES (?, ?, ?)').run(
+      'Kanalizacja pierwotna',
+      'KLEBARK/IST/002',
+      lineGeometry([
+        [574200, 424000],
+        [574300, 424000],
+      ]),
+    );
+    db.prepare('INSERT INTO "Profile Kanalizacji" VALUES (?, ?, ?, ?, ?, ?)').run(
+      'KLEBARK/RUR/001',
+      'P000000101',
+      'OKW0337349/002',
+      'Kabel',
+      '2x2',
+      pointGeometry(574100, 424000),
+    );
+    db.prepare('INSERT INTO "Profile Kanalizacji" VALUES (?, ?, ?, ?, ?, ?)').run(
+      'KLEBARK/KAN-WT/001',
+      'P000000102',
+      'OKW0337349/002',
+      'Kabel',
+      '1x1',
+      pointGeometry(574200, 424000),
+    );
+    db.prepare('INSERT INTO "Kable Swiatlowodowe" VALUES (?, ?, ?, ?, ?, ?, ?)').run(
+      'MI-MKF 36J G.652D [ZN-05_[W1]_3x12(36)]',
+      'Kabel w kanalizacji',
+      'KLEBARK/OSD0012',
+      'KLEBARK/OSD0013',
+      'OKW0337349/002',
+      360,
+      lineGeometry([
+        [574000, 424000],
+        [574100, 424000],
+        [574200, 424000],
+        [574300, 424000],
+      ]),
+    );
+    db.close();
+
+    const result = extractGpkg(gpkgPath);
+    const cableParts = result.trunkCables.filter((cable) => cable.rawName === 'OKW0337349/002');
+
+    expect(cableParts).toHaveLength(3);
+    expect(cableParts.map((cable) => cable.routingType)).toEqual([
+      'existing_duct',
+      'underground',
+      'existing_duct',
+    ]);
+    expect(cableParts.map((cable) => cable.routeLengthMeters)).toEqual([100, 100, 100]);
+    expect(cableParts.map((cable) => cable.installationLengthMeters)).toEqual([120, 120, 120]);
+  });
+
   it('extracts pole infrastructure from _Obiekty instead of conceptual pole layers', () => {
     const dir = mkdtempSync(join(tmpdir(), 'photo-local-gpkg-obiekty-poles-'));
     const gpkgPath = join(dir, 'sample.gpkg');
