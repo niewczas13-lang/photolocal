@@ -1,7 +1,5 @@
 import type Database from 'better-sqlite3';
-import { createHash, randomUUID } from 'node:crypto';
-import { readFileSync } from 'node:fs';
-import { isAbsolute, relative } from 'node:path';
+import { randomUUID } from 'node:crypto';
 import type {
   ChecklistNodeRecord,
   ChecklistNodeSource,
@@ -29,19 +27,10 @@ import type {
   SplitterTopologySource,
 } from '../types.js';
 import type { GeneratedChecklistNode, ChecklistAddress } from '../checklist/checklist-generator.js';
+import { listKnownProjectPhotoHashes } from '../photos/photo-hash-cache.js';
 import { safeFolderName, toAddressFolderName } from '../utils/path-names.js';
 
 const STALE_GPKG_NODE_REASON = 'Nie wystepuje w ostatnio przeliczonym GPKG';
-
-function sha256(buffer: Buffer): string {
-  return createHash('sha256').update(buffer).digest('hex');
-}
-
-function isInsideFolder(path: string, folder: string): boolean {
-  if (!path || !folder) return false;
-  const relativePath = relative(folder, path);
-  return relativePath === '' || (!relativePath.startsWith('..') && !isAbsolute(relativePath));
-}
 
 export interface AddPhotoInput {
   id: string;
@@ -2316,42 +2305,7 @@ export class ProjectsRepository {
   }
 
   listProjectPhotoContentHashes(projectId: string): string[] {
-    const rows = this.db
-      .prepare(
-        `SELECT
-           photo.id,
-           photo.content_hash AS contentHash,
-           photo.storage_path AS storagePath,
-           project.base_folder AS baseFolder
-         FROM photos photo
-         JOIN projects project ON project.id = photo.project_id
-         WHERE photo.project_id = ?`,
-      )
-      .all(projectId) as Array<{ id: string; contentHash: string | null; storagePath: string; baseFolder: string }>;
-    const hashes = new Set<string>();
-    const updatePhotoHash = this.db.prepare(
-      `UPDATE photos
-       SET content_hash = ?
-       WHERE id = ?`,
-    );
-
-    for (const row of rows) {
-      if (!isInsideFolder(row.storagePath, row.baseFolder)) continue;
-
-      let contentHash = row.contentHash;
-      if (!contentHash) {
-        try {
-          contentHash = sha256(readFileSync(row.storagePath));
-          updatePhotoHash.run(contentHash, row.id);
-        } catch {
-          continue;
-        }
-      }
-
-      hashes.add(contentHash);
-    }
-
-    return [...hashes];
+    return listKnownProjectPhotoHashes(this.db, projectId);
   }
 
   private refreshChecklistNodeStatus(projectId: string, nodeId: string): void {

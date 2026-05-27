@@ -16,6 +16,18 @@ function insertProject(db: Database.Database, id: string): void {
 }
 
 describe('runMigrations', () => {
+  it('creates the project photo hash cache table', () => {
+    const db = new Database(':memory:');
+    runMigrations(db);
+
+    const table = db
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'project_photo_hash_cache'")
+      .get() as { name: string } | undefined;
+    db.close();
+
+    expect(table).toMatchObject({ name: 'project_photo_hash_cache' });
+  });
+
   it('migrates legacy Metki checklist nodes into a folder with a photo child', () => {
     const db = new Database(':memory:');
     runMigrations(db);

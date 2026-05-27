@@ -72,6 +72,16 @@ CREATE TABLE IF NOT EXISTS photos (
   error_message TEXT
 );
 
+CREATE TABLE IF NOT EXISTS project_photo_hash_cache (
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  storage_path TEXT NOT NULL,
+  content_hash TEXT NOT NULL,
+  file_size INTEGER,
+  modified_mtime_ms REAL,
+  scanned_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (project_id, storage_path)
+);
+
 CREATE TABLE IF NOT EXISTS map_polygons (
   id TEXT PRIMARY KEY,
   project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -247,6 +257,7 @@ CREATE INDEX IF NOT EXISTS idx_checklist_nodes_project_id ON checklist_nodes(pro
 CREATE INDEX IF NOT EXISTS idx_checklist_nodes_parent_id ON checklist_nodes(parent_id);
 CREATE INDEX IF NOT EXISTS idx_photos_project_id ON photos(project_id);
 CREATE INDEX IF NOT EXISTS idx_photos_checklist_node_id ON photos(checklist_node_id);
+CREATE INDEX IF NOT EXISTS idx_project_photo_hash_cache_project_hash ON project_photo_hash_cache(project_id, content_hash);
 CREATE INDEX IF NOT EXISTS idx_map_polygons_project_id ON map_polygons(project_id);
 CREATE INDEX IF NOT EXISTS idx_map_trunk_cables_project_id ON map_trunk_cables(project_id);
 CREATE INDEX IF NOT EXISTS idx_map_infra_nodes_project_id ON map_infra_nodes(project_id);

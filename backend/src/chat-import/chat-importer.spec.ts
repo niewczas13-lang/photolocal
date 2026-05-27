@@ -387,6 +387,27 @@ describe('importChatFolders', () => {
     expect(batches).toEqual([]);
   });
 
+  it('does not create review batches for photos already present in the project hash cache', async () => {
+    const { db, repository, projectId, dir, projectBaseFolder } = createContext();
+    const contentHash = sha256('image-from-cache');
+    const cachedPath = join(projectBaseFolder, 'manualnie_wgrane', 'photo.jpeg');
+    mkdirSync(dirname(cachedPath), { recursive: true });
+    writeFileSync(cachedPath, 'image-from-cache');
+    db.prepare(
+      `INSERT INTO project_photo_hash_cache (
+        project_id, storage_path, content_hash, file_size, modified_mtime_ms, scanned_at
+      ) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+    ).run(projectId, cachedPath, contentHash, 16, 123);
+    writeManifest(dir, 'brak_opisu_cache', '', undefined, 'image-from-cache');
+
+    const result = await importChatFolders({ projectId, rootPath: dir, repository });
+    const batches = repository.listBatches(projectId);
+    db.close();
+
+    expect(result).toEqual({ imported: 0, waitingForClassification: 0, pendingReview: 0, cleared: 0 });
+    expect(batches).toEqual([]);
+  });
+
   it('skips already assigned project photos even when stored and downloaded hashes are missing', async () => {
     const { db, projects, repository, projectId, dir, projectBaseFolder } = createContext();
     writeManifest(dir, 'brak_opisu', '', undefined, 'image');
@@ -420,6 +441,88 @@ describe('importChatFolders', () => {
     expect(result).toEqual({ imported: 0, waitingForClassification: 0, pendingReview: 0, cleared: 0 });
     expect(batches).toEqual([]);
     expect(photo.contentHash).toBe(sha256('image'));
+  });
+
+  it('does not requeue a photo hash that was already rejected', async () => {
+    const { db, repository, projectId, dir } = createContext();
+    const contentHash = sha256('rejected-image');
+    writeManifest(
+      dir,
+      'pierwsze_odrzucenie',
+      '',
+      'spaces/AAA/messages/rejected-first',
+      'rejected-image',
+      contentHash,
+    );
+
+    await importChatFolders({ projectId, rootPath: dir, repository });
+    const [firstBatch] = repository.listBatches(projectId, 'PENDING_REVIEW');
+    repository.updateDecision({
+      projectId,
+      batchId: firstBatch.id,
+      status: 'REJECTED',
+      reviewReason: 'Odrzucone recznie',
+    });
+    writeManifest(
+      dir,
+      'drugie_odrzucenie',
+      '',
+      'spaces/AAA/messages/rejected-second',
+      'rejected-image',
+      contentHash,
+    );
+
+    const result = await importChatFolders({ projectId, rootPath: dir, repository });
+    const batches = repository.listBatches(projectId);
+    db.close();
+
+    expect(result).toEqual({ imported: 0, waitingForClassification: 0, pendingReview: 0, cleared: 0 });
+    expect(batches).toEqual([expect.objectContaining({ folderName: 'pierwsze_odrzucenie', status: 'REJECTED' })]);
+  });
+
+  it('does not requeue an older rejected photo file without a stored hash', async () => {
+    const { db, repository, projectId, dir } = createContext();
+    const rejectedFolder = join(dir, 'stare_odrzucenie');
+    mkdirSync(rejectedFolder, { recursive: true });
+    writeFileSync(join(rejectedFolder, 'photo.jpeg'), 'legacy-rejected-image');
+    const rejectedBatch = repository.importManifest({
+      projectId,
+      manifest: {
+        source: 'google-chat',
+        spaceName: 'spaces/AAA',
+        spaceDisplayName: 'Budowa',
+        messageName: 'spaces/AAA/messages/legacy-rejected',
+        messageText: '',
+        createTime: '2026-04-27T10:00:00Z',
+        folderName: 'stare_odrzucenie',
+        folderPath: rejectedFolder,
+        files: [{ fileName: 'photo.jpeg', contentName: 'photo.jpeg', contentType: 'image/jpeg' }],
+      },
+      status: 'PENDING_REVIEW',
+      reviewReason: 'Brak opisu wiadomosci',
+    });
+    repository.updateDecision({
+      projectId,
+      batchId: rejectedBatch.id,
+      status: 'REJECTED',
+      reviewReason: 'Odrzucone recznie',
+    });
+    writeManifest(
+      dir,
+      'nowe_odrzucenie_ten_sam_plik',
+      '',
+      'spaces/AAA/messages/legacy-rejected-new',
+      'legacy-rejected-image',
+    );
+
+    const result = await importChatFolders({ projectId, rootPath: dir, repository });
+    const batches = repository.listBatches(projectId);
+    const rejectedFile = repository.listBatchFiles(projectId, rejectedBatch.id)[0];
+    db.close();
+
+    expect(result).toEqual({ imported: 0, waitingForClassification: 0, pendingReview: 0, cleared: 0 });
+    expect(batches).toEqual([expect.objectContaining({ folderName: 'stare_odrzucenie', status: 'REJECTED' })]);
+    expect(rejectedFile.contentHash).toBe(sha256('legacy-rejected-image'));
   });
 
   it('keeps only one review batch when two new Google Chat messages contain the same photo', async () => {

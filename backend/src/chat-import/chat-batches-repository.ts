@@ -1,7 +1,7 @@
 import type Database from 'better-sqlite3';
-import { createHash, randomUUID } from 'node:crypto';
-import { readFileSync } from 'node:fs';
-import { isAbsolute, join, relative } from 'node:path';
+import { randomUUID } from 'node:crypto';
+import { join } from 'node:path';
+import { listKnownProjectPhotoHashes } from '../photos/photo-hash-cache.js';
 import type { ReserveClassification } from './vision-classifier.js';
 import type { ChatManifest, ChatManifestSourceMessage } from './chat-manifest.js';
 
@@ -140,16 +140,6 @@ function toBatchRecord(row: ChatBatchRow): ChatBatchRecord {
     sourceMessages: parseSourceMessages(row.sourceMessages),
     visualEvidence: parseVisualEvidence(row.visualEvidence),
   };
-}
-
-function isInsideFolder(path: string, folder: string): boolean {
-  if (!path || !folder) return false;
-  const relativePath = relative(folder, path);
-  return relativePath === '' || (!relativePath.startsWith('..') && !isAbsolute(relativePath));
-}
-
-function sha256(buffer: Buffer): string {
-  return createHash('sha256').update(buffer).digest('hex');
 }
 
 export class ChatBatchesRepository {
@@ -351,42 +341,7 @@ export class ChatBatchesRepository {
   }
 
   listAssignedProjectPhotoContentHashes(projectId: string): string[] {
-    const rows = this.db
-      .prepare(
-        `SELECT
-          photo.id,
-          photo.content_hash AS contentHash,
-          photo.storage_path AS storagePath,
-          project.base_folder AS baseFolder
-        FROM photos photo
-        JOIN projects project ON project.id = photo.project_id
-        WHERE photo.project_id = ?`,
-      )
-      .all(projectId) as Array<{ id: string; contentHash: string | null; storagePath: string; baseFolder: string }>;
-    const hashes: string[] = [];
-    const updatePhotoHash = this.db.prepare(
-      `UPDATE photos
-       SET content_hash = ?
-       WHERE id = ?`,
-    );
-
-    for (const row of rows) {
-      if (!isInsideFolder(row.storagePath, row.baseFolder)) continue;
-
-      let contentHash = row.contentHash;
-      if (!contentHash) {
-        try {
-          contentHash = sha256(readFileSync(row.storagePath));
-          updatePhotoHash.run(contentHash, row.id);
-        } catch {
-          continue;
-        }
-      }
-
-      hashes.push(contentHash);
-    }
-
-    return hashes;
+    return listKnownProjectPhotoHashes(this.db, projectId);
   }
 
   clearWorkingBatches(projectId: string): number {
