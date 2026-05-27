@@ -4,6 +4,9 @@ import path from 'node:path';
 import { defineConfig } from 'vite';
 export default defineConfig({
     plugins: [tailwindcss(), react()],
+    build: {
+        chunkSizeWarningLimit: 1000,
+    },
     resolve: {
         alias: {
             '@': path.resolve(__dirname, './src'),
