@@ -1,6 +1,5 @@
 import type Database from 'better-sqlite3';
-import { createHash } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ensureDefaultUsers } from '../auth/app-auth.js';
@@ -61,36 +60,10 @@ export function runMigrations(db: Database.Database): void {
     // Ignore error if column already exists
   }
 
-  backfillPhotoContentHashes(db);
   migrateChatReserveLocationConstraint(db, schema);
   migrateMapTrunkCableIdentity(db, schema);
   backfillSystemMetkiFolder(db);
   ensureDefaultUsers(db);
-}
-
-function hashExistingFile(path: string): string | null {
-  try {
-    if (!existsSync(path)) return null;
-    return createHash('sha256').update(readFileSync(path)).digest('hex');
-  } catch {
-    return null;
-  }
-}
-
-function backfillPhotoContentHashes(db: Database.Database): void {
-  const rows = db
-    .prepare(
-      `SELECT id, storage_path AS storagePath
-       FROM photos
-       WHERE content_hash IS NULL OR content_hash = ''`,
-    )
-    .all() as Array<{ id: string; storagePath: string }>;
-  const update = db.prepare(`UPDATE photos SET content_hash = ? WHERE id = ?`);
-
-  for (const row of rows) {
-    const hash = hashExistingFile(row.storagePath);
-    if (hash) update.run(hash, row.id);
-  }
 }
 
 function tableColumns(db: Database.Database, tableName: string): Set<string> {

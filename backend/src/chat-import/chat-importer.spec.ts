@@ -1,5 +1,4 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { createHash } from 'node:crypto';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -75,10 +74,6 @@ function writeManifest(
       2,
     ),
   );
-}
-
-function sha256(value: string): string {
-  return createHash('sha256').update(value).digest('hex');
 }
 
 describe('importChatFolders', () => {
@@ -299,7 +294,6 @@ describe('importChatFolders', () => {
       lng: null,
       capturedAt: null,
       reserveLocation: null,
-      contentHash: sha256('image'),
     });
 
     const result = await importChatFolders({ projectId, rootPath: dir, repository });

@@ -362,20 +362,28 @@ export class ChatBatchesRepository {
     const rows = this.db
       .prepare(
         `SELECT
+          photo.id,
           photo.content_hash AS contentHash,
           photo.storage_path AS storagePath,
           project.base_folder AS baseFolder
         FROM photos photo
         JOIN projects project ON project.id = photo.project_id
-        WHERE photo.project_id = ?
-          AND photo.content_hash IS NOT NULL
-          AND photo.content_hash != ''`,
+        WHERE photo.project_id = ?`,
       )
-      .all(projectId) as Array<{ contentHash: string; storagePath: string; baseFolder: string }>;
+      .all(projectId) as Array<{ id: string; contentHash: string | null; storagePath: string; baseFolder: string }>;
+    const updateHash = this.db.prepare(`UPDATE photos SET content_hash = ? WHERE id = ?`);
+    const hashes: string[] = [];
 
-    return rows
-      .filter((row) => isInsideFolder(row.storagePath, row.baseFolder) && existsSync(row.storagePath))
-      .map((row) => row.contentHash);
+    for (const row of rows) {
+      if (!isInsideFolder(row.storagePath, row.baseFolder) || !existsSync(row.storagePath)) continue;
+
+      const contentHash = row.contentHash || hashFile(row.storagePath);
+      if (!contentHash) continue;
+      if (!row.contentHash) updateHash.run(contentHash, row.id);
+      hashes.push(contentHash);
+    }
+
+    return hashes;
   }
 
   clearWorkingBatches(projectId: string): number {

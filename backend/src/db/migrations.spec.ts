@@ -1,4 +1,8 @@
 import Database from 'better-sqlite3';
+import { randomUUID } from 'node:crypto';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { runMigrations } from './migrations.js';
 
@@ -61,5 +65,43 @@ describe('runMigrations', () => {
     expect(photo.checklistNodeId).toBe(metkiPhotos.id);
 
     db.close();
+  });
+
+  it('does not hash existing photo files during startup migrations', () => {
+    const dir = join(tmpdir(), `photo-local-migration-${randomUUID()}`);
+    const photoPath = join(dir, 'photos', 'photo.jpg');
+    mkdirSync(join(dir, 'photos'), { recursive: true });
+    writeFileSync(photoPath, 'existing-photo');
+
+    const db = new Database(':memory:');
+    runMigrations(db);
+    insertProject(db, 'project-1');
+    db.prepare(
+      `INSERT INTO checklist_nodes (
+        id, project_id, parent_id, name, path, node_type, source,
+        address_id, sort_order, min_photos, accepts_photos, status
+      ) VALUES (
+        'node-1', 'project-1', NULL, 'Node', 'Node', 'STATIC', 'SYSTEM',
+        NULL, 0, 0, 1, 'OPEN'
+      )`,
+    ).run();
+    db.prepare(
+      `INSERT INTO photos (
+        id, project_id, checklist_node_id, source_file_name, stored_file_name,
+        storage_path, mime_type, file_size, content_hash
+      ) VALUES (
+        'photo-1', 'project-1', 'node-1', 'photo.jpg', 'photo.jpg',
+        ?, 'image/jpeg', 10, NULL
+      )`,
+    ).run(photoPath);
+
+    runMigrations(db);
+
+    const photo = db
+      .prepare("SELECT content_hash AS contentHash FROM photos WHERE id = 'photo-1'")
+      .get() as { contentHash: string | null };
+    db.close();
+
+    expect(photo.contentHash).toBeNull();
   });
 });
