@@ -213,6 +213,17 @@ def write_downloaded_content(save_path, content):
     return hashlib.sha256(content).hexdigest()
 
 
+def hash_existing_file(path):
+    try:
+        digest = hashlib.sha256()
+        with open(path, 'rb') as f:
+            for chunk in iter(lambda: f.read(1024 * 1024), b''):
+                digest.update(chunk)
+        return digest.hexdigest()
+    except OSError:
+        return None
+
+
 def download_attachment(service, creds, attachment, save_path):
     """
     Pobiera pojedynczy zalacznik.
@@ -360,6 +371,9 @@ def process_space(service, creds, space_name, space_display_name, download_all=F
             }
 
             if os.path.exists(save_path):
+                existing_hash = hash_existing_file(save_path)
+                if existing_hash:
+                    manifest_file = {**manifest_file, 'contentHash': existing_hash}
                 upsert_message_manifest(manifest_path, manifest_base, manifest_file)
                 skipped += 1
                 continue
