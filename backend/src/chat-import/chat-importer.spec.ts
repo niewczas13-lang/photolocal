@@ -387,7 +387,7 @@ describe('importChatFolders', () => {
     expect(batches).toEqual([]);
   });
 
-  it('keeps a review batch when a downloaded file has no manifest hash yet', async () => {
+  it('skips already assigned project photos even when stored and downloaded hashes are missing', async () => {
     const { db, projects, repository, projectId, dir, projectBaseFolder } = createContext();
     writeManifest(dir, 'brak_opisu', '', undefined, 'image');
     const storedPath = join(projectBaseFolder, 'Zapasy_kabli_instalacyjnych', 'OPP0013', 'Maleniecka_5', 'photo.jpeg');
@@ -407,17 +407,19 @@ describe('importChatFolders', () => {
       lng: null,
       capturedAt: null,
       reserveLocation: null,
-      contentHash: sha256('image'),
+      contentHash: null,
     });
 
     const result = await importChatFolders({ projectId, rootPath: dir, repository });
     const batches = repository.listBatches(projectId);
+    const photo = db
+      .prepare(`SELECT content_hash AS contentHash FROM photos WHERE id = 'photo-existing'`)
+      .get() as { contentHash: string | null };
     db.close();
 
-    expect(result).toEqual({ imported: 1, waitingForClassification: 0, pendingReview: 1, cleared: 0 });
-    expect(batches).toEqual([
-      expect.objectContaining({ folderName: 'brak_opisu', status: 'PENDING_REVIEW' }),
-    ]);
+    expect(result).toEqual({ imported: 0, waitingForClassification: 0, pendingReview: 0, cleared: 0 });
+    expect(batches).toEqual([]);
+    expect(photo.contentHash).toBe(sha256('image'));
   });
 
   it('keeps only one review batch when two new Google Chat messages contain the same photo', async () => {

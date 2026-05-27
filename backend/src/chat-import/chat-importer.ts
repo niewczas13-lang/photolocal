@@ -1,3 +1,6 @@
+import { createHash } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import type { ChatBatchesRepository, ChatBatchStatus } from './chat-batches-repository.js';
 import { extractMatcherFeatures } from './checklist-matcher.js';
 import { findChatManifests, type ChatManifest } from './chat-manifest.js';
@@ -69,6 +72,29 @@ function removeDuplicateFiles(manifest: ChatManifest, knownHashes: Set<string>):
   return files.length === manifest.files.length ? manifest : { ...manifest, files };
 }
 
+function sha256(buffer: Buffer): string {
+  return createHash('sha256').update(buffer).digest('hex');
+}
+
+async function fillMissingContentHashes(manifest: ChatManifest): Promise<ChatManifest> {
+  let changed = false;
+  const files = await Promise.all(
+    manifest.files.map(async (file) => {
+      if (file.contentHash) return file;
+
+      try {
+        const sourceBuffer = await readFile(join(manifest.folderPath, file.fileName));
+        changed = true;
+        return { ...file, contentHash: sha256(sourceBuffer) };
+      } catch {
+        return file;
+      }
+    }),
+  );
+
+  return changed ? { ...manifest, files } : manifest;
+}
+
 export async function importChatFolders(input: ImportChatFoldersInput): Promise<ImportChatFoldersResult> {
   const manifests = await findChatManifests(input.rootPath);
   const result: ImportChatFoldersResult = {
@@ -80,7 +106,8 @@ export async function importChatFolders(input: ImportChatFoldersInput): Promise<
   const knownHashes = new Set(input.repository.listAssignedProjectPhotoContentHashes(input.projectId));
 
   for (const rawManifest of manifests) {
-    const manifest = removeDuplicateFiles(rawManifest, knownHashes);
+    const hashedManifest = await fillMissingContentHashes(rawManifest);
+    const manifest = removeDuplicateFiles(hashedManifest, knownHashes);
     if (manifest.files.length === 0) continue;
 
     const existingBatch = input.repository.findBatchForManifest(input.projectId, manifest);

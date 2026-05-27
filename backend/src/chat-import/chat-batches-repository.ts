@@ -1,5 +1,6 @@
 import type Database from 'better-sqlite3';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { isAbsolute, join, relative } from 'node:path';
 import type { ReserveClassification } from './vision-classifier.js';
 import type { ChatManifest, ChatManifestSourceMessage } from './chat-manifest.js';
@@ -145,6 +146,10 @@ function isInsideFolder(path: string, folder: string): boolean {
   if (!path || !folder) return false;
   const relativePath = relative(folder, path);
   return relativePath === '' || (!relativePath.startsWith('..') && !isAbsolute(relativePath));
+}
+
+function sha256(buffer: Buffer): string {
+  return createHash('sha256').update(buffer).digest('hex');
 }
 
 export class ChatBatchesRepository {
@@ -355,16 +360,30 @@ export class ChatBatchesRepository {
           project.base_folder AS baseFolder
         FROM photos photo
         JOIN projects project ON project.id = photo.project_id
-        WHERE photo.project_id = ?
-          AND photo.content_hash IS NOT NULL
-          AND photo.content_hash != ''`,
+        WHERE photo.project_id = ?`,
       )
       .all(projectId) as Array<{ id: string; contentHash: string | null; storagePath: string; baseFolder: string }>;
     const hashes: string[] = [];
+    const updatePhotoHash = this.db.prepare(
+      `UPDATE photos
+       SET content_hash = ?
+       WHERE id = ?`,
+    );
 
     for (const row of rows) {
-      if (!row.contentHash || !isInsideFolder(row.storagePath, row.baseFolder)) continue;
-      hashes.push(row.contentHash);
+      if (!isInsideFolder(row.storagePath, row.baseFolder)) continue;
+
+      let contentHash = row.contentHash;
+      if (!contentHash) {
+        try {
+          contentHash = sha256(readFileSync(row.storagePath));
+          updatePhotoHash.run(contentHash, row.id);
+        } catch {
+          continue;
+        }
+      }
+
+      hashes.push(contentHash);
     }
 
     return hashes;
