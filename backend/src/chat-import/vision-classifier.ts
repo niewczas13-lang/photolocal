@@ -121,6 +121,7 @@ export async function classifyChatFolder(
   const attempts = [
     { maxImages, imageMaxSize },
     { maxImages: Math.min(maxImages, 3), imageMaxSize: Math.min(imageMaxSize, 512), resetModel: true },
+    { maxImages: 1, imageMaxSize: Math.min(imageMaxSize, 384), resetModel: true },
   ];
   let rawResponse = '';
   let sampledPaths = imagePaths.slice(0, maxImages);
@@ -135,15 +136,15 @@ export async function classifyChatFolder(
     const images = await Promise.all(
       sampledPaths.map((imagePath) => prepareImageForOllama(imagePath, attempt.imageMaxSize)),
     );
-    rawResponse = await callOllamaVision({
-      ollamaUrl,
-      model,
-      folderName: basename(folderPath),
-      images,
-      requestTimeoutMs,
-    });
 
     try {
+      rawResponse = await callOllamaVision({
+        ollamaUrl,
+        model,
+        folderName: basename(folderPath),
+        images,
+        requestTimeoutMs,
+      });
       if (isDegenerateModelResponse(rawResponse)) {
         throw new Error('Model response degenerated into repeated punctuation');
       }

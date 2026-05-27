@@ -149,6 +149,54 @@ describe('classifyChatFolder', () => {
     expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(String(fetchMock.mock.calls[1][0])).toBe('http://ollama.test/api/generate');
   });
+
+  it('retries an Ollama HTTP 500 runtime error with a lighter request', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'photo-local-vision-http-retry-'));
+    writeFileSync(
+      join(dir, 'photo.png'),
+      Buffer.from(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=',
+        'base64',
+      ),
+    );
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            error: 'an error was encountered while running the model: GGML_ASSERT(a->ne[2] * 4 == b->ne[0]) failed',
+          }),
+          { status: 500 },
+        ),
+      )
+      .mockResolvedValueOnce(new Response(JSON.stringify({ done: true }), { status: 200 }))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            message: {
+              content:
+                '{"reserveLocation":"W studni","confidence":0.91,"visualEvidence":["widoczna studnia"],"shouldReview":false}',
+            },
+          }),
+          { status: 200 },
+        ),
+      );
+
+    const result = await classifyChatFolder({
+      folderPath: dir,
+      ollamaUrl: 'http://ollama.test',
+      requestTimeoutMs: 10_000,
+    });
+
+    expect(result).toMatchObject({
+      reserveLocation: 'W studni',
+      confidence: 0.91,
+      shouldReview: false,
+      visualEvidence: ['widoczna studnia'],
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(String(fetchMock.mock.calls[1][0])).toBe('http://ollama.test/api/generate');
+  });
 });
 
 describe('decideReviewStatus', () => {
