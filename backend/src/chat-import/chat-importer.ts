@@ -1,6 +1,7 @@
+import { createHash } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { ChatBatchesRepository, ChatBatchStatus } from './chat-batches-repository.js';
-import { hashChatFile } from './chat-batches-repository.js';
 import { extractMatcherFeatures } from './checklist-matcher.js';
 import { findChatManifests, type ChatManifest } from './chat-manifest.js';
 
@@ -53,14 +54,28 @@ function decideInitialStatus(manifest: ChatManifest): { status: ChatBatchStatus;
   return { status: 'WAITING_FOR_CLASSIFICATION', reviewReason: null };
 }
 
-function removeDuplicateFiles(manifest: ChatManifest, knownHashes: Set<string>): ChatManifest {
-  const files = manifest.files.filter((file) => {
-    const contentHash = hashChatFile(join(manifest.folderPath, file.fileName));
-    if (!contentHash) return true;
-    if (knownHashes.has(contentHash)) return false;
+async function hashChatFile(path: string): Promise<string | null> {
+  try {
+    return createHash('sha256').update(await readFile(path)).digest('hex');
+  } catch {
+    return null;
+  }
+}
+
+async function removeDuplicateFiles(manifest: ChatManifest, knownHashes: Set<string>): Promise<ChatManifest> {
+  const files: ChatManifest['files'] = [];
+
+  for (const file of manifest.files) {
+    const contentHash = file.contentHash ?? (await hashChatFile(join(manifest.folderPath, file.fileName)));
+    if (!contentHash) {
+      files.push(file);
+      continue;
+    }
+    if (knownHashes.has(contentHash)) continue;
+
     knownHashes.add(contentHash);
-    return true;
-  });
+    files.push({ ...file, contentHash });
+  }
 
   return files.length === manifest.files.length ? manifest : { ...manifest, files };
 }
@@ -76,7 +91,7 @@ export async function importChatFolders(input: ImportChatFoldersInput): Promise<
   const knownHashes = new Set(input.repository.listAssignedProjectPhotoContentHashes(input.projectId));
 
   for (const rawManifest of manifests) {
-    const manifest = removeDuplicateFiles(rawManifest, knownHashes);
+    const manifest = await removeDuplicateFiles(rawManifest, knownHashes);
     if (manifest.files.length === 0) continue;
 
     const existingBatch = input.repository.findBatchForManifest(input.projectId, manifest);

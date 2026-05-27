@@ -8,6 +8,7 @@ export interface ChatManifestFile {
   fileName: string;
   contentName: string;
   contentType: string;
+  contentHash?: string | null;
 }
 
 export interface ChatManifestSourceMessage {
@@ -51,6 +52,7 @@ interface RawChatManifestFile {
   fileName?: unknown;
   contentName?: unknown;
   contentType?: unknown;
+  contentHash?: unknown;
 }
 
 function toStringValue(value: unknown): string {
@@ -63,6 +65,7 @@ function isSupportedImage(fileName: string): boolean {
 
 function normalizeFile(file: RawChatManifestFile): ChatManifestFile | null {
   const fileName = toStringValue(file.fileName);
+  const contentHash = toStringValue(file.contentHash);
 
   if (!fileName || !isSupportedImage(fileName)) {
     return null;
@@ -72,6 +75,7 @@ function normalizeFile(file: RawChatManifestFile): ChatManifestFile | null {
     fileName,
     contentName: toStringValue(file.contentName),
     contentType: toStringValue(file.contentType),
+    ...(contentHash ? { contentHash } : {}),
   };
 }
 

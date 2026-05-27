@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, statSync, unlinkSync, writeFileSync } from 'node
 import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { setImmediate } from 'node:timers';
 import { ProjectsRepository } from './projects-repository.js';
 import { resolveProjectPhotoFolder } from './project-photo-path.js';
@@ -101,6 +101,10 @@ function getChatAcceptErrorStatus(error: unknown): 409 | 500 {
     message.includes('no longer available')
     ? 409
     : 500;
+}
+
+function sha256(buffer: Buffer): string {
+  return createHash('sha256').update(buffer).digest('hex');
 }
 
 function prepareChecklistFromGpkg(input: {
@@ -442,9 +446,16 @@ export async function registerProjectRoutes(
 
     if (!file) return reply.status(404).send({ error: 'Chat batch file not found' });
 
-    const buffer = await readFile(file.sourcePath);
-    reply.header('Content-Type', file.contentType || 'application/octet-stream');
-    return reply.send(buffer);
+    try {
+      const buffer = await readFile(file.sourcePath);
+      reply.header('Content-Type', file.contentType || 'application/octet-stream');
+      return reply.send(buffer);
+    } catch (error) {
+      if (isMissingFileError(error)) {
+        return reply.status(404).send({ error: 'Chat batch file not found on disk' });
+      }
+      throw error;
+    }
   });
 
   app.post('/api/projects/:projectId/chat-batches/:batchId/accept', async (request, reply) => {
@@ -1060,6 +1071,7 @@ export async function registerProjectRoutes(
       lng: processed.lng,
       capturedAt: processed.capturedAt,
       reserveLocation,
+      contentHash: sha256(sourceBuffer),
     });
 
     return {

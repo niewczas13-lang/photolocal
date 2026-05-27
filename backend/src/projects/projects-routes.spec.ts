@@ -385,6 +385,7 @@ describe('projects routes', () => {
       payload,
     });
     const checklist = repository.getChecklist(project.id) as Array<{ photoCount: number }>;
+    const photoHashes = repository.listProjectPhotoContentHashes(project.id);
     await app.close();
 
     expect(response.statusCode).toBe(200);
@@ -392,6 +393,7 @@ describe('projects routes', () => {
       storedFileName: 'WRONCKIEJ_13_foto1.jpeg',
     });
     expect(checklist[0].photoCount).toBe(1);
+    expect(photoHashes).toHaveLength(1);
   });
 
   it('serves a thumbnail fallback when the original photo file is missing', async () => {

@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3';
 import { createHash, randomUUID } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { isAbsolute, join, relative } from 'node:path';
 import type { ReserveClassification } from './vision-classifier.js';
 import type { ChatManifest, ChatManifestSourceMessage } from './chat-manifest.js';
@@ -156,10 +156,6 @@ function isInsideFolder(path: string, folder: string): boolean {
   return relativePath === '' || (!relativePath.startsWith('..') && !isAbsolute(relativePath));
 }
 
-export function hashChatFile(path: string): string | null {
-  return hashFile(path);
-}
-
 export class ChatBatchesRepository {
   constructor(private readonly db: Database.Database) {}
 
@@ -266,7 +262,7 @@ export class ChatBatchesRepository {
           file.contentName,
           file.contentType,
           sourcePath,
-          hashFile(sourcePath),
+          file.contentHash ?? hashFile(sourcePath),
         );
       }
 
@@ -368,19 +364,16 @@ export class ChatBatchesRepository {
           project.base_folder AS baseFolder
         FROM photos photo
         JOIN projects project ON project.id = photo.project_id
-        WHERE photo.project_id = ?`,
+        WHERE photo.project_id = ?
+          AND photo.content_hash IS NOT NULL
+          AND photo.content_hash != ''`,
       )
       .all(projectId) as Array<{ id: string; contentHash: string | null; storagePath: string; baseFolder: string }>;
-    const updateHash = this.db.prepare(`UPDATE photos SET content_hash = ? WHERE id = ?`);
     const hashes: string[] = [];
 
     for (const row of rows) {
-      if (!isInsideFolder(row.storagePath, row.baseFolder) || !existsSync(row.storagePath)) continue;
-
-      const contentHash = row.contentHash || hashFile(row.storagePath);
-      if (!contentHash) continue;
-      if (!row.contentHash) updateHash.run(contentHash, row.id);
-      hashes.push(contentHash);
+      if (!row.contentHash || !isInsideFolder(row.storagePath, row.baseFolder)) continue;
+      hashes.push(row.contentHash);
     }
 
     return hashes;
