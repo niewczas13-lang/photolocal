@@ -76,6 +76,30 @@ describe('findBestChecklistCandidate', () => {
     const result = findBestChecklistCandidate(source, candidates);
     expect(result).toBeNull();
   });
+
+  it('uses reserve location hints to resolve installation versus aerial folders', () => {
+    const source = '2026-05-26_Ul. Ziołowa 1';
+    const candidates: ChecklistMatcherCandidate[] = [
+      {
+        id: 'node-ziolowa-install',
+        name: 'UL_ZIOLOWA_1',
+        path: 'Zapasy_kabli_instalacyjnych/BARTAG/OPP0049/UL_ZIOLOWA_1',
+        nodeType: 'CABLE_RESERVE',
+        acceptsPhotos: true,
+      },
+      {
+        id: 'node-ziolowa-aerial',
+        name: 'UL_ZIOLOWA_1',
+        path: 'Zapasy_kabli_napowietrznych/BARTAG/OPP0049/UL_ZIOLOWA_1',
+        nodeType: 'CABLE_RESERVE',
+        acceptsPhotos: true,
+      },
+    ];
+
+    expect(findBestChecklistCandidate(source, candidates)).toBeNull();
+    expect(findBestChecklistCandidate(source, candidates, 'Napowietrzny')?.candidate.id).toBe('node-ziolowa-aerial');
+    expect(findBestChecklistCandidate(source, candidates, 'W studni')?.candidate.id).toBe('node-ziolowa-install');
+  });
 });
 
 describe('findBestDistributionDetailCandidate', () => {

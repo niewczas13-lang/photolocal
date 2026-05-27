@@ -303,6 +303,66 @@ describe('classifyWaitingChatBatches', () => {
     db.close();
   });
 
+  it('uses the classified aerial reserve type to match the aerial checklist folder', async () => {
+    const { db, projects, batches, projectId, dir } = createContext();
+    db.prepare(`DELETE FROM checklist_nodes WHERE project_id = ?`).run(projectId);
+    const insertNode = db.prepare(
+      `INSERT INTO checklist_nodes (
+        id, project_id, parent_id, name, path, node_type, address_id,
+        sort_order, min_photos, accepts_photos, status
+      ) VALUES (?, ?, null, ?, ?, 'CABLE_RESERVE', null, ?, 1, 1, 'OPEN')`,
+    );
+    insertNode.run(
+      'node-ziolowa-install',
+      projectId,
+      'UL_ZIOLOWA_1',
+      'Zapasy_kabli_instalacyjnych/BARTAG/OPP0049/UL_ZIOLOWA_1',
+      0,
+    );
+    insertNode.run(
+      'node-ziolowa-aerial',
+      projectId,
+      'UL_ZIOLOWA_1',
+      'Zapasy_kabli_napowietrznych/BARTAG/OPP0049/UL_ZIOLOWA_1',
+      1,
+    );
+    const folderPath = join(dir, '2026-05-26_Ul. Ziołowa 1');
+    const batch = batches.importManifest({
+      projectId,
+      manifest: createManifest(folderPath, 'Ul. Ziołowa 1'),
+      status: 'WAITING_FOR_CLASSIFICATION',
+    });
+
+    await classifyWaitingChatBatches({
+      projectId,
+      projectsRepository: projects,
+      batchesRepository: batches,
+      classifyFolder: async () => ({
+        folder: folderPath,
+        imageCount: 1,
+        sampledImages: [join(folderPath, 'photo.jpeg')],
+        model: 'qwen2.5vl:3b',
+        reserveLocation: 'Napowietrzny',
+        confidence: 0.9,
+        visualEvidence: ['kabel zwiniety na slupie'],
+        shouldReview: false,
+        rawResponse: '{"reserveLocation":"Napowietrzny"}',
+        durationMs: 123,
+        classifiedAt: '2026-04-28T10:00:00.000Z',
+      }),
+    });
+
+    const updated = batches.getBatch(projectId, batch.id);
+    db.close();
+
+    expect(updated).toMatchObject({
+      status: 'READY_FOR_IMPORT',
+      checklistNodeId: 'node-ziolowa-aerial',
+      reserveLocation: 'Napowietrzny',
+      reviewReason: null,
+    });
+  });
+
   it('does not auto-match street typos when multiple candidates share the same building number', async () => {
     const { db, projects, batches, projectId, dir } = createContext();
     db.prepare(`UPDATE checklist_nodes SET name = ?, path = ? WHERE id = ?`).run(

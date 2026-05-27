@@ -184,7 +184,11 @@ export async function classifyWaitingChatBatches(
     const classification = await classifier({
       folderPath: batch.folderPath,
     });
-    const match = findBestChecklistCandidate(`${batch.messageText} ${batch.folderName}`, checklistRows);
+    const match = findBestChecklistCandidate(
+      `${batch.messageText} ${batch.folderName}`,
+      checklistRows,
+      classification.reserveLocation,
+    );
     const candidate = match?.candidate ?? null;
     const decision = decideStatus(classification, candidate);
 

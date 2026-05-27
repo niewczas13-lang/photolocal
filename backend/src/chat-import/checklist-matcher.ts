@@ -29,6 +29,8 @@ export interface ChecklistMatchResult {
   topCandidates: RankedChecklistCandidate[];
 }
 
+export type ChecklistReserveLocationHint = 'Doziemny' | 'W studni' | 'Napowietrzny' | 'Inne' | 'Niepewne' | null;
+
 const NOISE_PATTERNS = [
   /\bzapas(?:u|y)?(?: kabla)?\b/g,
   /\bw studni\b/g,
@@ -265,11 +267,29 @@ function normalizeCandidates(rows: unknown[], predicate: (candidate: ChecklistMa
   });
 }
 
-export function findBestChecklistCandidate(sourceText: string, rows: unknown[]): ChecklistMatchResult | null {
+function matchesReserveLocationHint(
+  candidate: ChecklistMatcherCandidate,
+  reserveLocation: ChecklistReserveLocationHint | undefined,
+): boolean {
+  if (!reserveLocation || reserveLocation === 'Inne' || reserveLocation === 'Niepewne') return true;
+  if (reserveLocation === 'Napowietrzny') {
+    return candidate.path.startsWith('Zapasy_kabli_napowietrznych');
+  }
+  return candidate.path.startsWith('Zapasy_kabli_instalacyjnych');
+}
+
+export function findBestChecklistCandidate(
+  sourceText: string,
+  rows: unknown[],
+  reserveLocation?: ChecklistReserveLocationHint,
+): ChecklistMatchResult | null {
   const features = extractMatcherFeatures(sourceText);
   const candidates = normalizeCandidates(
     rows,
-    (candidate) => candidate.nodeType === 'CABLE_RESERVE' && Boolean(candidate.acceptsPhotos),
+    (candidate) =>
+      candidate.nodeType === 'CABLE_RESERVE' &&
+      Boolean(candidate.acceptsPhotos) &&
+      matchesReserveLocationHint(candidate, reserveLocation),
   );
 
   const ranked = candidates
