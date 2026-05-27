@@ -112,6 +112,40 @@ describe('getChatUpdateWorkflowSnapshot', () => {
     expect(snapshot.secondaryAction).toBeNull();
   });
 
+  it('shows Qwen model load status and diagnostic errors while classifying', () => {
+    const snapshot = getChatUpdateWorkflowSnapshot({
+      phase: 'qwen',
+      counts: { waiting: 0, ready: 0, review: 0 },
+      downloadStatus: downloadStatus({ state: 'COMPLETED' }),
+      importStatus: importStatus({ state: 'COMPLETED' }),
+      classificationStatus: classificationStatus({
+        state: 'RUNNING',
+        processed: 1,
+        total: 3,
+        readyForImport: 1,
+        pendingReview: 0,
+        diagnostics: {
+          checkedAt: '2026-05-27T21:50:00.000Z',
+          ollamaUrl: 'http://localhost:11434',
+          model: 'qwen2.5vl:3b',
+          ollamaReachable: true,
+          modelLoaded: false,
+          processor: null,
+          size: null,
+          sizeVram: null,
+          expiresAt: null,
+          gpu: null,
+          error: 'Ollama /api/ps HTTP 500',
+        },
+      }),
+      error: null,
+    });
+
+    expect(snapshot.details).toContain('Model: qwen2.5vl:3b');
+    expect(snapshot.details).toContain('niezaladowany');
+    expect(snapshot.details).toContain('Ollama /api/ps HTTP 500');
+  });
+
   it('offers queue shortcuts only after Qwen has finished', () => {
     const snapshot = getChatUpdateWorkflowSnapshot({
       phase: 'done',

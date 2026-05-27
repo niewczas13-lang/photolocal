@@ -150,11 +150,25 @@ function getDetails(input: GetChatUpdateWorkflowSnapshotInput): string {
   }
   if (input.phase === 'qwen') {
     const status = input.classificationStatus;
+    const diagnostics = status?.diagnostics;
+    const modelState = diagnostics
+      ? `Model: ${diagnostics.model} (${diagnostics.modelLoaded ? 'zaladowany' : 'niezaladowany'})`
+      : 'Model: brak danych diagnostycznych';
+    const ollamaState = diagnostics
+      ? `Ollama: ${diagnostics.ollamaReachable ? 'polaczona' : 'brak polaczenia'}`
+      : null;
+    const diagnosticError = diagnostics?.error ? `Blad: ${diagnostics.error}` : null;
     return [
       `Qwen: ${status?.processed ?? 0}/${status?.total ?? 0}`,
       `Do importu: ${status?.readyForImport ?? input.counts.ready}`,
       `Review: ${status?.pendingReview ?? input.counts.review}`,
-    ].join(' | ');
+      modelState,
+      ollamaState,
+      diagnosticError,
+      diagnostics?.processor ? `Tryb: ${diagnostics.processor}` : null,
+    ]
+      .filter((detail): detail is string => Boolean(detail))
+      .join(' | ');
   }
   if (input.phase === 'done') {
     return `Gotowe: Do importu ${input.counts.ready}, Review ${input.counts.review}, Czeka na Qwen ${input.counts.waiting}.`;
