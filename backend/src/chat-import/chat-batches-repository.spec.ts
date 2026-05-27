@@ -180,10 +180,10 @@ describe('ChatBatchesRepository', () => {
     }
 
     const cleared = repository.clearWorkingBatches(projectId);
-    const remaining = repository.listBatches(projectId).map((batch) => batch.status);
+    const remaining = repository.listBatches(projectId).map((batch) => batch.status).sort();
     db.close();
 
     expect(cleared).toBe(3);
-    expect(remaining).toEqual(['IMPORTED', 'REJECTED']);
+    expect(remaining).toEqual(['IMPORTED', 'REJECTED'].sort());
   });
 });

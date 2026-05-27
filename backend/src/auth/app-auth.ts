@@ -14,6 +14,7 @@ export interface AuthSession {
 
 const DEFAULT_USERS = ['aniela', 'pawel', 'jarek', 'piotr'];
 const SESSION_DURATION_MS = 30 * 24 * 60 * 60 * 1000;
+const SESSION_COOKIE_NAME = 'photo_local_session';
 
 function normalizeUsername(username: string): string {
   return username.trim().toLowerCase();
@@ -40,6 +41,39 @@ function getBearerToken(request: FastifyRequest): string | null {
   return match?.[1]?.trim() || null;
 }
 
+function getCookieSessionToken(request: FastifyRequest): string | null {
+  const rawHeader = request.headers.cookie;
+  const cookieHeader = Array.isArray(rawHeader) ? rawHeader.join('; ') : rawHeader;
+  if (!cookieHeader) return null;
+
+  for (const cookie of cookieHeader.split(';')) {
+    const [rawName, ...rawValueParts] = cookie.trim().split('=');
+    if (rawName !== SESSION_COOKIE_NAME) continue;
+
+    const rawValue = rawValueParts.join('=');
+    try {
+      return decodeURIComponent(rawValue);
+    } catch {
+      return rawValue || null;
+    }
+  }
+
+  return null;
+}
+
+function getRequestSessionToken(request: FastifyRequest): string | null {
+  return getBearerToken(request) ?? getCookieSessionToken(request);
+}
+
+function createSessionCookie(token: string): string {
+  const maxAgeSeconds = Math.floor(SESSION_DURATION_MS / 1000);
+  return `${SESSION_COOKIE_NAME}=${encodeURIComponent(token)}; Path=/; Max-Age=${maxAgeSeconds}; HttpOnly; SameSite=Lax`;
+}
+
+function createExpiredSessionCookie(): string {
+  return `${SESSION_COOKIE_NAME}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax`;
+}
+
 function getUserBySessionToken(db: Database.Database, token: string): AuthUser | null {
   const row = db
     .prepare(
@@ -64,7 +98,7 @@ function getUserBySessionToken(db: Database.Database, token: string): AuthUser |
 }
 
 function readAuthenticatedUser(db: Database.Database, request: FastifyRequest): AuthUser | null {
-  const token = getBearerToken(request);
+  const token = getRequestSessionToken(request);
   return token ? getUserBySessionToken(db, token) : null;
 }
 
@@ -121,19 +155,21 @@ export function registerAuthRoutes(app: FastifyInstance, db: Database.Database):
     const user = authenticateUser(db, username, password);
 
     if (!user) return reply.status(401).send({ error: 'Nieprawidlowy login albo haslo' });
-    return createSession(db, user);
+    const session = createSession(db, user);
+    return reply.header('Set-Cookie', createSessionCookie(session.token)).send(session);
   });
 
   app.get('/api/auth/me', async (request, reply) => {
-    const user = readAuthenticatedUser(db, request);
-    if (!user) return reply.status(401).send({ error: 'Unauthorized' });
-    return { user };
+    const token = getRequestSessionToken(request);
+    const user = token ? getUserBySessionToken(db, token) : null;
+    if (!token || !user) return reply.status(401).send({ error: 'Unauthorized' });
+    return reply.header('Set-Cookie', createSessionCookie(token)).send({ user });
   });
 
-  app.post('/api/auth/logout', async (request) => {
-    const token = getBearerToken(request);
+  app.post('/api/auth/logout', async (request, reply) => {
+    const token = getRequestSessionToken(request);
     if (token) deleteSession(db, token);
-    return { ok: true };
+    return reply.header('Set-Cookie', createExpiredSessionCookie()).send({ ok: true });
   });
 }
 

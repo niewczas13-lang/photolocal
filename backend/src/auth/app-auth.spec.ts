@@ -1,8 +1,9 @@
-import { mkdtempSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { buildApp } from '../app.js';
+import { ProjectsRepository } from '../projects/projects-repository.js';
 
 describe('app auth', () => {
   afterEach(() => {
@@ -43,6 +44,7 @@ describe('app auth', () => {
       url: '/api/auth/me',
       headers: { authorization: `Bearer ${token}` },
     });
+    const renewedCookie = me.headers['set-cookie'];
 
     await app.close();
 
@@ -56,6 +58,83 @@ describe('app auth', () => {
     expect(authorized.json()).toEqual([]);
     expect(me.statusCode).toBe(200);
     expect(me.json()).toMatchObject({ user: { username: 'aniela' } });
+    expect(renewedCookie).toContain('photo_local_session=');
+  });
+
+  it('allows browser image requests to use the login session cookie', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'photo-local-auth-photo-'));
+    process.env.PHOTO_LOCAL_AUTH = 'enabled';
+    process.env.PHOTO_LOCAL_DB = join(dir, 'test.sqlite');
+    process.env.PHOTO_BASE_DIR = join(dir, 'photos');
+
+    const { app, db } = await buildApp();
+    const repository = new ProjectsRepository(db);
+    const projectFolder = join(dir, 'photos', 'PROJEKT');
+    const storagePath = join(projectFolder, 'photo.jpeg');
+    mkdirSync(projectFolder, { recursive: true });
+    writeFileSync(storagePath, 'photo-bytes');
+    const project = repository.createProject({
+      name: 'PROJEKT',
+      projectDefinition: null,
+      projectType: 'SI',
+      splitterTopology: 'SINGLE',
+      splitterTopologySource: 'AUTO',
+      splitterCount: 1,
+      gpkgFileName: 'projekt.gpkg',
+      baseFolder: projectFolder,
+      addresses: [],
+      dacToAddressCableCount: 0,
+      adssToAddressCableCount: 0,
+      checklistNodes: [
+        {
+          id: 'node-photo',
+          projectId: 'project-temp',
+          parentId: null,
+          name: 'Zdjecia',
+          path: 'Zdjecia',
+          nodeType: 'STATIC',
+          addressId: null,
+          sortOrder: 0,
+          minPhotos: 1,
+          acceptsPhotos: true,
+        },
+      ],
+    });
+    repository.addPhoto({
+      id: 'photo-1',
+      projectId: project.id,
+      checklistNodeId: 'node-photo',
+      sourceFileName: 'photo.jpeg',
+      storedFileName: 'photo.jpeg',
+      storagePath,
+      thumbnailPath: null,
+      mimeType: 'image/jpeg',
+      fileSize: 10,
+      lat: null,
+      lng: null,
+      capturedAt: null,
+      reserveLocation: null,
+    });
+
+    const login = await app.inject({
+      method: 'POST',
+      url: '/api/auth/login',
+      headers: { 'content-type': 'application/json' },
+      payload: JSON.stringify({ username: 'pawel', password: 'pawel' }),
+    });
+    const setCookie = login.headers['set-cookie'];
+    const cookie = Array.isArray(setCookie) ? setCookie[0] : setCookie;
+    const photoResponse = await app.inject({
+      method: 'GET',
+      url: `/api/projects/${project.id}/photos/photo-1/file`,
+      headers: { cookie: cookie?.split(';')[0] ?? '' },
+    });
+
+    await app.close();
+
+    expect(login.statusCode).toBe(200);
+    expect(cookie).toContain('photo_local_session=');
+    expect(photoResponse.statusCode).toBe(200);
+    expect(photoResponse.body).toBe('photo-bytes');
   });
 });
-
