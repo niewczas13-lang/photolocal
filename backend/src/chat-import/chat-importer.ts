@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import type { ChatBatchesRepository, ChatBatchStatus } from './chat-batches-repository.js';
 import { extractMatcherFeatures } from './checklist-matcher.js';
 import { findChatManifests, type ChatManifest } from './chat-manifest.js';
+import { processPhoto } from '../photos/photo-processor.js';
 
 export interface ImportChatFoldersInput {
   projectId: string;
@@ -54,45 +55,54 @@ function decideInitialStatus(manifest: ChatManifest): { status: ChatBatchStatus;
   return { status: 'WAITING_FOR_CLASSIFICATION', reviewReason: null };
 }
 
-function removeDuplicateFiles(manifest: ChatManifest, knownHashes: Set<string>): ChatManifest {
+function sha256(buffer: Buffer): string {
+  return createHash('sha256').update(buffer).digest('hex');
+}
+
+async function filterDuplicateFiles(manifest: ChatManifest, knownHashes: Set<string>): Promise<ChatManifest> {
   const files: ChatManifest['files'] = [];
 
   for (const file of manifest.files) {
-    const contentHash = file.contentHash;
+    let sourceBuffer: Buffer | null = null;
+    let contentHash = file.contentHash ?? null;
+
     if (!contentHash) {
-      files.push(file);
-      continue;
+      try {
+        sourceBuffer = await readFile(join(manifest.folderPath, file.fileName));
+        contentHash = sha256(sourceBuffer);
+      } catch {
+        files.push(file);
+        continue;
+      }
     }
+
     if (knownHashes.has(contentHash)) continue;
+
+    if (!sourceBuffer) {
+      try {
+        sourceBuffer = await readFile(join(manifest.folderPath, file.fileName));
+      } catch {
+        knownHashes.add(contentHash);
+        files.push({ ...file, contentHash });
+        continue;
+      }
+    }
+
+    try {
+      const processed = await processPhoto(sourceBuffer);
+      const processedHash = sha256(processed.buffer);
+      if (knownHashes.has(processedHash)) continue;
+
+      knownHashes.add(processedHash);
+    } catch {
+      // Keep the raw hash path for files that cannot be normalized by sharp.
+    }
 
     knownHashes.add(contentHash);
     files.push({ ...file, contentHash });
   }
 
   return files.length === manifest.files.length ? manifest : { ...manifest, files };
-}
-
-function sha256(buffer: Buffer): string {
-  return createHash('sha256').update(buffer).digest('hex');
-}
-
-async function fillMissingContentHashes(manifest: ChatManifest): Promise<ChatManifest> {
-  let changed = false;
-  const files = await Promise.all(
-    manifest.files.map(async (file) => {
-      if (file.contentHash) return file;
-
-      try {
-        const sourceBuffer = await readFile(join(manifest.folderPath, file.fileName));
-        changed = true;
-        return { ...file, contentHash: sha256(sourceBuffer) };
-      } catch {
-        return file;
-      }
-    }),
-  );
-
-  return changed ? { ...manifest, files } : manifest;
 }
 
 export async function importChatFolders(input: ImportChatFoldersInput): Promise<ImportChatFoldersResult> {
@@ -106,8 +116,7 @@ export async function importChatFolders(input: ImportChatFoldersInput): Promise<
   const knownHashes = new Set(input.repository.listAssignedProjectPhotoContentHashes(input.projectId));
 
   for (const rawManifest of manifests) {
-    const hashedManifest = await fillMissingContentHashes(rawManifest);
-    const manifest = removeDuplicateFiles(hashedManifest, knownHashes);
+    const manifest = await filterDuplicateFiles(rawManifest, knownHashes);
     if (manifest.files.length === 0) continue;
 
     const existingBatch = input.repository.findBatchForManifest(input.projectId, manifest);

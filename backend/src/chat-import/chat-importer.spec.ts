@@ -6,6 +6,7 @@ import { dirname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { openDatabase } from '../db/connection.js';
 import { runMigrations } from '../db/migrations.js';
+import { processPhoto } from '../photos/photo-processor.js';
 import { ProjectsRepository } from '../projects/projects-repository.js';
 import { ChatBatchesRepository } from './chat-batches-repository.js';
 import { importChatFolders } from './chat-importer.js';
@@ -85,7 +86,7 @@ function writeManifest(
   );
 }
 
-function sha256(value: string): string {
+function sha256(value: string | Buffer): string {
   return createHash('sha256').update(value).digest('hex');
 }
 
@@ -399,6 +400,51 @@ describe('importChatFolders', () => {
       ) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
     ).run(projectId, cachedPath, contentHash, 16, 123);
     writeManifest(dir, 'brak_opisu_cache', '', undefined, 'image-from-cache');
+
+    const result = await importChatFolders({ projectId, rootPath: dir, repository });
+    const batches = repository.listBatches(projectId);
+    db.close();
+
+    expect(result).toEqual({ imported: 0, waitingForClassification: 0, pendingReview: 0, cleared: 0 });
+    expect(batches).toEqual([]);
+  });
+
+  it('matches downloaded originals against processed photos stored in the project hash cache', async () => {
+    const { db, repository, projectId, dir, projectBaseFolder } = createContext();
+    const sourceBuffer = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAF0lEQVR4nGP8z8DwnwEJMDGgAcQBAH0MBQn5n8SFAAAAAElFTkSuQmCC',
+      'base64',
+    );
+    const processed = await processPhoto(sourceBuffer);
+    const cachedPath = join(projectBaseFolder, 'Zapasy', 'processed.jpeg');
+    mkdirSync(dirname(cachedPath), { recursive: true });
+    writeFileSync(cachedPath, processed.buffer);
+    db.prepare(
+      `INSERT INTO project_photo_hash_cache (
+        project_id, storage_path, content_hash, file_size, modified_mtime_ms, scanned_at
+      ) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+    ).run(projectId, cachedPath, sha256(processed.buffer), processed.buffer.length, 123);
+
+    const folderPath = join(dir, 'oryginal_z_google');
+    mkdirSync(folderPath, { recursive: true });
+    writeFileSync(join(folderPath, 'photo.png'), sourceBuffer);
+    writeFileSync(
+      join(folderPath, 'manifest.json'),
+      JSON.stringify(
+        {
+          source: 'google-chat',
+          spaceName: 'spaces/AAA',
+          spaceDisplayName: 'Budowa',
+          messageName: 'spaces/AAA/messages/original',
+          messageText: '',
+          createTime: '2026-04-27T10:00:00Z',
+          folderName: 'oryginal_z_google',
+          files: [{ fileName: 'photo.png', contentName: 'photo.png', contentType: 'image/png' }],
+        },
+        null,
+        2,
+      ),
+    );
 
     const result = await importChatFolders({ projectId, rootPath: dir, repository });
     const batches = repository.listBatches(projectId);
