@@ -16,7 +16,7 @@ function createContext() {
   const db = openDatabase(join(dir, 'test.sqlite'));
   runMigrations(db);
   const projects = new ProjectsRepository(db);
-  const projectBaseFolder = join(dir, 'photos');
+  const projectBaseFolder = mkdtempSync(join(tmpdir(), 'photo-local-project-photos-'));
   const project = projects.createProject({
     name: 'OPP0013',
     projectDefinition: null,
@@ -54,6 +54,7 @@ function writeManifest(
   messageText: string,
   messageName?: string,
   photoContent = `image:${folderName}`,
+  contentHash?: string,
 ): void {
   const folderPath = join(root, folderName);
   mkdirSync(folderPath, { recursive: true });
@@ -69,7 +70,14 @@ function writeManifest(
         messageText,
         createTime: '2026-04-27T10:00:00Z',
         folderName,
-        files: [{ fileName: 'photo.jpeg', contentName: 'photo.jpeg', contentType: 'image/jpeg' }],
+        files: [
+          {
+            fileName: 'photo.jpeg',
+            contentName: 'photo.jpeg',
+            contentType: 'image/jpeg',
+            ...(contentHash ? { contentHash } : {}),
+          },
+        ],
       },
       null,
       2,
@@ -279,9 +287,78 @@ describe('importChatFolders', () => {
     ]);
   });
 
+  it('requeues new files added to a previously imported chat folder', async () => {
+    const { db, projects, repository, projectId, dir, projectBaseFolder } = createContext();
+    const oldHash = sha256('old-image');
+    const newHash = sha256('new-image');
+    writeManifest(dir, 'brak_opisu', '', 'spaces/AAA/messages/first', 'old-image', oldHash);
+
+    await importChatFolders({ projectId, rootPath: dir, repository });
+    const [firstBatch] = repository.listBatches(projectId);
+    const oldFiles = repository.listBatchFiles(projectId, firstBatch.id);
+    repository.removeBatchFiles(projectId, firstBatch.id, oldFiles.map((file) => file.id));
+    repository.updateDecision({
+      projectId,
+      batchId: firstBatch.id,
+      status: 'IMPORTED',
+      reviewReason: null,
+    });
+    const storedPath = join(projectBaseFolder, 'Zapasy_kabli_instalacyjnych', 'OPP0013', 'Maleniecka_5', 'photo.jpeg');
+    mkdirSync(dirname(storedPath), { recursive: true });
+    writeFileSync(storedPath, 'old-image');
+    projects.addPhoto({
+      id: 'photo-existing',
+      projectId,
+      checklistNodeId: 'node-existing',
+      sourceFileName: 'photo.jpeg',
+      storedFileName: 'photo.jpeg',
+      storagePath: storedPath,
+      thumbnailPath: null,
+      mimeType: 'image/jpeg',
+      fileSize: 9,
+      lat: null,
+      lng: null,
+      capturedAt: null,
+      reserveLocation: null,
+      contentHash: oldHash,
+    });
+
+    const folderPath = join(dir, 'brak_opisu');
+    writeFileSync(join(folderPath, 'new.jpeg'), 'new-image');
+    writeFileSync(
+      join(folderPath, 'manifest.json'),
+      JSON.stringify(
+        {
+          source: 'google-chat',
+          spaceName: 'spaces/AAA',
+          spaceDisplayName: 'Budowa',
+          messageName: 'spaces/AAA/messages/first',
+          messageText: '',
+          createTime: '2026-04-27T10:00:00Z',
+          folderName: 'brak_opisu',
+          files: [
+            { fileName: 'photo.jpeg', contentName: 'photo.jpeg', contentType: 'image/jpeg', contentHash: oldHash },
+            { fileName: 'new.jpeg', contentName: 'new.jpeg', contentType: 'image/jpeg', contentHash: newHash },
+          ],
+        },
+        null,
+        2,
+      ),
+    );
+
+    const result = await importChatFolders({ projectId, rootPath: dir, repository });
+    const [batch] = repository.listBatches(projectId, 'PENDING_REVIEW');
+    const files = repository.listBatchFiles(projectId, batch.id);
+    db.close();
+
+    expect(result).toEqual({ imported: 1, waitingForClassification: 0, pendingReview: 1, cleared: 0 });
+    expect(batch.id).toBe(firstBatch.id);
+    expect(files.map((file) => file.fileName)).toEqual(['new.jpeg']);
+  });
+
   it('does not create review batches for photos already assigned inside the project folder', async () => {
     const { db, projects, repository, projectId, dir, projectBaseFolder } = createContext();
-    writeManifest(dir, '2026-04-27_Maleniecka 5', 'Maleniecka 5', undefined, 'image');
+    writeManifest(dir, '2026-04-27_Maleniecka 5', 'Maleniecka 5', undefined, 'image', sha256('image'));
     const storedPath = join(projectBaseFolder, 'Zapasy_kabli_instalacyjnych', 'OPP0013', 'Maleniecka_5', 'photo.jpeg');
     mkdirSync(dirname(storedPath), { recursive: true });
     writeFileSync(storedPath, 'image');
@@ -310,10 +387,58 @@ describe('importChatFolders', () => {
     expect(batches).toEqual([]);
   });
 
+  it('keeps a review batch when a downloaded file has no manifest hash yet', async () => {
+    const { db, projects, repository, projectId, dir, projectBaseFolder } = createContext();
+    writeManifest(dir, 'brak_opisu', '', undefined, 'image');
+    const storedPath = join(projectBaseFolder, 'Zapasy_kabli_instalacyjnych', 'OPP0013', 'Maleniecka_5', 'photo.jpeg');
+    mkdirSync(dirname(storedPath), { recursive: true });
+    writeFileSync(storedPath, 'image');
+    projects.addPhoto({
+      id: 'photo-existing',
+      projectId,
+      checklistNodeId: 'node-existing',
+      sourceFileName: 'photo.jpeg',
+      storedFileName: 'photo.jpeg',
+      storagePath: storedPath,
+      thumbnailPath: null,
+      mimeType: 'image/jpeg',
+      fileSize: 5,
+      lat: null,
+      lng: null,
+      capturedAt: null,
+      reserveLocation: null,
+      contentHash: sha256('image'),
+    });
+
+    const result = await importChatFolders({ projectId, rootPath: dir, repository });
+    const batches = repository.listBatches(projectId);
+    db.close();
+
+    expect(result).toEqual({ imported: 1, waitingForClassification: 0, pendingReview: 1, cleared: 0 });
+    expect(batches).toEqual([
+      expect.objectContaining({ folderName: 'brak_opisu', status: 'PENDING_REVIEW' }),
+    ]);
+  });
+
   it('keeps only one review batch when two new Google Chat messages contain the same photo', async () => {
     const { db, repository, projectId, dir } = createContext();
-    writeManifest(dir, '2026-04-27_Maleniecka 5 pierwsza', 'Maleniecka 5', 'spaces/AAA/messages/first', 'same-image');
-    writeManifest(dir, '2026-04-27_Maleniecka 5 druga', 'Maleniecka 5', 'spaces/AAA/messages/second', 'same-image');
+    const contentHash = sha256('same-image');
+    writeManifest(
+      dir,
+      '2026-04-27_Maleniecka 5 pierwsza',
+      'Maleniecka 5',
+      'spaces/AAA/messages/first',
+      'same-image',
+      contentHash,
+    );
+    writeManifest(
+      dir,
+      '2026-04-27_Maleniecka 5 druga',
+      'Maleniecka 5',
+      'spaces/AAA/messages/second',
+      'same-image',
+      contentHash,
+    );
 
     const result = await importChatFolders({ projectId, rootPath: dir, repository });
     const batches = repository.listBatches(projectId);

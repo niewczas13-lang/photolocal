@@ -7,6 +7,7 @@ import time
 import threading
 import argparse
 import contextlib
+import hashlib
 import requests
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from google.oauth2.credentials import Credentials
@@ -111,6 +112,9 @@ def upsert_message_manifest(manifest_path, base_data, file_entry):
         for entry in manifest.get('files', [])
         if isinstance(entry, dict) and entry.get('fileName')
     }
+    existing_file = files_by_name.get(file_entry['fileName'], {})
+    if 'contentHash' not in file_entry and existing_file.get('contentHash'):
+        file_entry = {**file_entry, 'contentHash': existing_file['contentHash']}
     files_by_name[file_entry['fileName']] = file_entry
     manifest['files'] = sorted(files_by_name.values(), key=lambda entry: entry['fileName'])
 
@@ -203,6 +207,12 @@ def _download_media_http(creds, resource_name):
     return resp.content
 
 
+def write_downloaded_content(save_path, content):
+    with open(save_path, 'wb') as f:
+        f.write(content)
+    return hashlib.sha256(content).hexdigest()
+
+
 def download_attachment(service, creds, attachment, save_path):
     """
     Pobiera pojedynczy zalacznik.
@@ -220,11 +230,10 @@ def download_attachment(service, creds, attachment, save_path):
     if resource_name:
         try:
             content = _download_media_http(creds, resource_name)
-            with open(save_path, 'wb') as f:
-                f.write(content)
+            content_hash = write_downloaded_content(save_path, content)
             size_kb = len(content) / 1024
             print(f"    [OK] Pobrano (media HTTP): {filename} ({size_kb:.1f} KB)")
-            return True
+            return True, content_hash
         except Exception as e:
             print(f"    [!!] media HTTP error: {e}")
 
@@ -237,11 +246,10 @@ def download_attachment(service, creds, attachment, save_path):
             headers = {'Authorization': f'Bearer {creds.token}'}
             resp = requests.get(download_uri, headers=headers, allow_redirects=True, timeout=30)
             if resp.status_code == 200 and len(resp.content) > 100:
-                with open(save_path, 'wb') as f:
-                    f.write(resp.content)
+                content_hash = write_downloaded_content(save_path, resp.content)
                 size_kb = len(resp.content) / 1024
                 print(f"    [OK] Pobrano (downloadUri): {filename} ({size_kb:.1f} KB)")
-                return True
+                return True, content_hash
             else:
                 print(f"    [!!] downloadUri: HTTP {resp.status_code}, {len(resp.content)} bajtow")
         except Exception as e:
@@ -256,16 +264,15 @@ def download_attachment(service, creds, attachment, save_path):
             rn2 = ref2.get('resourceName', '')
             if rn2:
                 content = _download_media_http(creds, rn2)
-                with open(save_path, 'wb') as f:
-                    f.write(content)
+                content_hash = write_downloaded_content(save_path, content)
                 size_kb = len(content) / 1024
                 print(f"    [OK] Pobrano (att.get->media): {filename} ({size_kb:.1f} KB)")
-                return True
+                return True, content_hash
         except Exception as e:
             print(f"    [!!] att.get->media error: {e}")
 
     print(f"    [!!] Nie udalo sie pobrac: {filename}")
-    return False
+    return False, None
 
 
 def process_space(service, creds, space_name, space_display_name, download_all=False):
@@ -384,8 +391,10 @@ def process_space(service, creds, space_name, space_display_name, download_all=F
 
         def _do_download(task):
             att, save_path, content_name, label, manifest_path, manifest_base, manifest_file = task
-            success = download_attachment(service, creds, att, save_path)
+            success, content_hash = download_attachment(service, creds, att, save_path)
             if success:
+                if content_hash:
+                    manifest_file = {**manifest_file, 'contentHash': content_hash}
                 upsert_message_manifest(manifest_path, manifest_base, manifest_file)
             return success, content_name
 

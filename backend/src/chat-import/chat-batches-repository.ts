@@ -1,6 +1,5 @@
 import type Database from 'better-sqlite3';
-import { createHash, randomUUID } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import { isAbsolute, join, relative } from 'node:path';
 import type { ReserveClassification } from './vision-classifier.js';
 import type { ChatManifest, ChatManifestSourceMessage } from './chat-manifest.js';
@@ -142,14 +141,6 @@ function toBatchRecord(row: ChatBatchRow): ChatBatchRecord {
   };
 }
 
-function hashFile(path: string): string | null {
-  try {
-    return createHash('sha256').update(readFileSync(path)).digest('hex');
-  } catch {
-    return null;
-  }
-}
-
 function isInsideFolder(path: string, folder: string): boolean {
   if (!path || !folder) return false;
   const relativePath = relative(folder, path);
@@ -262,7 +253,7 @@ export class ChatBatchesRepository {
           file.contentName,
           file.contentType,
           sourcePath,
-          file.contentHash ?? hashFile(sourcePath),
+          file.contentHash ?? null,
         );
       }
 

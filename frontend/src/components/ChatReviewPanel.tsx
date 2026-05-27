@@ -231,6 +231,8 @@ export default function ChatReviewPanel({
                         <img
                           src={api.chatBatchFileUrl(projectId, batch.id, file.id)}
                           alt={file.fileName}
+                          loading="lazy"
+                          decoding="async"
                           className="h-full w-full object-cover"
                         />
                       </a>

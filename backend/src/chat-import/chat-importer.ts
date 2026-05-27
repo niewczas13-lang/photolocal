@@ -1,6 +1,3 @@
-import { createHash } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
-import { join } from 'node:path';
 import type { ChatBatchesRepository, ChatBatchStatus } from './chat-batches-repository.js';
 import { extractMatcherFeatures } from './checklist-matcher.js';
 import { findChatManifests, type ChatManifest } from './chat-manifest.js';
@@ -54,19 +51,11 @@ function decideInitialStatus(manifest: ChatManifest): { status: ChatBatchStatus;
   return { status: 'WAITING_FOR_CLASSIFICATION', reviewReason: null };
 }
 
-async function hashChatFile(path: string): Promise<string | null> {
-  try {
-    return createHash('sha256').update(await readFile(path)).digest('hex');
-  } catch {
-    return null;
-  }
-}
-
-async function removeDuplicateFiles(manifest: ChatManifest, knownHashes: Set<string>): Promise<ChatManifest> {
+function removeDuplicateFiles(manifest: ChatManifest, knownHashes: Set<string>): ChatManifest {
   const files: ChatManifest['files'] = [];
 
   for (const file of manifest.files) {
-    const contentHash = file.contentHash ?? (await hashChatFile(join(manifest.folderPath, file.fileName)));
+    const contentHash = file.contentHash;
     if (!contentHash) {
       files.push(file);
       continue;
@@ -91,12 +80,17 @@ export async function importChatFolders(input: ImportChatFoldersInput): Promise<
   const knownHashes = new Set(input.repository.listAssignedProjectPhotoContentHashes(input.projectId));
 
   for (const rawManifest of manifests) {
-    const manifest = await removeDuplicateFiles(rawManifest, knownHashes);
+    const manifest = removeDuplicateFiles(rawManifest, knownHashes);
     if (manifest.files.length === 0) continue;
 
     const existingBatch = input.repository.findBatchForManifest(input.projectId, manifest);
     if (existingBatch) {
-      continue;
+      const canRefreshImportedBatch =
+        existingBatch.status === 'IMPORTED' &&
+        input.repository.listBatchFiles(input.projectId, existingBatch.id).length === 0;
+      if (!canRefreshImportedBatch) {
+        continue;
+      }
     }
 
     const decision = decideInitialStatus(manifest);
