@@ -6,6 +6,7 @@ import type {
   ChatBatchStatus,
   ChatClassificationResult,
   ChatClassificationStatus,
+  ChatImportStatus,
   ChatImportResult,
   ChatQueueClearResult,
   AppConfig,
@@ -272,6 +273,8 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ rootPath }),
     }),
+  getChatImportStatus: (projectId: string) =>
+    request<ChatImportStatus>(`/api/projects/${projectId}/chat-import/status`),
   clearChatQueues: (projectId: string) =>
     request<ChatQueueClearResult>(`/api/projects/${projectId}/chat-batches/clear-working`, {
       method: 'POST',

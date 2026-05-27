@@ -10,6 +10,7 @@ export interface ImportChatFoldersInput {
   projectId: string;
   rootPath: string;
   repository: ChatBatchesRepository;
+  onProgress?: (event: ChatImportProgressEvent) => void;
 }
 
 export interface ImportChatFoldersResult {
@@ -17,6 +18,22 @@ export interface ImportChatFoldersResult {
   waitingForClassification: number;
   pendingReview: number;
   cleared: number;
+}
+
+export type ChatImportProgressPhase = 'scanning' | 'checking' | 'done';
+
+export interface ChatImportProgressEvent extends ImportChatFoldersResult {
+  projectId: string;
+  rootPath: string;
+  phase: ChatImportProgressPhase;
+  processedManifests: number;
+  totalManifests: number;
+  processedFiles: number;
+  totalFiles: number;
+  skippedFiles: number;
+  currentFolderName: string | null;
+  currentFileName: string | null;
+  updatedAt: string;
 }
 
 const MULTI_ADDRESS_PATTERN = /\b\d+[a-z]?\s*(?:i|oraz)\s*\d+[a-z]?\b/i;
@@ -59,7 +76,11 @@ function sha256(buffer: Buffer): string {
   return createHash('sha256').update(buffer).digest('hex');
 }
 
-async function filterDuplicateFiles(manifest: ChatManifest, knownHashes: Set<string>): Promise<ChatManifest> {
+async function filterDuplicateFiles(
+  manifest: ChatManifest,
+  knownHashes: Set<string>,
+  onFileChecked?: (file: ChatManifest['files'][number], skipped: boolean) => void,
+): Promise<ChatManifest> {
   const files: ChatManifest['files'] = [];
 
   for (const file of manifest.files) {
@@ -72,11 +93,15 @@ async function filterDuplicateFiles(manifest: ChatManifest, knownHashes: Set<str
         contentHash = sha256(sourceBuffer);
       } catch {
         files.push(file);
+        onFileChecked?.(file, false);
         continue;
       }
     }
 
-    if (knownHashes.has(contentHash)) continue;
+    if (knownHashes.has(contentHash)) {
+      onFileChecked?.(file, true);
+      continue;
+    }
 
     if (!sourceBuffer) {
       try {
@@ -84,6 +109,7 @@ async function filterDuplicateFiles(manifest: ChatManifest, knownHashes: Set<str
       } catch {
         knownHashes.add(contentHash);
         files.push({ ...file, contentHash });
+        onFileChecked?.(file, false);
         continue;
       }
     }
@@ -91,7 +117,10 @@ async function filterDuplicateFiles(manifest: ChatManifest, knownHashes: Set<str
     try {
       const processed = await processPhoto(sourceBuffer);
       const processedHash = sha256(processed.buffer);
-      if (knownHashes.has(processedHash)) continue;
+      if (knownHashes.has(processedHash)) {
+        onFileChecked?.(file, true);
+        continue;
+      }
 
       knownHashes.add(processedHash);
     } catch {
@@ -100,6 +129,7 @@ async function filterDuplicateFiles(manifest: ChatManifest, knownHashes: Set<str
 
     knownHashes.add(contentHash);
     files.push({ ...file, contentHash });
+    onFileChecked?.(file, false);
   }
 
   return files.length === manifest.files.length ? manifest : { ...manifest, files };
@@ -107,6 +137,10 @@ async function filterDuplicateFiles(manifest: ChatManifest, knownHashes: Set<str
 
 export async function importChatFolders(input: ImportChatFoldersInput): Promise<ImportChatFoldersResult> {
   const manifests = await findChatManifests(input.rootPath);
+  const totalFiles = manifests.reduce((sum, manifest) => sum + manifest.files.length, 0);
+  let processedFiles = 0;
+  let skippedFiles = 0;
+  let processedManifests = 0;
   const result: ImportChatFoldersResult = {
     imported: 0,
     waitingForClassification: 0,
@@ -114,9 +148,38 @@ export async function importChatFolders(input: ImportChatFoldersInput): Promise<
     cleared: input.repository.clearWorkingBatches(input.projectId),
   };
   const knownHashes = new Set(input.repository.listAssignedProjectPhotoContentHashes(input.projectId));
+  const emitProgress = (
+    phase: ChatImportProgressPhase,
+    current: { folderName?: string | null; fileName?: string | null } = {},
+  ) => {
+    input.onProgress?.({
+      ...result,
+      projectId: input.projectId,
+      rootPath: input.rootPath,
+      phase,
+      processedManifests,
+      totalManifests: manifests.length,
+      processedFiles,
+      totalFiles,
+      skippedFiles,
+      currentFolderName: current.folderName ?? null,
+      currentFileName: current.fileName ?? null,
+      updatedAt: new Date().toISOString(),
+    });
+  };
+
+  emitProgress('scanning');
 
   for (const rawManifest of manifests) {
-    const manifest = await filterDuplicateFiles(rawManifest, knownHashes);
+    const manifest = await filterDuplicateFiles(rawManifest, knownHashes, (file, skipped) => {
+      processedFiles += 1;
+      if (skipped) skippedFiles += 1;
+      emitProgress('checking', {
+        folderName: rawManifest.folderName,
+        fileName: file.fileName,
+      });
+    });
+    processedManifests += 1;
     if (manifest.files.length === 0) continue;
 
     const existingBatch = input.repository.findBatchForManifest(input.projectId, manifest);
@@ -146,6 +209,8 @@ export async function importChatFolders(input: ImportChatFoldersInput): Promise<
       result.pendingReview += 1;
     }
   }
+
+  emitProgress('done');
 
   return result;
 }

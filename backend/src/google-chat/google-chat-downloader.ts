@@ -12,6 +12,11 @@ export interface GoogleChatDownloadStatus {
   projectId: string | null;
   spaceName: string | null;
   spaceDisplayName: string | null;
+  downloadedFiles?: number;
+  skippedFiles?: number;
+  totalFiles?: number;
+  filesToDownload?: number;
+  failedFiles?: number;
   startedAt?: string;
   updatedAt?: string;
   finishedAt?: string;
@@ -35,8 +40,45 @@ const status: GoogleChatDownloadStatus = {
 function rememberLine(line: string): void {
   const value = line.trim();
   if (!value) return;
+  updateDownloadCounters(value);
   status.recentLines = [...status.recentLines, value].slice(-40);
   status.updatedAt = new Date().toISOString();
+}
+
+function parseCount(match: RegExpMatchArray | null): number | null {
+  if (!match) return null;
+  const value = Number(match[1]);
+  return Number.isFinite(value) ? value : null;
+}
+
+function updateDownloadCounters(line: string): void {
+  const countAfterColon = parseCount(line.match(/:\s*(\d+)/));
+
+  if (/liczba plik/i.test(line) && countAfterColon !== null) {
+    status.totalFiles = countAfterColon;
+  }
+
+  if (/Pomin/i.test(line) && countAfterColon !== null) {
+    status.skippedFiles = countAfterColon;
+  }
+
+  const toDownload = parseCount(line.match(/Do pobrania:\s*(\d+)/i));
+  if (toDownload !== null) status.filesToDownload = toDownload;
+
+  const progress = line.match(/postep:\s*(\d+)\/(\d+)/i);
+  if (progress) {
+    const processed = Number(progress[1]);
+    const totalToDownload = Number(progress[2]);
+    if (Number.isFinite(processed)) status.downloadedFiles = processed;
+    if (Number.isFinite(totalToDownload)) status.filesToDownload = totalToDownload;
+  }
+
+  const downloaded = parseCount(line.match(/Pobrano:\s*(\d+)/i));
+  if (downloaded !== null) status.downloadedFiles = downloaded;
+
+  if (/B.*d.*w/i.test(line) && countAfterColon !== null) {
+    status.failedFiles = countAfterColon;
+  }
 }
 
 function runPython(args: string[], config: GoogleChatRunnerConfig): Promise<{ stdout: string; stderr: string }> {
@@ -115,6 +157,11 @@ export function startGoogleChatDownload(input: {
   status.updatedAt = now;
   status.finishedAt = undefined;
   status.error = undefined;
+  status.downloadedFiles = 0;
+  status.skippedFiles = 0;
+  status.totalFiles = undefined;
+  status.filesToDownload = undefined;
+  status.failedFiles = 0;
   status.recentLines = [];
 
   void runPython(

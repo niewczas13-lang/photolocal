@@ -6,6 +6,7 @@ import type {
   ChatBatch,
   ChatClassificationStatus,
   ChatImportResult,
+  ChatImportStatus,
   GoogleChatDownloadStatus,
   GoogleChatInvite,
   GoogleChatInviteSessionStatus,
@@ -80,6 +81,7 @@ export default function ChatImportPanel({ projectId, project, batches, onChanged
   const [spaces, setSpaces] = useState<GoogleChatSpace[]>([]);
   const [selectedSpaceName, setSelectedSpaceName] = useState('');
   const [downloadStatus, setDownloadStatus] = useState<GoogleChatDownloadStatus | null>(null);
+  const [importStatus, setImportStatus] = useState<ChatImportStatus | null>(null);
   const [pendingAutoImportKey, setPendingAutoImportKey] = useState<string | null>(null);
   const [completedAutoImportKey, setCompletedAutoImportKey] = useState<string | null>(null);
   const [refreshedClassificationKey, setRefreshedClassificationKey] = useState<string | null>(null);
@@ -103,6 +105,7 @@ export default function ChatImportPanel({ projectId, project, batches, onChanged
   const selectedSpace = spaces.find((space) => space.name === selectedSpaceName);
   const activeDownloadSpace = assignedSpace && !isChangingSpace ? assignedSpace : selectedSpace;
   const showSpacePicker = !assignedSpace || isChangingSpace;
+  const isImportRunning = importStatus?.state === 'RUNNING';
 
   const loadSpaces = async () => {
     setBusyAction('spaces');
@@ -314,12 +317,38 @@ export default function ChatImportPanel({ projectId, project, batches, onChanged
     const importDownloaded = async () => {
       setCompletedAutoImportKey(downloadStatus.startedAt ?? null);
       const downloadRoot = `${defaultChatRoot}\\${safeFolderName(downloadStatus.spaceDisplayName ?? '')}`;
+      const now = new Date().toISOString();
+      setImportStatus({
+        state: 'RUNNING',
+        projectId,
+        rootPath: downloadRoot,
+        phase: 'scanning',
+        imported: 0,
+        waitingForClassification: 0,
+        pendingReview: 0,
+        cleared: 0,
+        processedManifests: 0,
+        totalManifests: 0,
+        processedFiles: 0,
+        totalFiles: 0,
+        skippedFiles: 0,
+        currentFolderName: null,
+        currentFileName: null,
+        startedAt: now,
+        updatedAt: now,
+      });
       try {
         const result = await api.importChatFolders(projectId, downloadRoot);
         setLastResult({ type: 'import', result });
+        setImportStatus(await api.getChatImportStatus(projectId));
         await onChanged();
       } catch (error) {
         console.error(error);
+        try {
+          setImportStatus(await api.getChatImportStatus(projectId));
+        } catch (statusError) {
+          console.error(statusError);
+        }
         alert('Pobieranie zakonczone, ale import paczek z folderu Google Chat nie powiodl sie');
       }
     };
@@ -350,9 +379,39 @@ export default function ChatImportPanel({ projectId, project, batches, onChanged
     };
   }, [projectId]);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    const refreshImportStatus = async () => {
+      try {
+        const status = await api.getChatImportStatus(projectId);
+        if (!cancelled) setImportStatus(status);
+      } catch (error) {
+        console.error(error);
+      }
+    };
+
+    void refreshImportStatus();
+    const interval = window.setInterval(() => {
+      void refreshImportStatus();
+    }, importStatus?.state === 'RUNNING' ? 1000 : 3000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [importStatus?.state, projectId]);
+
   const progressPercent =
     classificationStatus && classificationStatus.total > 0
       ? Math.round((classificationStatus.processed / classificationStatus.total) * 100)
+      : 0;
+  const downloadTotal = downloadStatus?.totalFiles ?? 0;
+  const downloadDone = (downloadStatus?.downloadedFiles ?? 0) + (downloadStatus?.skippedFiles ?? 0);
+  const downloadProgressPercent = downloadTotal > 0 ? Math.min(100, Math.round((downloadDone / downloadTotal) * 100)) : 0;
+  const importProgressPercent =
+    importStatus && importStatus.totalFiles > 0
+      ? Math.min(100, Math.round((importStatus.processedFiles / importStatus.totalFiles) * 100))
       : 0;
 
   return (
@@ -482,13 +541,13 @@ export default function ChatImportPanel({ projectId, project, batches, onChanged
                   <p className="text-xs text-muted-foreground">Ostatnie pobranie: {formatDateTime(lastDownloadAt)}</p>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  <Button disabled={!defaultChatRoot || busyAction !== null} onClick={() => void startDownload()}>
+                  <Button disabled={!defaultChatRoot || busyAction !== null || isImportRunning} onClick={() => void startDownload()}>
                     {busyAction === 'download' ? <Loader2 size={16} className="mr-2 animate-spin" /> : <MessageSquare size={16} className="mr-2" />}
                     Zaktualizuj zdjecia
                   </Button>
                   <Button
                     variant="outline"
-                    disabled={busyAction !== null}
+                    disabled={busyAction !== null || isImportRunning}
                     onClick={() => {
                       setIsChangingSpace(true);
                       void loadSpaces();
@@ -513,7 +572,7 @@ export default function ChatImportPanel({ projectId, project, batches, onChanged
                     </option>
                   ))}
                 </select>
-                <Button disabled={!selectedSpace || !defaultChatRoot || busyAction !== null} onClick={() => void startDownload()}>
+                <Button disabled={!selectedSpace || !defaultChatRoot || busyAction !== null || isImportRunning} onClick={() => void startDownload()}>
                   {busyAction === 'download' ? <Loader2 size={16} className="mr-2 animate-spin" /> : <MessageSquare size={16} className="mr-2" />}
                   {assignedSpace ? 'Pobierz i zmien pokoj' : 'Pobierz zdjecia'}
                 </Button>
@@ -528,12 +587,60 @@ export default function ChatImportPanel({ projectId, project, batches, onChanged
                     <span className="text-muted-foreground">{downloadStatus.spaceDisplayName}</span>
                   )}
                 </div>
+                <div className="h-2 rounded-full bg-muted overflow-hidden">
+                  <div
+                    className={`h-full transition-all ${downloadStatus.state === 'RUNNING' && downloadTotal === 0 ? 'w-1/3 animate-pulse bg-primary/70' : 'bg-primary'}`}
+                    style={downloadTotal > 0 ? { width: `${downloadProgressPercent}%` } : undefined}
+                  />
+                </div>
+                <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                  {downloadTotal > 0 && <span>Pliki: {downloadDone}/{downloadTotal}</span>}
+                  {typeof downloadStatus.filesToDownload === 'number' && <span>Do pobrania: {downloadStatus.filesToDownload}</span>}
+                  {typeof downloadStatus.skippedFiles === 'number' && <span>Pominiete: {downloadStatus.skippedFiles}</span>}
+                  {typeof downloadStatus.failedFiles === 'number' && downloadStatus.failedFiles > 0 && (
+                    <span className="text-destructive">Bledy: {downloadStatus.failedFiles}</span>
+                  )}
+                </div>
                 {downloadStatus.error && <p className="text-destructive">{downloadStatus.error}</p>}
                 {downloadStatus.recentLines.length > 0 && (
                   <pre className="max-h-36 overflow-auto rounded bg-background p-2 text-xs whitespace-pre-wrap">
                     {downloadStatus.recentLines.join('\n')}
                   </pre>
                 )}
+              </div>
+            )}
+
+            {importStatus && importStatus.state !== 'IDLE' && (
+              <div className="rounded-md border p-3 text-sm flex flex-col gap-2">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="font-medium">
+                    Sprawdzanie zdjec: {importStatus.state === 'RUNNING' ? 'hashuje i porownuje' : importStatus.state}
+                  </span>
+                  <span className="text-muted-foreground">
+                    {importStatus.processedFiles}/{importStatus.totalFiles}
+                  </span>
+                </div>
+                <div className="h-2 rounded-full bg-muted overflow-hidden">
+                  <div
+                    className={`h-full transition-all ${importStatus.totalFiles === 0 && importStatus.state === 'RUNNING' ? 'w-1/3 animate-pulse bg-amber-500' : 'bg-amber-500'}`}
+                    style={importStatus.totalFiles > 0 ? { width: `${importProgressPercent}%` } : undefined}
+                  />
+                </div>
+                <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                  <span>Paczki: {importStatus.processedManifests}/{importStatus.totalManifests}</span>
+                  <span>Pominiete duplikaty: {importStatus.skippedFiles}</span>
+                  <span>Do Qwena: {importStatus.waitingForClassification}</span>
+                  <span>Review: {importStatus.pendingReview}</span>
+                </div>
+                {importStatus.currentFolderName && (
+                  <div className="rounded-md bg-muted/30 p-2">
+                    <p className="font-medium break-words">{importStatus.currentFolderName}</p>
+                    {importStatus.currentFileName && (
+                      <p className="text-muted-foreground break-words">{importStatus.currentFileName}</p>
+                    )}
+                  </div>
+                )}
+                {importStatus.error && <p className="text-destructive">{importStatus.error}</p>}
               </div>
             )}
           </div>
@@ -547,17 +654,17 @@ export default function ChatImportPanel({ projectId, project, batches, onChanged
           </div>
 
           <div className="flex flex-wrap gap-2">
-            <Button variant="secondary" disabled={busyAction !== null} onClick={() => void runAction('classify')}>
+            <Button variant="secondary" disabled={busyAction !== null || isImportRunning} onClick={() => void runAction('classify')}>
               {busyAction === 'classify' ? <Loader2 size={16} className="mr-2 animate-spin" /> : <Bot size={16} className="mr-2" />}
               Weryfikuj Qwen
             </Button>
-            <Button variant="secondary" disabled={busyAction !== null} onClick={() => void runAction('accept')}>
+            <Button variant="secondary" disabled={busyAction !== null || isImportRunning} onClick={() => void runAction('accept')}>
               {busyAction === 'accept' ? <Loader2 size={16} className="mr-2 animate-spin" /> : <CheckCircle2 size={16} className="mr-2" />}
               Importuj zaakceptowane
             </Button>
             <Button
               variant="destructive"
-              disabled={busyAction !== null || counts.waiting + counts.ready + counts.review === 0}
+              disabled={busyAction !== null || isImportRunning || counts.waiting + counts.ready + counts.review === 0}
               onClick={() => void clearQueues()}
             >
               {busyAction === 'clear' ? <Loader2 size={16} className="mr-2 animate-spin" /> : <Trash2 size={16} className="mr-2" />}

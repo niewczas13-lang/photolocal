@@ -293,6 +293,24 @@ export interface ChatImportResult {
   cleared: number;
 }
 
+export interface ChatImportStatus extends ChatImportResult {
+  state: 'IDLE' | 'RUNNING' | 'COMPLETED' | 'FAILED';
+  projectId: string | null;
+  rootPath: string | null;
+  phase: 'scanning' | 'checking' | 'done' | null;
+  processedManifests: number;
+  totalManifests: number;
+  processedFiles: number;
+  totalFiles: number;
+  skippedFiles: number;
+  currentFolderName: string | null;
+  currentFileName: string | null;
+  startedAt?: string;
+  updatedAt?: string;
+  finishedAt?: string;
+  error?: string;
+}
+
 export interface ChatQueueClearResult {
   cleared: number;
 }
@@ -381,6 +399,11 @@ export interface GoogleChatDownloadStatus {
   projectId: string | null;
   spaceName: string | null;
   spaceDisplayName: string | null;
+  downloadedFiles?: number;
+  skippedFiles?: number;
+  totalFiles?: number;
+  filesToDownload?: number;
+  failedFiles?: number;
   startedAt?: string;
   updatedAt?: string;
   finishedAt?: string;

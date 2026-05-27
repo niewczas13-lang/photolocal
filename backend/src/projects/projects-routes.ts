@@ -19,6 +19,13 @@ import {
   updateChatClassificationDiagnostics,
   updateChatClassificationProgress,
 } from '../chat-import/chat-classification-status.js';
+import {
+  completeChatImport,
+  failChatImport,
+  getChatImportStatus,
+  startChatImport,
+  updateChatImportProgress,
+} from '../chat-import/chat-import-status.js';
 import { ChatBatchesRepository, type ChatBatchStatus } from '../chat-import/chat-batches-repository.js';
 import { importChatFolders } from '../chat-import/chat-importer.js';
 import { getOllamaDiagnostics } from '../chat-import/ollama-diagnostics.js';
@@ -299,6 +306,11 @@ export async function registerProjectRoutes(
     getGoogleChatDownloadStatus(),
   );
 
+  app.get('/api/projects/:projectId/chat-import/status', async (request) => {
+    const { projectId } = request.params as { projectId: string };
+    return getChatImportStatus(projectId);
+  });
+
   app.post('/api/projects/:projectId/google-chat/download', async (request, reply) => {
     const { projectId } = request.params as { projectId: string };
     const body = request.body as { spaceName?: string; spaceDisplayName?: string };
@@ -345,11 +357,27 @@ export async function registerProjectRoutes(
       return reply.status(400).send({ error: 'Google Chat import folder does not exist' });
     }
 
-    return importChatFolders({
-      projectId,
-      rootPath: body.rootPath.trim(),
-      repository: chatBatchesRepository,
-    });
+    const status = getChatImportStatus(projectId);
+    if (status.state === 'RUNNING') {
+      return reply.status(409).send({ error: 'Google Chat import is already running' });
+    }
+
+    const rootPath = body.rootPath.trim();
+    startChatImport(projectId, rootPath);
+
+    try {
+      const result = await importChatFolders({
+        projectId,
+        rootPath,
+        repository: chatBatchesRepository,
+        onProgress: updateChatImportProgress,
+      });
+      completeChatImport(projectId, result);
+      return result;
+    } catch (error) {
+      failChatImport(projectId, error);
+      throw error;
+    }
   });
 
   app.post('/api/projects/:projectId/chat-batches/classify', async (request, reply) => {

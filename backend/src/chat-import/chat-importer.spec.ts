@@ -599,6 +599,57 @@ describe('importChatFolders', () => {
     expect(batches).toHaveLength(1);
   });
 
+  it('reports progress while checking downloaded chat photos against known hashes', async () => {
+    const { db, repository, projectId, dir } = createContext();
+    const events: Array<{
+      phase: string;
+      processedFiles: number;
+      totalFiles: number;
+      currentFolderName?: string | null;
+      currentFileName?: string | null;
+    }> = [];
+    writeManifest(dir, 'brak_opisu_a', '', 'spaces/AAA/messages/a', 'first-image');
+    writeManifest(dir, 'brak_opisu_b', '', 'spaces/AAA/messages/b', 'second-image');
+
+    const result = await importChatFolders({
+      projectId,
+      rootPath: dir,
+      repository,
+      onProgress: (event) => events.push(event),
+    });
+    db.close();
+
+    expect(result.imported).toBe(2);
+    expect(events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          phase: 'scanning',
+          processedFiles: 0,
+          totalFiles: 2,
+        }),
+        expect.objectContaining({
+          phase: 'checking',
+          processedFiles: 1,
+          totalFiles: 2,
+          currentFolderName: 'brak_opisu_a',
+          currentFileName: 'photo.jpeg',
+        }),
+        expect.objectContaining({
+          phase: 'checking',
+          processedFiles: 2,
+          totalFiles: 2,
+          currentFolderName: 'brak_opisu_b',
+          currentFileName: 'photo.jpeg',
+        }),
+        expect.objectContaining({
+          phase: 'done',
+          processedFiles: 2,
+          totalFiles: 2,
+        }),
+      ]),
+    );
+  });
+
   it('clears old working chat queue before importing another folder', async () => {
     const { db, repository, projectId, dir } = createContext();
     const wrongRoot = join(dir, 'wrong-room');

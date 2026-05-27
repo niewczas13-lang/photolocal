@@ -1055,10 +1055,23 @@ describe('projects routes', () => {
       headers: { 'content-type': 'application/json' },
       payload: JSON.stringify({ rootPath: chatRoot }),
     });
+    const statusResponse = await app.inject({
+      method: 'GET',
+      url: `/api/projects/${project.id}/chat-import/status`,
+    });
     await app.close();
 
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({ imported: 2, waitingForClassification: 1, pendingReview: 1, cleared: 0 });
+    expect(statusResponse.statusCode).toBe(200);
+    expect(statusResponse.json()).toMatchObject({
+      state: 'COMPLETED',
+      processedFiles: 2,
+      totalFiles: 2,
+      imported: 2,
+      waitingForClassification: 1,
+      pendingReview: 1,
+    });
   });
 
   it('clears Google Chat working queues for a project', async () => {
