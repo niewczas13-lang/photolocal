@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Bot, CheckCircle2, Loader2, MessageSquare, RefreshCw, Trash2, UserPlus } from 'lucide-react';
+import { AlertTriangle, Bot, CheckCircle2, Circle, Loader2, MessageSquare, RefreshCw, Trash2, UserPlus } from 'lucide-react';
 import { api } from '../api';
 import type {
   ChatAcceptReadyResult,
@@ -16,13 +16,20 @@ import type {
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
 import { Card, CardContent } from './ui/card';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog';
 import { getSuggestedGoogleChatSpaces } from './chat-space-suggestions';
+import {
+  getChatUpdateWorkflowSnapshot,
+  type ChatUpdateWorkflowPhase,
+  type ChatUpdateWorkflowStep,
+} from './chat-update-workflow';
 
 interface ChatImportPanelProps {
   projectId: string;
   project: ProjectSummary;
   batches: ChatBatch[];
   onChanged: () => Promise<void>;
+  onOpenQueue?: (tab: 'ready' | 'review') => void;
 }
 
 type LastResult =
@@ -60,7 +67,26 @@ function formatDateTime(value: string | null | undefined): string {
   }).format(date);
 }
 
-export default function ChatImportPanel({ projectId, project, batches, onChanged }: ChatImportPanelProps) {
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : 'Nieznany blad';
+}
+
+function isWorkflowRunning(phase: ChatUpdateWorkflowPhase): boolean {
+  return phase === 'download' || phase === 'dedupe' || phase === 'qwen';
+}
+
+function WorkflowStepIcon({ step }: { step: ChatUpdateWorkflowStep }) {
+  if (step.state === 'complete') return <CheckCircle2 size={18} className="text-emerald-600" />;
+  if (step.state === 'failed') return <AlertTriangle size={18} className="text-destructive" />;
+  if (step.state === 'active') return <Loader2 size={18} className="animate-spin text-primary" />;
+  return <Circle size={18} className="text-muted-foreground/60" />;
+}
+
+export default function ChatImportPanel({ projectId, project, batches, onChanged, onOpenQueue }: ChatImportPanelProps) {
   const [defaultChatRoot, setDefaultChatRoot] = useState('');
   const [assignedSpace, setAssignedSpace] = useState<GoogleChatSpace | null>(() =>
     project.googleChatSpaceName
@@ -82,9 +108,10 @@ export default function ChatImportPanel({ projectId, project, batches, onChanged
   const [selectedSpaceName, setSelectedSpaceName] = useState('');
   const [downloadStatus, setDownloadStatus] = useState<GoogleChatDownloadStatus | null>(null);
   const [importStatus, setImportStatus] = useState<ChatImportStatus | null>(null);
-  const [pendingAutoImportKey, setPendingAutoImportKey] = useState<string | null>(null);
-  const [completedAutoImportKey, setCompletedAutoImportKey] = useState<string | null>(null);
   const [refreshedClassificationKey, setRefreshedClassificationKey] = useState<string | null>(null);
+  const [workflowPhase, setWorkflowPhase] = useState<ChatUpdateWorkflowPhase>('idle');
+  const [workflowError, setWorkflowError] = useState<string | null>(null);
+  const [workflowModalOpen, setWorkflowModalOpen] = useState(false);
   const [invites, setInvites] = useState<GoogleChatInvite[]>([]);
   const [inviteProfileDir, setInviteProfileDir] = useState('');
   const [inviteSession, setInviteSession] = useState<GoogleChatInviteSessionStatus | null>(null);
@@ -106,6 +133,21 @@ export default function ChatImportPanel({ projectId, project, batches, onChanged
   const activeDownloadSpace = assignedSpace && !isChangingSpace ? assignedSpace : selectedSpace;
   const showSpacePicker = !assignedSpace || isChangingSpace;
   const isImportRunning = importStatus?.state === 'RUNNING';
+  const isClassificationRunning = classificationStatus?.state === 'RUNNING';
+  const workflowRunning = isWorkflowRunning(workflowPhase);
+  const operationRunning = workflowRunning || isImportRunning || isClassificationRunning;
+  const workflowSnapshot = useMemo(
+    () =>
+      getChatUpdateWorkflowSnapshot({
+        phase: workflowPhase,
+        counts,
+        downloadStatus,
+        importStatus,
+        classificationStatus,
+        error: workflowError,
+      }),
+    [classificationStatus, counts, downloadStatus, importStatus, workflowError, workflowPhase],
+  );
 
   const loadSpaces = async () => {
     setBusyAction('spaces');
@@ -172,17 +214,76 @@ export default function ChatImportPanel({ projectId, project, batches, onChanged
   const startDownload = async () => {
     if (!activeDownloadSpace || !defaultChatRoot) return;
     setBusyAction('download');
+    setWorkflowPhase('download');
+    setWorkflowError(null);
+    setWorkflowModalOpen(true);
     try {
       const result = await api.startGoogleChatDownload(projectId, activeDownloadSpace.name, activeDownloadSpace.displayName);
       setDownloadStatus(result);
       setAssignedSpace(activeDownloadSpace);
       setLastDownloadAt(result.startedAt ?? new Date().toISOString());
       setIsChangingSpace(false);
-      setPendingAutoImportKey(result.startedAt ?? null);
-      setCompletedAutoImportKey(null);
+
+      let completedDownload = result;
+      while (completedDownload.state === 'RUNNING') {
+        await sleep(1000);
+        completedDownload = await api.getGoogleChatDownloadStatus(projectId);
+        setDownloadStatus(completedDownload);
+      }
+
+      if (completedDownload.state === 'FAILED') {
+        throw new Error(completedDownload.error ?? 'Pobieranie z Google Chat nie powiodlo sie');
+      }
+
+      setWorkflowPhase('dedupe');
+      const downloadRoot = `${defaultChatRoot}\\${safeFolderName(completedDownload.spaceDisplayName ?? activeDownloadSpace.displayName)}`;
+      const now = new Date().toISOString();
+      setImportStatus({
+        state: 'RUNNING',
+        projectId,
+        rootPath: downloadRoot,
+        phase: 'scanning',
+        imported: 0,
+        waitingForClassification: 0,
+        pendingReview: 0,
+        cleared: 0,
+        processedManifests: 0,
+        totalManifests: 0,
+        processedFiles: 0,
+        totalFiles: 0,
+        skippedFiles: 0,
+        currentFolderName: null,
+        currentFileName: null,
+        startedAt: now,
+        updatedAt: now,
+      });
+      const importResult = await api.importChatFolders(projectId, downloadRoot);
+      setLastResult({ type: 'import', result: importResult });
+      setImportStatus(await api.getChatImportStatus(projectId));
+      await onChanged();
+
+      setWorkflowPhase('qwen');
+      const classificationStart = await api.classifyChatBatches(projectId);
+      setLastResult({ type: 'classify-started', result: classificationStart });
+      setClassificationStatus(classificationStart);
+
+      let completedClassification = classificationStart;
+      while (completedClassification.state === 'RUNNING') {
+        await sleep(1500);
+        completedClassification = await api.getChatClassificationStatus(projectId);
+        setClassificationStatus(completedClassification);
+      }
+
+      if (completedClassification.state === 'FAILED') {
+        throw new Error(completedClassification.error ?? 'Qwen przerwal klasyfikacje');
+      }
+
+      await onChanged();
+      setWorkflowPhase('done');
     } catch (error) {
       console.error(error);
-      alert('Blad podczas startu pobierania z Google Chat');
+      setWorkflowError(getErrorMessage(error));
+      setWorkflowPhase('failed');
     } finally {
       setBusyAction(null);
     }
@@ -303,60 +404,6 @@ export default function ChatImportPanel({ projectId, project, batches, onChanged
   }, [classificationStatus, onChanged, refreshedClassificationKey]);
 
   useEffect(() => {
-    if (
-      downloadStatus?.state !== 'COMPLETED' ||
-      downloadStatus.projectId !== projectId ||
-      !downloadStatus.startedAt ||
-      downloadStatus.startedAt !== pendingAutoImportKey ||
-      completedAutoImportKey === downloadStatus.startedAt ||
-      !defaultChatRoot
-    ) {
-      return;
-    }
-
-    const importDownloaded = async () => {
-      setCompletedAutoImportKey(downloadStatus.startedAt ?? null);
-      const downloadRoot = `${defaultChatRoot}\\${safeFolderName(downloadStatus.spaceDisplayName ?? '')}`;
-      const now = new Date().toISOString();
-      setImportStatus({
-        state: 'RUNNING',
-        projectId,
-        rootPath: downloadRoot,
-        phase: 'scanning',
-        imported: 0,
-        waitingForClassification: 0,
-        pendingReview: 0,
-        cleared: 0,
-        processedManifests: 0,
-        totalManifests: 0,
-        processedFiles: 0,
-        totalFiles: 0,
-        skippedFiles: 0,
-        currentFolderName: null,
-        currentFileName: null,
-        startedAt: now,
-        updatedAt: now,
-      });
-      try {
-        const result = await api.importChatFolders(projectId, downloadRoot);
-        setLastResult({ type: 'import', result });
-        setImportStatus(await api.getChatImportStatus(projectId));
-        await onChanged();
-      } catch (error) {
-        console.error(error);
-        try {
-          setImportStatus(await api.getChatImportStatus(projectId));
-        } catch (statusError) {
-          console.error(statusError);
-        }
-        alert('Pobieranie zakonczone, ale import paczek z folderu Google Chat nie powiodl sie');
-      }
-    };
-
-    void importDownloaded();
-  }, [completedAutoImportKey, defaultChatRoot, downloadStatus, onChanged, pendingAutoImportKey, projectId]);
-
-  useEffect(() => {
     let cancelled = false;
 
     const refreshDownloadStatus = async () => {
@@ -416,6 +463,116 @@ export default function ChatImportPanel({ projectId, project, batches, onChanged
 
   return (
     <div className="flex flex-col gap-4">
+      <Dialog
+        open={workflowModalOpen}
+        onOpenChange={(open) => {
+          if (!open && !workflowSnapshot.canClose) return;
+          setWorkflowModalOpen(open);
+        }}
+      >
+        <DialogContent className="sm:max-w-xl" showCloseButton={workflowSnapshot.canClose}>
+          <DialogHeader>
+            <DialogTitle>{workflowSnapshot.title}</DialogTitle>
+            <DialogDescription>{workflowSnapshot.description}</DialogDescription>
+          </DialogHeader>
+
+          <div className="flex flex-col gap-4">
+            <div className="rounded-lg border bg-muted/20 p-3">
+              <div className="mb-2 flex items-center justify-between gap-3 text-sm">
+                <span className="font-medium">Postep workflow</span>
+                <span className="font-mono text-xs text-muted-foreground">{workflowSnapshot.progressPercent}%</span>
+              </div>
+              <div className="h-2 overflow-hidden rounded-full bg-muted">
+                <div
+                  className={`h-full transition-all ${
+                    workflowRunning && workflowSnapshot.progressPercent === 0 ? 'w-1/3 animate-pulse bg-primary/70' : 'bg-primary'
+                  }`}
+                  style={workflowSnapshot.progressPercent > 0 ? { width: `${workflowSnapshot.progressPercent}%` } : undefined}
+                />
+              </div>
+            </div>
+
+            <div className="grid gap-2">
+              {workflowSnapshot.steps.map((step) => (
+                <div
+                  key={step.id}
+                  className={`flex items-center gap-3 rounded-lg border px-3 py-2 ${
+                    step.state === 'active'
+                      ? 'border-primary/30 bg-primary/5'
+                      : step.state === 'failed'
+                        ? 'border-destructive/30 bg-destructive/5'
+                        : step.state === 'complete'
+                          ? 'border-emerald-200 bg-emerald-50'
+                          : 'bg-background'
+                  }`}
+                >
+                  <WorkflowStepIcon step={step} />
+                  <div className="min-w-0">
+                    <p className="font-medium">{step.label}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {step.state === 'active'
+                        ? 'Trwa'
+                        : step.state === 'complete'
+                          ? 'Gotowe'
+                          : step.state === 'failed'
+                            ? 'Blad'
+                            : 'Czeka'}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="rounded-lg border bg-background p-3 text-sm">
+              <p className="break-words text-muted-foreground">{workflowSnapshot.details}</p>
+              {workflowSnapshot.currentItem && (
+                <p className="mt-2 break-words font-medium">Aktualnie: {workflowSnapshot.currentItem}</p>
+              )}
+              {workflowRunning && (
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Operacja jest w toku. Przyciski zostaja zablokowane do zakonczenia tego przebiegu.
+                </p>
+              )}
+            </div>
+          </div>
+
+          <DialogFooter>
+            {workflowSnapshot.primaryAction && (
+              <Button
+                onClick={() => {
+                  setWorkflowModalOpen(false);
+                  onOpenQueue?.(workflowSnapshot.primaryAction!.tab);
+                }}
+              >
+                {workflowSnapshot.primaryAction.label}
+              </Button>
+            )}
+            {workflowSnapshot.secondaryAction && (
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setWorkflowModalOpen(false);
+                  onOpenQueue?.(workflowSnapshot.secondaryAction!.tab);
+                }}
+              >
+                {workflowSnapshot.secondaryAction.label}
+              </Button>
+            )}
+            {workflowSnapshot.canClose && (
+              <Button variant={workflowSnapshot.primaryAction ? 'ghost' : 'default'} onClick={() => setWorkflowModalOpen(false)}>
+                Zamknij
+              </Button>
+            )}
+            {!workflowSnapshot.canClose && (
+              <Button variant="outline" disabled>
+                <Loader2 size={16} className="mr-2 animate-spin" />
+                Pracuje
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <Card>
         <CardContent className="p-4 flex flex-col gap-4">
           <div>
@@ -434,11 +591,11 @@ export default function ChatImportPanel({ projectId, project, batches, onChanged
                 </p>
               </div>
               <div className="flex flex-wrap gap-2">
-                <Button variant="outline" disabled={busyAction !== null} onClick={() => void openInviteSetup()}>
+                <Button variant="outline" disabled={busyAction !== null || operationRunning} onClick={() => void openInviteSetup()}>
                   {busyAction === 'invite-setup' ? <Loader2 size={16} className="mr-2 animate-spin" /> : <UserPlus size={16} className="mr-2" />}
                   Otworz logowanie
                 </Button>
-                <Button variant="outline" disabled={busyAction !== null} onClick={() => void loadInvites()}>
+                <Button variant="outline" disabled={busyAction !== null || operationRunning} onClick={() => void loadInvites()}>
                   {busyAction === 'invites' ? <Loader2 size={16} className="mr-2 animate-spin" /> : <RefreshCw size={16} className="mr-2" />}
                   Zaladuj zaproszenia
                 </Button>
@@ -492,7 +649,7 @@ export default function ChatImportPanel({ projectId, project, batches, onChanged
                     <div className="flex justify-end">
                       <Button
                         size="sm"
-                        disabled={busyAction !== null}
+                        disabled={busyAction !== null || operationRunning}
                         onClick={() => void acceptInvite(invite)}
                       >
                         {acceptingInviteKey === invite.key ? (
@@ -525,7 +682,7 @@ export default function ChatImportPanel({ projectId, project, batches, onChanged
                 </p>
               </div>
               {showSpacePicker && (
-                <Button variant="outline" disabled={busyAction !== null} onClick={() => void loadSpaces()}>
+                <Button variant="outline" disabled={busyAction !== null || operationRunning} onClick={() => void loadSpaces()}>
                   {busyAction === 'spaces' ? <Loader2 size={16} className="mr-2 animate-spin" /> : <RefreshCw size={16} className="mr-2" />}
                   Zaladuj pokoje
                 </Button>
@@ -541,13 +698,13 @@ export default function ChatImportPanel({ projectId, project, batches, onChanged
                   <p className="text-xs text-muted-foreground">Ostatnie pobranie: {formatDateTime(lastDownloadAt)}</p>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  <Button disabled={!defaultChatRoot || busyAction !== null || isImportRunning} onClick={() => void startDownload()}>
+                  <Button disabled={!defaultChatRoot || busyAction !== null || operationRunning} onClick={() => void startDownload()}>
                     {busyAction === 'download' ? <Loader2 size={16} className="mr-2 animate-spin" /> : <MessageSquare size={16} className="mr-2" />}
                     Zaktualizuj zdjecia
                   </Button>
                   <Button
                     variant="outline"
-                    disabled={busyAction !== null || isImportRunning}
+                    disabled={busyAction !== null || operationRunning}
                     onClick={() => {
                       setIsChangingSpace(true);
                       void loadSpaces();
@@ -572,7 +729,7 @@ export default function ChatImportPanel({ projectId, project, batches, onChanged
                     </option>
                   ))}
                 </select>
-                <Button disabled={!selectedSpace || !defaultChatRoot || busyAction !== null || isImportRunning} onClick={() => void startDownload()}>
+                <Button disabled={!selectedSpace || !defaultChatRoot || busyAction !== null || operationRunning} onClick={() => void startDownload()}>
                   {busyAction === 'download' ? <Loader2 size={16} className="mr-2 animate-spin" /> : <MessageSquare size={16} className="mr-2" />}
                   {assignedSpace ? 'Pobierz i zmien pokoj' : 'Pobierz zdjecia'}
                 </Button>
@@ -654,17 +811,17 @@ export default function ChatImportPanel({ projectId, project, batches, onChanged
           </div>
 
           <div className="flex flex-wrap gap-2">
-            <Button variant="secondary" disabled={busyAction !== null || isImportRunning} onClick={() => void runAction('classify')}>
+            <Button variant="secondary" disabled={busyAction !== null || operationRunning} onClick={() => void runAction('classify')}>
               {busyAction === 'classify' ? <Loader2 size={16} className="mr-2 animate-spin" /> : <Bot size={16} className="mr-2" />}
               Weryfikuj Qwen
             </Button>
-            <Button variant="secondary" disabled={busyAction !== null || isImportRunning} onClick={() => void runAction('accept')}>
+            <Button variant="secondary" disabled={busyAction !== null || operationRunning} onClick={() => void runAction('accept')}>
               {busyAction === 'accept' ? <Loader2 size={16} className="mr-2 animate-spin" /> : <CheckCircle2 size={16} className="mr-2" />}
               Importuj zaakceptowane
             </Button>
             <Button
               variant="destructive"
-              disabled={busyAction !== null || isImportRunning || counts.waiting + counts.ready + counts.review === 0}
+              disabled={busyAction !== null || operationRunning || counts.waiting + counts.ready + counts.review === 0}
               onClick={() => void clearQueues()}
             >
               {busyAction === 'clear' ? <Loader2 size={16} className="mr-2 animate-spin" /> : <Trash2 size={16} className="mr-2" />}

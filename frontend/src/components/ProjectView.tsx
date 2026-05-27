@@ -964,6 +964,10 @@ export default function ProjectView({
                     projectId={projectId}
                     project={project}
                     batches={chatBatches}
+                    onOpenQueue={(tab) => {
+                      setActiveTab(tab);
+                      onTabChange(tab);
+                    }}
                     onChanged={async () => {
                       await refreshChecklist(selectedNodeId);
                       await refreshNodeDetail(selectedNodeId);
