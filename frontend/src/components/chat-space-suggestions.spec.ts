@@ -12,6 +12,8 @@ const project: ProjectSummary = {
   splitterCount: 1,
   gpkgFileName: 'sample.gpkg',
   baseFolder: 'Z:\\BARTAG',
+  googleChatSpaceName: null,
+  googleChatSpaceDisplayName: null,
   addressCount: 0,
   dacToAddressCableCount: 0,
   adssToAddressCableCount: 0,
@@ -49,6 +51,25 @@ describe('getSuggestedGoogleChatSpaces', () => {
 
     expect(result[0]).toMatchObject({
       space: expect.objectContaining({ displayName: 'BARTĄG X/04017287' }),
+      isSuggested: true,
+    });
+  });
+
+  it('puts the assigned room before fuzzy project matches', () => {
+    const result = getSuggestedGoogleChatSpaces(
+      {
+        ...project,
+        googleChatSpaceName: 'spaces/ASSIGNED',
+        googleChatSpaceDisplayName: 'Staly pokoj budowy',
+      },
+      [
+        { name: 'spaces/MATCH', displayName: 'Bartag OPP03 X/04017284', spaceType: 'SPACE' },
+        { name: 'spaces/ASSIGNED', displayName: 'Staly pokoj budowy', spaceType: 'SPACE' },
+      ],
+    );
+
+    expect(result[0]).toMatchObject({
+      space: expect.objectContaining({ name: 'spaces/ASSIGNED' }),
       isSuggested: true,
     });
   });

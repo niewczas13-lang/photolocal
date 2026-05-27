@@ -99,6 +99,43 @@ describe('ProjectsRepository', () => {
     });
   });
 
+  it('stores an assigned Google Chat room on the project summary', () => {
+    const { db, repository } = createRepository();
+
+    const project = repository.createProject({
+      name: 'OPP0013',
+      projectDefinition: null,
+      projectType: 'SI',
+      splitterTopology: 'SINGLE',
+      splitterTopologySource: 'AUTO',
+      splitterCount: 1,
+      gpkgFileName: 'OPP0013.gpkg',
+      baseFolder: 'C:/photos/OPP0013',
+      addresses: [],
+      dacToAddressCableCount: 0,
+      adssToAddressCableCount: 0,
+      checklistNodes: [],
+    });
+
+    const updated = repository.assignGoogleChatSpace(project.id, {
+      spaceName: 'spaces/AAA',
+      spaceDisplayName: 'Budowa OPP0013',
+    });
+    const [summary] = repository.listProjects();
+    db.close();
+
+    expect(updated).toMatchObject({
+      id: project.id,
+      googleChatSpaceName: 'spaces/AAA',
+      googleChatSpaceDisplayName: 'Budowa OPP0013',
+    });
+    expect(summary).toMatchObject({
+      id: project.id,
+      googleChatSpaceName: 'spaces/AAA',
+      googleChatSpaceDisplayName: 'Budowa OPP0013',
+    });
+  });
+
   it('recalculates checklist without removing assigned photos', () => {
     const { db, repository } = createRepository();
 

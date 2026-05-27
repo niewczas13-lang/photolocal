@@ -303,15 +303,18 @@ export async function registerProjectRoutes(
     if (!project) return reply.status(404).send({ error: 'Project not found' });
     if (!body.spaceName?.trim()) return reply.status(400).send({ error: 'spaceName is required' });
 
+    const spaceName = body.spaceName.trim();
+    const spaceDisplayName = body.spaceDisplayName?.trim() || spaceName;
+
     try {
-      return reply.status(202).send(
-        startGoogleChatDownload({
-          projectId,
-          spaceName: body.spaceName.trim(),
-          spaceDisplayName: body.spaceDisplayName?.trim() || body.spaceName.trim(),
-          config: googleChatConfig(),
-        }),
-      );
+      const downloadStatus = startGoogleChatDownload({
+        projectId,
+        spaceName,
+        spaceDisplayName,
+        config: googleChatConfig(),
+      });
+      repository.assignGoogleChatSpace(projectId, { spaceName, spaceDisplayName });
+      return reply.status(202).send(downloadStatus);
     } catch (error) {
       return reply.status(409).send({ error: error instanceof Error ? error.message : String(error) });
     }

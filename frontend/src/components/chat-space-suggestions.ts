@@ -32,6 +32,8 @@ function scoreSpace(project: ProjectSummary, space: GoogleChatSpace): number {
   const compactSpace = compact(spaceText);
   let score = 0;
 
+  if (project.googleChatSpaceName && space.name === project.googleChatSpaceName) score += 10_000;
+
   if (project.projectDefinition) {
     const normalizedDefinition = normalizeForMatch(project.projectDefinition);
     const compactDefinition = compact(project.projectDefinition);

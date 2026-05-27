@@ -21,6 +21,8 @@ export interface ProjectSummary {
   splitterCount: number;
   gpkgFileName: string;
   baseFolder: string;
+  googleChatSpaceName: string | null;
+  googleChatSpaceDisplayName: string | null;
   addressCount: number;
   dacToAddressCableCount: number;
   adssToAddressCableCount: number;

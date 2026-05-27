@@ -24,6 +24,18 @@ export function runMigrations(db: Database.Database): void {
     // Ignore error if column already exists
   }
 
+  try {
+    db.exec('ALTER TABLE projects ADD COLUMN google_chat_space_name TEXT;');
+  } catch (e) {
+    // Ignore error if column already exists
+  }
+
+  try {
+    db.exec('ALTER TABLE projects ADD COLUMN google_chat_space_display_name TEXT;');
+  } catch (e) {
+    // Ignore error if column already exists
+  }
+
   migrateChatReserveLocationConstraint(db, schema);
   migrateMapTrunkCableIdentity(db, schema);
   backfillSystemMetkiFolder(db);

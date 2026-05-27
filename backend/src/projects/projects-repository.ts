@@ -635,6 +635,8 @@ export class ProjectsRepository {
           project.splitter_topology_source AS splitterTopologySource,
           project.gpkg_file_name AS gpkgFileName,
           project.base_folder AS baseFolder,
+          project.google_chat_space_name AS googleChatSpaceName,
+          project.google_chat_space_display_name AS googleChatSpaceDisplayName,
           project.address_count AS addressCount,
           project.dac_to_address_cable_count AS dacToAddressCableCount,
           project.adss_to_address_cable_count AS adssToAddressCableCount,
@@ -802,6 +804,26 @@ export class ProjectsRepository {
 
   getProject(projectId: string): ProjectRecord | null {
     return this.listProjects().find((project) => project.id === projectId) ?? null;
+  }
+
+  assignGoogleChatSpace(
+    projectId: string,
+    input: {
+      spaceName: string;
+      spaceDisplayName: string;
+    },
+  ): ProjectRecord | null {
+    this.db
+      .prepare(
+        `UPDATE projects
+         SET google_chat_space_name = ?,
+             google_chat_space_display_name = ?,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?`,
+      )
+      .run(input.spaceName, input.spaceDisplayName, projectId);
+
+    return this.getProject(projectId);
   }
 
   private findDistributionPointForRegion(projectId: string, lat: number, lng: number): string | null {

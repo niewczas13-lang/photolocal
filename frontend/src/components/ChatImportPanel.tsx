@@ -51,6 +51,16 @@ function formatElapsed(ms: number | null | undefined): string {
 
 export default function ChatImportPanel({ projectId, project, batches, onChanged }: ChatImportPanelProps) {
   const [defaultChatRoot, setDefaultChatRoot] = useState('');
+  const [assignedSpace, setAssignedSpace] = useState<GoogleChatSpace | null>(() =>
+    project.googleChatSpaceName
+      ? {
+          name: project.googleChatSpaceName,
+          displayName: project.googleChatSpaceDisplayName ?? project.googleChatSpaceName,
+          spaceType: '',
+        }
+      : null,
+  );
+  const [isChangingSpace, setIsChangingSpace] = useState(false);
   const [busyAction, setBusyAction] = useState<
     'spaces' | 'download' | 'clear' | 'classify' | 'accept' | 'invites' | 'invite-setup' | 'accept-invite' | null
   >(null);
@@ -80,6 +90,8 @@ export default function ChatImportPanel({ projectId, project, batches, onChanged
 
   const suggestedSpaces = useMemo(() => getSuggestedGoogleChatSpaces(project, spaces), [project, spaces]);
   const selectedSpace = spaces.find((space) => space.name === selectedSpaceName);
+  const activeDownloadSpace = assignedSpace && !isChangingSpace ? assignedSpace : selectedSpace;
+  const showSpacePicker = !assignedSpace || isChangingSpace;
 
   const loadSpaces = async () => {
     setBusyAction('spaces');
@@ -144,11 +156,13 @@ export default function ChatImportPanel({ projectId, project, batches, onChanged
   };
 
   const startDownload = async () => {
-    if (!selectedSpace || !defaultChatRoot) return;
+    if (!activeDownloadSpace || !defaultChatRoot) return;
     setBusyAction('download');
     try {
-      const result = await api.startGoogleChatDownload(projectId, selectedSpace.name, selectedSpace.displayName);
+      const result = await api.startGoogleChatDownload(projectId, activeDownloadSpace.name, activeDownloadSpace.displayName);
       setDownloadStatus(result);
+      setAssignedSpace(activeDownloadSpace);
+      setIsChangingSpace(false);
       setPendingAutoImportKey(result.startedAt ?? null);
       setCompletedAutoImportKey(null);
     } catch (error) {
@@ -222,6 +236,19 @@ export default function ChatImportPanel({ projectId, project, batches, onChanged
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    setAssignedSpace(
+      project.googleChatSpaceName
+        ? {
+            name: project.googleChatSpaceName,
+            displayName: project.googleChatSpaceDisplayName ?? project.googleChatSpaceName,
+            spaceType: '',
+          }
+        : null,
+    );
+    setIsChangingSpace(false);
+  }, [project.googleChatSpaceDisplayName, project.googleChatSpaceName, projectId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -419,33 +446,65 @@ export default function ChatImportPanel({ projectId, project, batches, onChanged
             <div className="flex items-center justify-between gap-3">
               <div>
                 <h4 className="font-semibold text-sm">Pobieranie z Google Chat</h4>
-                <p className="text-sm text-muted-foreground">Wybierz pokoj i pobierz zdjecia bez odpalania skryptu bokiem.</p>
+                <p className="text-sm text-muted-foreground">
+                  {assignedSpace && !isChangingSpace
+                    ? 'Ten projekt ma juz przypisany pokoj. Aktualizacja sprawdzi, czy doszly nowe zdjecia.'
+                    : 'Wybierz pokoj i pobierz zdjecia bez odpalania skryptu bokiem.'}
+                </p>
               </div>
-              <Button variant="outline" disabled={busyAction !== null} onClick={() => void loadSpaces()}>
-                {busyAction === 'spaces' ? <Loader2 size={16} className="mr-2 animate-spin" /> : <RefreshCw size={16} className="mr-2" />}
-                Zaladuj pokoje
-              </Button>
+              {showSpacePicker && (
+                <Button variant="outline" disabled={busyAction !== null} onClick={() => void loadSpaces()}>
+                  {busyAction === 'spaces' ? <Loader2 size={16} className="mr-2 animate-spin" /> : <RefreshCw size={16} className="mr-2" />}
+                  Zaladuj pokoje
+                </Button>
+              )}
             </div>
 
-            <div className="grid md:grid-cols-[1fr_auto] gap-3">
-              <select
-                value={selectedSpaceName}
-                onChange={(event) => setSelectedSpaceName(event.target.value)}
-                className="h-8 rounded-lg border border-input bg-background px-2.5 text-sm"
-              >
-                <option value="">Wybierz pokoj</option>
-                {suggestedSpaces.map(({ space, isSuggested }) => (
-                  <option key={space.name} value={space.name}>
-                    {isSuggested ? '★ ' : ''}
-                    {space.displayName} ({space.name})
-                  </option>
-                ))}
-              </select>
-              <Button disabled={!selectedSpace || !defaultChatRoot || busyAction !== null} onClick={() => void startDownload()}>
-                {busyAction === 'download' ? <Loader2 size={16} className="mr-2 animate-spin" /> : <MessageSquare size={16} className="mr-2" />}
-                Pobierz zdjecia
-              </Button>
-            </div>
+            {assignedSpace && !isChangingSpace ? (
+              <div className="rounded-md border bg-muted/20 p-3 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                <div className="min-w-0">
+                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Przypisany pokoj</p>
+                  <p className="break-words font-semibold">{assignedSpace.displayName}</p>
+                  <p className="break-all text-xs text-muted-foreground">{assignedSpace.name}</p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button disabled={!defaultChatRoot || busyAction !== null} onClick={() => void startDownload()}>
+                    {busyAction === 'download' ? <Loader2 size={16} className="mr-2 animate-spin" /> : <MessageSquare size={16} className="mr-2" />}
+                    Zaktualizuj zdjecia
+                  </Button>
+                  <Button
+                    variant="outline"
+                    disabled={busyAction !== null}
+                    onClick={() => {
+                      setIsChangingSpace(true);
+                      void loadSpaces();
+                    }}
+                  >
+                    Zmien pokoj
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <div className="grid md:grid-cols-[1fr_auto] gap-3">
+                <select
+                  value={selectedSpaceName}
+                  onChange={(event) => setSelectedSpaceName(event.target.value)}
+                  className="h-8 rounded-lg border border-input bg-background px-2.5 text-sm"
+                >
+                  <option value="">Wybierz pokoj</option>
+                  {suggestedSpaces.map(({ space, isSuggested }) => (
+                    <option key={space.name} value={space.name}>
+                      {isSuggested ? '★ ' : ''}
+                      {space.displayName} ({space.name})
+                    </option>
+                  ))}
+                </select>
+                <Button disabled={!selectedSpace || !defaultChatRoot || busyAction !== null} onClick={() => void startDownload()}>
+                  {busyAction === 'download' ? <Loader2 size={16} className="mr-2 animate-spin" /> : <MessageSquare size={16} className="mr-2" />}
+                  {assignedSpace ? 'Pobierz i zmien pokoj' : 'Pobierz zdjecia'}
+                </Button>
+              </div>
+            )}
 
             {downloadStatus && downloadStatus.state !== 'IDLE' && (
               <div className="rounded-md bg-muted/30 p-3 text-sm flex flex-col gap-2">

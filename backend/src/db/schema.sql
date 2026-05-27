@@ -8,6 +8,8 @@ CREATE TABLE IF NOT EXISTS projects (
   splitter_topology_source TEXT NOT NULL CHECK (splitter_topology_source IN ('AUTO', 'MANUAL')),
   gpkg_file_name TEXT NOT NULL,
   base_folder TEXT NOT NULL,
+  google_chat_space_name TEXT,
+  google_chat_space_display_name TEXT,
   address_count INTEGER NOT NULL DEFAULT 0,
   dac_to_address_cable_count INTEGER NOT NULL DEFAULT 0,
   adss_to_address_cable_count INTEGER NOT NULL DEFAULT 0,

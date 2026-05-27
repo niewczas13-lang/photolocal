@@ -241,6 +241,8 @@ export interface ProjectRecord {
   splitterTopologySource: SplitterTopologySource;
   gpkgFileName: string;
   baseFolder: string;
+  googleChatSpaceName: string | null;
+  googleChatSpaceDisplayName: string | null;
   addressCount: number;
   dacToAddressCableCount: number;
   adssToAddressCableCount: number;
