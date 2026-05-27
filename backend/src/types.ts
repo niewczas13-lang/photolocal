@@ -243,6 +243,7 @@ export interface ProjectRecord {
   baseFolder: string;
   googleChatSpaceName: string | null;
   googleChatSpaceDisplayName: string | null;
+  googleChatLastDownloadAt: string | null;
   addressCount: number;
   dacToAddressCableCount: number;
   adssToAddressCableCount: number;

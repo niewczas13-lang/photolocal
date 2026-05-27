@@ -49,6 +49,16 @@ function formatElapsed(ms: number | null | undefined): string {
   return minutes > 0 ? `${minutes}m ${rest}s` : `${rest}s`;
 }
 
+function formatDateTime(value: string | null | undefined): string {
+  if (!value) return 'brak';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat('pl-PL', {
+    dateStyle: 'short',
+    timeStyle: 'short',
+  }).format(date);
+}
+
 export default function ChatImportPanel({ projectId, project, batches, onChanged }: ChatImportPanelProps) {
   const [defaultChatRoot, setDefaultChatRoot] = useState('');
   const [assignedSpace, setAssignedSpace] = useState<GoogleChatSpace | null>(() =>
@@ -61,6 +71,7 @@ export default function ChatImportPanel({ projectId, project, batches, onChanged
       : null,
   );
   const [isChangingSpace, setIsChangingSpace] = useState(false);
+  const [lastDownloadAt, setLastDownloadAt] = useState<string | null>(project.googleChatLastDownloadAt);
   const [busyAction, setBusyAction] = useState<
     'spaces' | 'download' | 'clear' | 'classify' | 'accept' | 'invites' | 'invite-setup' | 'accept-invite' | null
   >(null);
@@ -162,6 +173,7 @@ export default function ChatImportPanel({ projectId, project, batches, onChanged
       const result = await api.startGoogleChatDownload(projectId, activeDownloadSpace.name, activeDownloadSpace.displayName);
       setDownloadStatus(result);
       setAssignedSpace(activeDownloadSpace);
+      setLastDownloadAt(result.startedAt ?? new Date().toISOString());
       setIsChangingSpace(false);
       setPendingAutoImportKey(result.startedAt ?? null);
       setCompletedAutoImportKey(null);
@@ -247,8 +259,9 @@ export default function ChatImportPanel({ projectId, project, batches, onChanged
           }
         : null,
     );
+    setLastDownloadAt(project.googleChatLastDownloadAt);
     setIsChangingSpace(false);
-  }, [project.googleChatSpaceDisplayName, project.googleChatSpaceName, projectId]);
+  }, [project.googleChatLastDownloadAt, project.googleChatSpaceDisplayName, project.googleChatSpaceName, projectId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -466,6 +479,7 @@ export default function ChatImportPanel({ projectId, project, batches, onChanged
                   <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Przypisany pokoj</p>
                   <p className="break-words font-semibold">{assignedSpace.displayName}</p>
                   <p className="break-all text-xs text-muted-foreground">{assignedSpace.name}</p>
+                  <p className="text-xs text-muted-foreground">Ostatnie pobranie: {formatDateTime(lastDownloadAt)}</p>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <Button disabled={!defaultChatRoot || busyAction !== null} onClick={() => void startDownload()}>

@@ -14,6 +14,7 @@ const project: ProjectSummary = {
   baseFolder: 'Z:\\BARTAG',
   googleChatSpaceName: null,
   googleChatSpaceDisplayName: null,
+  googleChatLastDownloadAt: null,
   addressCount: 0,
   dacToAddressCableCount: 0,
   adssToAddressCableCount: 0,
@@ -61,6 +62,7 @@ describe('getSuggestedGoogleChatSpaces', () => {
         ...project,
         googleChatSpaceName: 'spaces/ASSIGNED',
         googleChatSpaceDisplayName: 'Staly pokoj budowy',
+        googleChatLastDownloadAt: null,
       },
       [
         { name: 'spaces/MATCH', displayName: 'Bartag OPP03 X/04017284', spaceType: 'SPACE' },

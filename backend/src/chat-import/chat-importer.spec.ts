@@ -33,7 +33,7 @@ function createContext() {
   return { db, repository: new ChatBatchesRepository(db), projectId: project.id, dir };
 }
 
-function writeManifest(root: string, folderName: string, messageText: string): void {
+function writeManifest(root: string, folderName: string, messageText: string, messageName?: string): void {
   const folderPath = join(root, folderName);
   mkdirSync(folderPath, { recursive: true });
   writeFileSync(join(folderPath, 'photo.jpeg'), 'image');
@@ -44,7 +44,7 @@ function writeManifest(root: string, folderName: string, messageText: string): v
         source: 'google-chat',
         spaceName: 'spaces/AAA',
         spaceDisplayName: 'Budowa',
-        messageName: `spaces/AAA/messages/${folderName}`,
+        messageName: messageName ?? `spaces/AAA/messages/${folderName}`,
         messageText,
         createTime: '2026-04-27T10:00:00Z',
         folderName,
@@ -225,6 +225,33 @@ describe('importChatFolders', () => {
         expect.objectContaining({ folderName: 'brak_opisu', status: 'PENDING_REVIEW' }),
       ]),
     );
+  });
+
+  it('does not requeue a rejected folder when Google Chat refresh changes the message id', async () => {
+    const { db, repository, projectId, dir } = createContext();
+    writeManifest(dir, '2026-04-27_Maleniecka 5', 'Maleniecka 5', 'spaces/AAA/messages/first');
+
+    await importChatFolders({ projectId, rootPath: dir, repository });
+    const [batch] = repository.listBatches(projectId);
+    repository.updateDecision({
+      projectId,
+      batchId: batch.id,
+      status: 'REJECTED',
+      reviewReason: 'Odrzucone recznie',
+    });
+    writeManifest(dir, '2026-04-27_Maleniecka 5', 'Maleniecka 5', 'spaces/AAA/messages/second');
+
+    const result = await importChatFolders({ projectId, rootPath: dir, repository });
+    const batches = repository.listBatches(projectId);
+    db.close();
+
+    expect(result).toEqual({ imported: 0, waitingForClassification: 0, pendingReview: 0, cleared: 0 });
+    expect(batches).toEqual([
+      expect.objectContaining({
+        folderName: '2026-04-27_Maleniecka 5',
+        status: 'REJECTED',
+      }),
+    ]);
   });
 
   it('clears old working chat queue before importing another folder', async () => {

@@ -1,8 +1,9 @@
 import type Database from 'better-sqlite3';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { ReserveClassification } from './vision-classifier.js';
-import type { ChatManifest } from './chat-manifest.js';
+import type { ChatManifest, ChatManifestSourceMessage } from './chat-manifest.js';
 
 export type ChatBatchStatus =
   | 'WAITING_FOR_CLASSIFICATION'
@@ -46,6 +47,7 @@ export interface ChatBatchRecord {
   sourceMessageName: string;
   messageText: string;
   sourceCreateTime: string;
+  sourceMessages: ChatManifestSourceMessage[];
   folderName: string;
   folderPath: string;
   status: ChatBatchStatus;
@@ -68,6 +70,7 @@ export interface ChatBatchFileRecord {
   contentName: string;
   contentType: string;
   sourcePath: string;
+  contentHash: string | null;
   photoId: string | null;
   createdAt: string;
 }
@@ -89,6 +92,7 @@ interface ChatBatchRow {
   sourceMessageName: string;
   messageText: string;
   sourceCreateTime: string;
+  sourceMessages: string;
   folderName: string;
   folderPath: string;
   status: ChatBatchStatus;
@@ -113,11 +117,37 @@ function parseVisualEvidence(value: string): string[] {
   }
 }
 
+function parseSourceMessages(value: string): ChatManifestSourceMessage[] {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((item): item is Partial<ChatManifestSourceMessage> => item !== null && typeof item === 'object')
+      .map((item) => ({
+        messageName: typeof item.messageName === 'string' ? item.messageName : '',
+        messageText: typeof item.messageText === 'string' ? item.messageText : '',
+        createTime: typeof item.createTime === 'string' ? item.createTime : '',
+      }))
+      .filter((item) => item.messageName || item.messageText || item.createTime);
+  } catch {
+    return [];
+  }
+}
+
 function toBatchRecord(row: ChatBatchRow): ChatBatchRecord {
   return {
     ...row,
+    sourceMessages: parseSourceMessages(row.sourceMessages),
     visualEvidence: parseVisualEvidence(row.visualEvidence),
   };
+}
+
+function hashFile(path: string): string | null {
+  try {
+    return createHash('sha256').update(readFileSync(path)).digest('hex');
+  } catch {
+    return null;
+  }
 }
 
 export class ChatBatchesRepository {
@@ -126,74 +156,107 @@ export class ChatBatchesRepository {
   importManifest(input: ImportChatManifestInput): ChatBatchRecord {
     const batchId = randomUUID();
     const visualEvidence = JSON.stringify(input.visualEvidence ?? []);
+    const sourceMessages = JSON.stringify(input.manifest.sourceMessages ?? []);
 
     const tx = this.db.transaction(() => {
-      this.db
-        .prepare(
-          `INSERT INTO chat_photo_batches (
-            id, project_id, source, source_space_name, source_space_display_name,
-            source_message_name, message_text, source_create_time, folder_name, folder_path,
-            status, review_reason, checklist_node_id, reserve_location, confidence,
-            llm_model, llm_raw_response, visual_evidence
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-          ON CONFLICT(project_id, source_message_name, folder_path) DO UPDATE SET
-            source_space_name = excluded.source_space_name,
-            source_space_display_name = excluded.source_space_display_name,
-            message_text = excluded.message_text,
-            source_create_time = excluded.source_create_time,
-            folder_name = excluded.folder_name,
-            status = excluded.status,
-            review_reason = excluded.review_reason,
-            checklist_node_id = excluded.checklist_node_id,
-            reserve_location = excluded.reserve_location,
-            confidence = excluded.confidence,
-            llm_model = excluded.llm_model,
-            llm_raw_response = excluded.llm_raw_response,
-            visual_evidence = excluded.visual_evidence,
-            updated_at = CURRENT_TIMESTAMP`,
-        )
-        .run(
-          batchId,
-          input.projectId,
-          input.manifest.source,
-          input.manifest.spaceName,
-          input.manifest.spaceDisplayName,
-          input.manifest.messageName,
-          input.manifest.messageText,
-          input.manifest.createTime,
-          input.manifest.folderName,
-          input.manifest.folderPath,
-          input.status,
-          input.reviewReason ?? null,
-          input.checklistNodeId ?? null,
-          input.reserveLocation ?? null,
-          input.confidence ?? null,
-          input.llmModel ?? null,
-          input.llmRawResponse ?? null,
-          visualEvidence,
-        );
+      const existing = this.findBatchIdentity(input.projectId, input.manifest.messageName, input.manifest.folderPath);
+      if (existing) {
+        this.db
+          .prepare(
+            `UPDATE chat_photo_batches
+             SET source_space_name = ?,
+                 source_space_display_name = ?,
+                 source_message_name = ?,
+                 message_text = ?,
+                 source_create_time = ?,
+                 source_messages = ?,
+                 folder_name = ?,
+                 status = ?,
+                 review_reason = ?,
+                 checklist_node_id = ?,
+                 reserve_location = ?,
+                 confidence = ?,
+                 llm_model = ?,
+                 llm_raw_response = ?,
+                 visual_evidence = ?,
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE id = ?`,
+          )
+          .run(
+            input.manifest.spaceName,
+            input.manifest.spaceDisplayName,
+            input.manifest.messageName,
+            input.manifest.messageText,
+            input.manifest.createTime,
+            sourceMessages,
+            input.manifest.folderName,
+            input.status,
+            input.reviewReason ?? null,
+            input.checklistNodeId ?? null,
+            input.reserveLocation ?? null,
+            input.confidence ?? null,
+            input.llmModel ?? null,
+            input.llmRawResponse ?? null,
+            visualEvidence,
+            existing.id,
+          );
+      } else {
+        this.db
+          .prepare(
+            `INSERT INTO chat_photo_batches (
+              id, project_id, source, source_space_name, source_space_display_name,
+              source_message_name, message_text, source_create_time, source_messages, folder_name, folder_path,
+              status, review_reason, checklist_node_id, reserve_location, confidence,
+              llm_model, llm_raw_response, visual_evidence
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          )
+          .run(
+            batchId,
+            input.projectId,
+            input.manifest.source,
+            input.manifest.spaceName,
+            input.manifest.spaceDisplayName,
+            input.manifest.messageName,
+            input.manifest.messageText,
+            input.manifest.createTime,
+            sourceMessages,
+            input.manifest.folderName,
+            input.manifest.folderPath,
+            input.status,
+            input.reviewReason ?? null,
+            input.checklistNodeId ?? null,
+            input.reserveLocation ?? null,
+            input.confidence ?? null,
+            input.llmModel ?? null,
+            input.llmRawResponse ?? null,
+            visualEvidence,
+          );
+      }
 
       const batch = this.findBatchIdentity(input.projectId, input.manifest.messageName, input.manifest.folderPath);
       if (!batch) throw new Error('Imported chat batch was not found');
 
       const insertFile = this.db.prepare(
         `INSERT INTO chat_photo_files (
-          id, batch_id, file_name, content_name, content_type, source_path
-        ) VALUES (?, ?, ?, ?, ?, ?)
+          id, batch_id, file_name, content_name, content_type, source_path, content_hash
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(batch_id, file_name) DO UPDATE SET
           content_name = excluded.content_name,
           content_type = excluded.content_type,
-          source_path = excluded.source_path`,
+          source_path = excluded.source_path,
+          content_hash = excluded.content_hash`,
       );
 
       for (const file of input.manifest.files) {
+        const sourcePath = join(input.manifest.folderPath, file.fileName);
         insertFile.run(
           randomUUID(),
           batch.id,
           file.fileName,
           file.contentName,
           file.contentType,
-          join(input.manifest.folderPath, file.fileName),
+          sourcePath,
+          hashFile(sourcePath),
         );
       }
 
@@ -223,6 +286,7 @@ export class ChatBatchesRepository {
               batch.source_message_name AS sourceMessageName,
               batch.message_text AS messageText,
               batch.source_create_time AS sourceCreateTime,
+              batch.source_messages AS sourceMessages,
               batch.folder_name AS folderName,
               batch.folder_path AS folderPath,
               batch.status,
@@ -254,6 +318,7 @@ export class ChatBatchesRepository {
               batch.source_message_name AS sourceMessageName,
               batch.message_text AS messageText,
               batch.source_create_time AS sourceCreateTime,
+              batch.source_messages AS sourceMessages,
               batch.folder_name AS folderName,
               batch.folder_path AS folderPath,
               batch.status,
@@ -307,6 +372,7 @@ export class ChatBatchesRepository {
           batch.source_message_name AS sourceMessageName,
           batch.message_text AS messageText,
           batch.source_create_time AS sourceCreateTime,
+          batch.source_messages AS sourceMessages,
           batch.folder_name AS folderName,
           batch.folder_path AS folderPath,
           batch.status,
@@ -340,6 +406,7 @@ export class ChatBatchesRepository {
           file.content_name AS contentName,
           file.content_type AS contentType,
           file.source_path AS sourcePath,
+          file.content_hash AS contentHash,
           file.photo_id AS photoId,
           file.created_at AS createdAt
         FROM chat_photo_files file
@@ -436,12 +503,24 @@ export class ChatBatchesRepository {
     sourceMessageName: string,
     folderPath: string,
   ): { id: string } | undefined {
-    return this.db
+    const exact = this.db
       .prepare(
         `SELECT id
          FROM chat_photo_batches
          WHERE project_id = ? AND source_message_name = ? AND folder_path = ?`,
       )
       .get(projectId, sourceMessageName, folderPath) as { id: string } | undefined;
+
+    if (exact) return exact;
+
+    return this.db
+      .prepare(
+        `SELECT id
+         FROM chat_photo_batches
+         WHERE project_id = ? AND folder_path = ?
+         ORDER BY updated_at DESC, created_at DESC
+         LIMIT 1`,
+      )
+      .get(projectId, folderPath) as { id: string } | undefined;
   }
 }

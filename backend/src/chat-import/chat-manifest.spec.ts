@@ -49,6 +49,13 @@ describe('readChatManifest', () => {
       createTime: '2025-10-16T12:00:00Z',
       folderName: '2025-10-16_Maleniecka 19B',
       folderPath: folder,
+      sourceMessages: [
+        {
+          messageName: 'spaces/AAA/messages/BBB',
+          messageText: 'Maleniecka 19B',
+          createTime: '2025-10-16T12:00:00Z',
+        },
+      ],
       files: [
         {
           fileName: 'photo.jpeg',
@@ -79,6 +86,59 @@ describe('readChatManifest', () => {
 
     expect(manifest.messageText).toBe('');
     expect(manifest.files).toEqual([]);
+    expect(manifest.sourceMessages).toEqual([
+      {
+        messageName: 'spaces/AAA/messages/BBB',
+        messageText: '',
+        createTime: '2025-10-16T12:00:00Z',
+      },
+    ]);
+  });
+
+  it('keeps all source messages when a folder contains photos from several messages', async () => {
+    const folder = await createTempFolder();
+    const manifestPath = join(folder, 'manifest.json');
+    await writeFile(
+      manifestPath,
+      JSON.stringify({
+        source: 'google-chat',
+        spaceName: 'spaces/AAA',
+        spaceDisplayName: 'Radom OPP13',
+        messageName: 'spaces/AAA/messages/latest',
+        messageText: 'Maleniecka 19B',
+        createTime: '2025-10-17T08:00:00Z',
+        folderName: '2025-10-16_Maleniecka 19B',
+        messages: [
+          {
+            messageName: 'spaces/AAA/messages/first',
+            messageText: 'Maleniecka 19B',
+            createTime: '2025-10-16T12:00:00Z',
+          },
+          {
+            messageName: 'spaces/AAA/messages/latest',
+            messageText: 'Maleniecka 19B',
+            createTime: '2025-10-17T08:00:00Z',
+          },
+        ],
+        files: [],
+      }),
+      'utf-8',
+    );
+
+    const manifest = await readChatManifest(manifestPath);
+
+    expect(manifest.sourceMessages).toEqual([
+      {
+        messageName: 'spaces/AAA/messages/first',
+        messageText: 'Maleniecka 19B',
+        createTime: '2025-10-16T12:00:00Z',
+      },
+      {
+        messageName: 'spaces/AAA/messages/latest',
+        messageText: 'Maleniecka 19B',
+        createTime: '2025-10-17T08:00:00Z',
+      },
+    ]);
   });
 
   it('filters unsupported file extensions', async () => {

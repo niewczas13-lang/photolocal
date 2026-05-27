@@ -89,6 +89,23 @@ def upsert_message_manifest(manifest_path, base_data, file_entry):
     manifest = _load_manifest(manifest_path) or {**base_data, 'files': []}
     manifest.update(base_data)
 
+    source_message = {
+        'messageName': base_data.get('messageName', ''),
+        'messageText': base_data.get('messageText', ''),
+        'createTime': base_data.get('createTime', ''),
+    }
+    messages_by_name = {
+        entry.get('messageName'): entry
+        for entry in manifest.get('messages', [])
+        if isinstance(entry, dict) and entry.get('messageName')
+    }
+    if source_message['messageName']:
+        messages_by_name[source_message['messageName']] = source_message
+    manifest['messages'] = sorted(
+        messages_by_name.values(),
+        key=lambda entry: (entry.get('createTime', ''), entry.get('messageName', '')),
+    )
+
     files_by_name = {
         entry.get('fileName'): entry
         for entry in manifest.get('files', [])

@@ -36,6 +36,30 @@ export function runMigrations(db: Database.Database): void {
     // Ignore error if column already exists
   }
 
+  try {
+    db.exec('ALTER TABLE projects ADD COLUMN google_chat_last_download_at TEXT;');
+  } catch (e) {
+    // Ignore error if column already exists
+  }
+
+  try {
+    db.exec('ALTER TABLE photos ADD COLUMN content_hash TEXT;');
+  } catch (e) {
+    // Ignore error if column already exists
+  }
+
+  try {
+    db.exec("ALTER TABLE chat_photo_batches ADD COLUMN source_messages TEXT NOT NULL DEFAULT '[]';");
+  } catch (e) {
+    // Ignore error if column already exists
+  }
+
+  try {
+    db.exec('ALTER TABLE chat_photo_files ADD COLUMN content_hash TEXT;');
+  } catch (e) {
+    // Ignore error if column already exists
+  }
+
   migrateChatReserveLocationConstraint(db, schema);
   migrateMapTrunkCableIdentity(db, schema);
   backfillSystemMetkiFolder(db);

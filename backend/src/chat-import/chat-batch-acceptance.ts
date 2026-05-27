@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import type { ProjectsRepository } from '../projects/projects-repository.js';
@@ -27,6 +27,10 @@ export interface AcceptChatBatchResult {
   sourceFileCount: number;
 }
 
+function sha256(buffer: Buffer): string {
+  return createHash('sha256').update(buffer).digest('hex');
+}
+
 function assertReserveLocationMatchesNodePath(nodePath: string, reserveLocation: ReserveLocation | null): void {
   if (!reserveLocation) return;
   if (nodePath.startsWith('Zapasy_kabli_napowietrznych') && reserveLocation !== 'Napowietrzny') {
@@ -45,6 +49,7 @@ export async function acceptChatBatch(input: AcceptChatBatchInput): Promise<Acce
     ? batchFiles.filter((file) => input.fileIds?.includes(file.id))
     : batchFiles;
   const processor = input.processPhoto ?? defaultProcessPhoto;
+  const knownPhotoHashes = new Set(input.projectsRepository.listProjectPhotoContentHashes(input.projectId));
 
   if (!project) throw new Error('Project not found');
   if (!batch) throw new Error('Chat batch not found');
@@ -71,6 +76,10 @@ export async function acceptChatBatch(input: AcceptChatBatchInput): Promise<Acce
     for (const file of files) {
       const photoId = randomUUID();
       const sourceBuffer = await readFile(file.sourcePath);
+      const contentHash = file.contentHash ?? sha256(sourceBuffer);
+      if (knownPhotoHashes.has(contentHash)) {
+        continue;
+      }
       const processed = await processor(sourceBuffer);
       const target = resolvePhotoTarget({
         projectFolder: project.baseFolder,
@@ -101,6 +110,7 @@ export async function acceptChatBatch(input: AcceptChatBatchInput): Promise<Acce
         lng: processed.lng,
         capturedAt: processed.capturedAt,
         reserveLocation: nodeReserveLocation,
+        contentHash,
       });
       input.batchesRepository.recordFileImport({
         chatPhotoFileId: file.id,

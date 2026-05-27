@@ -29,6 +29,32 @@ interface ChatReviewPanelProps {
   acceptLabel?: string;
 }
 
+function formatSourceDate(value: string): string {
+  if (!value) return 'brak daty';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat('pl-PL', {
+    dateStyle: 'short',
+    timeStyle: 'short',
+  }).format(date);
+}
+
+function messageTail(value: string): string {
+  const parts = value.split('/');
+  return parts.at(-1) || value || 'brak id';
+}
+
+function sourceMessagesForBatch(batch: ChatBatch) {
+  if ((batch.sourceMessages ?? []).length > 0) return batch.sourceMessages;
+  return [
+    {
+      messageName: batch.sourceMessageName,
+      messageText: batch.messageText,
+      createTime: batch.sourceCreateTime,
+    },
+  ];
+}
+
 export default function ChatReviewPanel({
   projectId,
   batches,
@@ -145,6 +171,10 @@ export default function ChatReviewPanel({
           selected,
           query,
         });
+        const sourceMessages = sourceMessagesForBatch(batch);
+        const sourceTooltip = sourceMessages
+          .map((message) => `${formatSourceDate(message.createTime)} | ${messageTail(message.messageName)} | ${message.messageText || 'brak opisu'}`)
+          .join('\n');
 
         return (
           <Card key={batch.id}>
@@ -154,6 +184,26 @@ export default function ChatReviewPanel({
                   <div>
                     <h3 className="text-base font-semibold">{batch.folderName}</h3>
                     <p className="text-sm text-muted-foreground">{batch.messageText || 'Brak opisu'}</p>
+                    {sourceMessages.length > 1 ? (
+                      <details className="mt-1 text-xs text-muted-foreground" title={sourceTooltip}>
+                        <summary className="cursor-pointer select-none">
+                          Zbite z {sourceMessages.length} wiadomosci
+                        </summary>
+                        <div className="mt-1 flex flex-col gap-0.5">
+                          {sourceMessages.map((message) => (
+                            <span key={`${message.messageName}-${message.createTime}`}>
+                              {formatSourceDate(message.createTime)} · {messageTail(message.messageName)}
+                              {message.messageText ? ` · ${message.messageText}` : ''}
+                            </span>
+                          ))}
+                        </div>
+                      </details>
+                    ) : (
+                      <p className="mt-1 text-xs text-muted-foreground" title={sourceTooltip}>
+                        Wiadomosc z {formatSourceDate(sourceMessages[0]?.createTime ?? '')} ·{' '}
+                        {messageTail(sourceMessages[0]?.messageName ?? '')}
+                      </p>
+                    )}
                   </div>
                   <Badge variant={batch.status === 'PENDING_REVIEW' ? 'secondary' : 'default'}>
                     {batch.status}

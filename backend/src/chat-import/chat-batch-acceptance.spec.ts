@@ -190,6 +190,79 @@ describe('acceptChatBatch', () => {
     expect(nodePhotos[0].sourceFileName).toBe('photo.jpeg');
   });
 
+  it('skips a chat photo when the same source image was already imported to the project', async () => {
+    const { db, projects, batches, projectId, dir } = createContext();
+    const firstBatch = batches.importManifest({
+      projectId,
+      manifest: createManifest(join(dir, 'first')),
+      status: 'PENDING_REVIEW',
+    });
+    const firstFile = batches
+      .listBatchFiles(projectId, firstBatch.id)
+      .find((file) => file.fileName === 'photo.jpeg');
+    if (!firstFile) throw new Error('first file missing');
+
+    await acceptChatBatch({
+      projectId,
+      batchId: firstBatch.id,
+      checklistNodeIds: ['node-maleniecka-5'],
+      fileIds: [firstFile.id],
+      reserveLocation: 'W studni',
+      projectsRepository: projects,
+      batchesRepository: batches,
+      processPhoto: async () => ({
+        buffer: Buffer.from('processed-photo'),
+        thumbnail: Buffer.from('thumb'),
+        mimeType: 'image/jpeg',
+        fileSize: 15,
+        lat: null,
+        lng: null,
+        capturedAt: null,
+      }),
+    });
+
+    const duplicateBatch = batches.importManifest({
+      projectId,
+      manifest: {
+        ...createManifest(join(dir, 'duplicate')),
+        messageName: 'spaces/AAA/messages/duplicate',
+        files: [{ fileName: 'photo.jpeg', contentName: 'photo.jpeg', contentType: 'image/jpeg' }],
+      },
+      status: 'PENDING_REVIEW',
+    });
+    const duplicateFile = batches
+      .listBatchFiles(projectId, duplicateBatch.id)
+      .find((file) => file.fileName === 'photo.jpeg');
+    if (!duplicateFile) throw new Error('duplicate file missing');
+
+    const result = await acceptChatBatch({
+      projectId,
+      batchId: duplicateBatch.id,
+      checklistNodeIds: ['node-maleniecka-5'],
+      fileIds: [duplicateFile.id],
+      reserveLocation: 'W studni',
+      projectsRepository: projects,
+      batchesRepository: batches,
+      processPhoto: async () => ({
+        buffer: Buffer.from('processed-photo-again'),
+        thumbnail: Buffer.from('thumb-again'),
+        mimeType: 'image/jpeg',
+        fileSize: 20,
+        lat: null,
+        lng: null,
+        capturedAt: null,
+      }),
+    });
+
+    const updatedBatch = batches.getBatch(projectId, duplicateBatch.id);
+    const nodePhotos = projects.getNodePhotos(projectId, 'node-maleniecka-5');
+    db.close();
+
+    expect(result).toEqual({ importedPhotos: 0, checklistNodeCount: 1, sourceFileCount: 1 });
+    expect(updatedBatch).toMatchObject({ status: 'IMPORTED' });
+    expect(nodePhotos).toHaveLength(1);
+  });
+
   it('rejects aerial reserve imports when the selected reserve location is underground', async () => {
     const { db, projects, batches, projectId, dir } = createContext();
     const batch = batches.importManifest({

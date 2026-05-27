@@ -10,6 +10,12 @@ export interface ChatManifestFile {
   contentType: string;
 }
 
+export interface ChatManifestSourceMessage {
+  messageName: string;
+  messageText: string;
+  createTime: string;
+}
+
 export interface ChatManifest {
   source: 'google-chat';
   spaceName: string;
@@ -19,6 +25,7 @@ export interface ChatManifest {
   createTime: string;
   folderName: string;
   folderPath: string;
+  sourceMessages?: ChatManifestSourceMessage[];
   files: ChatManifestFile[];
 }
 
@@ -30,7 +37,14 @@ interface RawChatManifest {
   messageText?: unknown;
   createTime?: unknown;
   folderName?: unknown;
+  messages?: unknown;
   files?: unknown;
+}
+
+interface RawChatManifestSourceMessage {
+  messageName?: unknown;
+  messageText?: unknown;
+  createTime?: unknown;
 }
 
 interface RawChatManifestFile {
@@ -72,6 +86,29 @@ function normalizeFiles(value: unknown): ChatManifestFile[] {
     .filter((file): file is ChatManifestFile => file !== null);
 }
 
+function normalizeSourceMessages(raw: RawChatManifest): ChatManifestSourceMessage[] {
+  if (Array.isArray(raw.messages)) {
+    const messages = raw.messages
+      .filter((item): item is RawChatManifestSourceMessage => item !== null && typeof item === 'object')
+      .map((item) => ({
+        messageName: toStringValue(item.messageName),
+        messageText: toStringValue(item.messageText),
+        createTime: toStringValue(item.createTime),
+      }))
+      .filter((item) => item.messageName || item.messageText || item.createTime);
+
+    if (messages.length > 0) return messages;
+  }
+
+  const fallback = {
+    messageName: toStringValue(raw.messageName),
+    messageText: toStringValue(raw.messageText),
+    createTime: toStringValue(raw.createTime),
+  };
+
+  return fallback.messageName || fallback.messageText || fallback.createTime ? [fallback] : [];
+}
+
 function contentTypeForFile(fileName: string): string {
   const extension = extname(fileName).toLowerCase();
   if (extension === '.png') return 'image/png';
@@ -99,6 +136,7 @@ export async function readChatManifest(manifestPath: string): Promise<ChatManife
     createTime: toStringValue(raw.createTime),
     folderName: toStringValue(raw.folderName),
     folderPath: dirname(manifestPath),
+    sourceMessages: normalizeSourceMessages(raw),
     files: normalizeFiles(raw.files),
   };
 }
@@ -151,6 +189,7 @@ async function collectLegacyManifests(rootPath: string, manifestFolders: Set<str
       createTime: '',
       folderName,
       folderPath: rootPath,
+      sourceMessages: [],
       files: imageFiles.map((fileName) => ({
         fileName,
         contentName: fileName,

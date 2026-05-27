@@ -23,6 +23,7 @@ export interface ProjectSummary {
   baseFolder: string;
   googleChatSpaceName: string | null;
   googleChatSpaceDisplayName: string | null;
+  googleChatLastDownloadAt: string | null;
   addressCount: number;
   dacToAddressCableCount: number;
   adssToAddressCableCount: number;
@@ -248,8 +249,15 @@ export interface ChatBatchFile {
   contentName: string;
   contentType: string;
   sourcePath: string;
+  contentHash: string | null;
   photoId: string | null;
   createdAt: string;
+}
+
+export interface ChatSourceMessage {
+  messageName: string;
+  messageText: string;
+  createTime: string;
 }
 
 export interface ChatBatch {
@@ -261,6 +269,7 @@ export interface ChatBatch {
   sourceMessageName: string;
   messageText: string;
   sourceCreateTime: string;
+  sourceMessages: ChatSourceMessage[];
   folderName: string;
   folderPath: string;
   status: ChatBatchStatus;

@@ -313,7 +313,11 @@ export async function registerProjectRoutes(
         spaceDisplayName,
         config: googleChatConfig(),
       });
-      repository.assignGoogleChatSpace(projectId, { spaceName, spaceDisplayName });
+      repository.assignGoogleChatSpace(projectId, {
+        spaceName,
+        spaceDisplayName,
+        lastDownloadAt: downloadStatus.startedAt ?? new Date().toISOString(),
+      });
       return reply.status(202).send(downloadStatus);
     } catch (error) {
       return reply.status(409).send({ error: error instanceof Error ? error.message : String(error) });

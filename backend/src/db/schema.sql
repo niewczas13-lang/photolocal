@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS projects (
   base_folder TEXT NOT NULL,
   google_chat_space_name TEXT,
   google_chat_space_display_name TEXT,
+  google_chat_last_download_at TEXT,
   address_count INTEGER NOT NULL DEFAULT 0,
   dac_to_address_cable_count INTEGER NOT NULL DEFAULT 0,
   adss_to_address_cable_count INTEGER NOT NULL DEFAULT 0,
@@ -64,6 +65,7 @@ CREATE TABLE IF NOT EXISTS photos (
   lat REAL,
   lng REAL,
   captured_at TEXT,
+  content_hash TEXT,
   uploaded_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   reserve_location TEXT,
   processing_status TEXT NOT NULL DEFAULT 'READY',
@@ -182,6 +184,7 @@ CREATE TABLE IF NOT EXISTS chat_photo_batches (
   source_message_name TEXT NOT NULL,
   message_text TEXT NOT NULL DEFAULT '',
   source_create_time TEXT NOT NULL DEFAULT '',
+  source_messages TEXT NOT NULL DEFAULT '[]',
   folder_name TEXT NOT NULL,
   folder_path TEXT NOT NULL,
   status TEXT NOT NULL CHECK (status IN (
@@ -210,6 +213,7 @@ CREATE TABLE IF NOT EXISTS chat_photo_files (
   content_name TEXT NOT NULL,
   content_type TEXT NOT NULL,
   source_path TEXT NOT NULL,
+  content_hash TEXT,
   photo_id TEXT REFERENCES photos(id) ON DELETE SET NULL,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE(batch_id, file_name)

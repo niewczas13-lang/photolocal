@@ -120,6 +120,7 @@ describe('ProjectsRepository', () => {
     const updated = repository.assignGoogleChatSpace(project.id, {
       spaceName: 'spaces/AAA',
       spaceDisplayName: 'Budowa OPP0013',
+      lastDownloadAt: '2026-05-27T10:00:00.000Z',
     });
     const [summary] = repository.listProjects();
     db.close();
@@ -128,11 +129,13 @@ describe('ProjectsRepository', () => {
       id: project.id,
       googleChatSpaceName: 'spaces/AAA',
       googleChatSpaceDisplayName: 'Budowa OPP0013',
+      googleChatLastDownloadAt: '2026-05-27T10:00:00.000Z',
     });
     expect(summary).toMatchObject({
       id: project.id,
       googleChatSpaceName: 'spaces/AAA',
       googleChatSpaceDisplayName: 'Budowa OPP0013',
+      googleChatLastDownloadAt: '2026-05-27T10:00:00.000Z',
     });
   });
 

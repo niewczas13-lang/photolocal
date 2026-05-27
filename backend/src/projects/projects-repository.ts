@@ -43,6 +43,7 @@ export interface AddPhotoInput {
   lng: number | null;
   capturedAt: string | null;
   reserveLocation: string | null;
+  contentHash?: string | null;
 }
 
 export interface AddMapNoteInput {
@@ -637,6 +638,7 @@ export class ProjectsRepository {
           project.base_folder AS baseFolder,
           project.google_chat_space_name AS googleChatSpaceName,
           project.google_chat_space_display_name AS googleChatSpaceDisplayName,
+          project.google_chat_last_download_at AS googleChatLastDownloadAt,
           project.address_count AS addressCount,
           project.dac_to_address_cable_count AS dacToAddressCableCount,
           project.adss_to_address_cable_count AS adssToAddressCableCount,
@@ -811,6 +813,7 @@ export class ProjectsRepository {
     input: {
       spaceName: string;
       spaceDisplayName: string;
+      lastDownloadAt?: string | null;
     },
   ): ProjectRecord | null {
     this.db
@@ -818,10 +821,11 @@ export class ProjectsRepository {
         `UPDATE projects
          SET google_chat_space_name = ?,
              google_chat_space_display_name = ?,
+             google_chat_last_download_at = COALESCE(?, google_chat_last_download_at),
              updated_at = CURRENT_TIMESTAMP
          WHERE id = ?`,
       )
-      .run(input.spaceName, input.spaceDisplayName, projectId);
+      .run(input.spaceName, input.spaceDisplayName, input.lastDownloadAt ?? null, projectId);
 
     return this.getProject(projectId);
   }
@@ -2260,6 +2264,20 @@ export class ProjectsRepository {
       .run(input.storedFileName, input.storagePath, input.thumbnailPath, input.reserveLocation, photoId);
   }
 
+  listProjectPhotoContentHashes(projectId: string): string[] {
+    const rows = this.db
+      .prepare(
+        `SELECT DISTINCT content_hash AS contentHash
+         FROM photos
+         WHERE project_id = ?
+           AND content_hash IS NOT NULL
+           AND content_hash != ''`,
+      )
+      .all(projectId) as Array<{ contentHash: string }>;
+
+    return rows.map((row) => row.contentHash);
+  }
+
   private refreshChecklistNodeStatus(projectId: string, nodeId: string): void {
     this.db
       .prepare(
@@ -2341,8 +2359,8 @@ export class ProjectsRepository {
           `INSERT INTO photos (
             id, project_id, checklist_node_id, source_file_name, stored_file_name,
             storage_path, thumbnail_path, mime_type, file_size, lat, lng,
-            captured_at, reserve_location
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            captured_at, reserve_location, content_hash
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           input.id,
@@ -2358,6 +2376,7 @@ export class ProjectsRepository {
           input.lng,
           input.capturedAt,
           input.reserveLocation,
+          input.contentHash ?? null,
         );
 
       this.db
