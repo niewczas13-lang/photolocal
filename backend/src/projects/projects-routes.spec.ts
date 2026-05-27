@@ -1018,8 +1018,8 @@ describe('projects routes', () => {
     const noDescriptionFolder = join(chatRoot, 'brak_opisu');
     mkdirSync(normalFolder, { recursive: true });
     mkdirSync(noDescriptionFolder, { recursive: true });
-    writeFileSync(join(normalFolder, 'photo.png'), 'image');
-    writeFileSync(join(noDescriptionFolder, 'photo.png'), 'image');
+    writeFileSync(join(normalFolder, 'photo.png'), 'normal-image');
+    writeFileSync(join(noDescriptionFolder, 'photo.png'), 'no-description-image');
     writeFileSync(
       join(normalFolder, 'manifest.json'),
       JSON.stringify({

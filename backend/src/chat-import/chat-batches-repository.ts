@@ -1,7 +1,7 @@
 import type Database from 'better-sqlite3';
 import { createHash, randomUUID } from 'node:crypto';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
+import { isAbsolute, join, relative } from 'node:path';
 import type { ReserveClassification } from './vision-classifier.js';
 import type { ChatManifest, ChatManifestSourceMessage } from './chat-manifest.js';
 
@@ -148,6 +148,16 @@ function hashFile(path: string): string | null {
   } catch {
     return null;
   }
+}
+
+function isInsideFolder(path: string, folder: string): boolean {
+  if (!path || !folder) return false;
+  const relativePath = relative(folder, path);
+  return relativePath === '' || (!relativePath.startsWith('..') && !isAbsolute(relativePath));
+}
+
+export function hashChatFile(path: string): string | null {
+  return hashFile(path);
 }
 
 export class ChatBatchesRepository {
@@ -346,6 +356,26 @@ export class ChatBatchesRepository {
   findBatchForManifest(projectId: string, manifest: ChatManifest): ChatBatchRecord | undefined {
     const batch = this.findBatchIdentity(projectId, manifest.messageName, manifest.folderPath);
     return batch ? this.getBatch(projectId, batch.id) : undefined;
+  }
+
+  listAssignedProjectPhotoContentHashes(projectId: string): string[] {
+    const rows = this.db
+      .prepare(
+        `SELECT
+          photo.content_hash AS contentHash,
+          photo.storage_path AS storagePath,
+          project.base_folder AS baseFolder
+        FROM photos photo
+        JOIN projects project ON project.id = photo.project_id
+        WHERE photo.project_id = ?
+          AND photo.content_hash IS NOT NULL
+          AND photo.content_hash != ''`,
+      )
+      .all(projectId) as Array<{ contentHash: string; storagePath: string; baseFolder: string }>;
+
+    return rows
+      .filter((row) => isInsideFolder(row.storagePath, row.baseFolder) && existsSync(row.storagePath))
+      .map((row) => row.contentHash);
   }
 
   clearWorkingBatches(projectId: string): number {

@@ -1,4 +1,6 @@
+import { join } from 'node:path';
 import type { ChatBatchesRepository, ChatBatchStatus } from './chat-batches-repository.js';
+import { hashChatFile } from './chat-batches-repository.js';
 import { extractMatcherFeatures } from './checklist-matcher.js';
 import { findChatManifests, type ChatManifest } from './chat-manifest.js';
 
@@ -51,6 +53,18 @@ function decideInitialStatus(manifest: ChatManifest): { status: ChatBatchStatus;
   return { status: 'WAITING_FOR_CLASSIFICATION', reviewReason: null };
 }
 
+function removeDuplicateFiles(manifest: ChatManifest, knownHashes: Set<string>): ChatManifest {
+  const files = manifest.files.filter((file) => {
+    const contentHash = hashChatFile(join(manifest.folderPath, file.fileName));
+    if (!contentHash) return true;
+    if (knownHashes.has(contentHash)) return false;
+    knownHashes.add(contentHash);
+    return true;
+  });
+
+  return files.length === manifest.files.length ? manifest : { ...manifest, files };
+}
+
 export async function importChatFolders(input: ImportChatFoldersInput): Promise<ImportChatFoldersResult> {
   const manifests = await findChatManifests(input.rootPath);
   const result: ImportChatFoldersResult = {
@@ -59,8 +73,12 @@ export async function importChatFolders(input: ImportChatFoldersInput): Promise<
     pendingReview: 0,
     cleared: input.repository.clearWorkingBatches(input.projectId),
   };
+  const knownHashes = new Set(input.repository.listAssignedProjectPhotoContentHashes(input.projectId));
 
-  for (const manifest of manifests) {
+  for (const rawManifest of manifests) {
+    const manifest = removeDuplicateFiles(rawManifest, knownHashes);
+    if (manifest.files.length === 0) continue;
+
     const existingBatch = input.repository.findBatchForManifest(input.projectId, manifest);
     if (existingBatch) {
       continue;

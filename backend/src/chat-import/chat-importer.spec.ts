@@ -1,7 +1,8 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { openDatabase } from '../db/connection.js';
 import { runMigrations } from '../db/migrations.js';
@@ -15,6 +16,7 @@ function createContext() {
   const db = openDatabase(join(dir, 'test.sqlite'));
   runMigrations(db);
   const projects = new ProjectsRepository(db);
+  const projectBaseFolder = join(dir, 'photos');
   const project = projects.createProject({
     name: 'OPP0013',
     projectDefinition: null,
@@ -23,20 +25,39 @@ function createContext() {
     splitterTopologySource: 'AUTO',
     splitterCount: 1,
     gpkgFileName: 'OPP0013.gpkg',
-    baseFolder: join(dir, 'photos'),
+    baseFolder: projectBaseFolder,
     addresses: [],
     dacToAddressCableCount: 0,
     adssToAddressCableCount: 0,
-    checklistNodes: [],
+    checklistNodes: [
+      {
+        id: 'node-existing',
+        projectId: 'project-temp',
+        parentId: null,
+        name: 'Maleniecka_5',
+        path: 'Zapasy_kabli_instalacyjnych/OPP0013/Maleniecka_5',
+        nodeType: 'CABLE_RESERVE',
+        addressId: null,
+        sortOrder: 0,
+        minPhotos: 1,
+        acceptsPhotos: true,
+      },
+    ],
   });
 
-  return { db, repository: new ChatBatchesRepository(db), projectId: project.id, dir };
+  return { db, projects, repository: new ChatBatchesRepository(db), projectId: project.id, dir, projectBaseFolder };
 }
 
-function writeManifest(root: string, folderName: string, messageText: string, messageName?: string): void {
+function writeManifest(
+  root: string,
+  folderName: string,
+  messageText: string,
+  messageName?: string,
+  photoContent = `image:${folderName}`,
+): void {
   const folderPath = join(root, folderName);
   mkdirSync(folderPath, { recursive: true });
-  writeFileSync(join(folderPath, 'photo.jpeg'), 'image');
+  writeFileSync(join(folderPath, 'photo.jpeg'), photoContent);
   writeFileSync(
     join(folderPath, 'manifest.json'),
     JSON.stringify(
@@ -54,6 +75,10 @@ function writeManifest(root: string, folderName: string, messageText: string, me
       2,
     ),
   );
+}
+
+function sha256(value: string): string {
+  return createHash('sha256').update(value).digest('hex');
 }
 
 describe('importChatFolders', () => {
@@ -252,6 +277,50 @@ describe('importChatFolders', () => {
         status: 'REJECTED',
       }),
     ]);
+  });
+
+  it('does not create review batches for photos already assigned inside the project folder', async () => {
+    const { db, projects, repository, projectId, dir, projectBaseFolder } = createContext();
+    writeManifest(dir, '2026-04-27_Maleniecka 5', 'Maleniecka 5', undefined, 'image');
+    const storedPath = join(projectBaseFolder, 'Zapasy_kabli_instalacyjnych', 'OPP0013', 'Maleniecka_5', 'photo.jpeg');
+    mkdirSync(dirname(storedPath), { recursive: true });
+    writeFileSync(storedPath, 'image');
+    projects.addPhoto({
+      id: 'photo-existing',
+      projectId,
+      checklistNodeId: 'node-existing',
+      sourceFileName: 'photo.jpeg',
+      storedFileName: 'photo.jpeg',
+      storagePath: storedPath,
+      thumbnailPath: null,
+      mimeType: 'image/jpeg',
+      fileSize: 5,
+      lat: null,
+      lng: null,
+      capturedAt: null,
+      reserveLocation: null,
+      contentHash: sha256('image'),
+    });
+
+    const result = await importChatFolders({ projectId, rootPath: dir, repository });
+    const batches = repository.listBatches(projectId);
+    db.close();
+
+    expect(result).toEqual({ imported: 0, waitingForClassification: 0, pendingReview: 0, cleared: 0 });
+    expect(batches).toEqual([]);
+  });
+
+  it('keeps only one review batch when two new Google Chat messages contain the same photo', async () => {
+    const { db, repository, projectId, dir } = createContext();
+    writeManifest(dir, '2026-04-27_Maleniecka 5 pierwsza', 'Maleniecka 5', 'spaces/AAA/messages/first', 'same-image');
+    writeManifest(dir, '2026-04-27_Maleniecka 5 druga', 'Maleniecka 5', 'spaces/AAA/messages/second', 'same-image');
+
+    const result = await importChatFolders({ projectId, rootPath: dir, repository });
+    const batches = repository.listBatches(projectId);
+    db.close();
+
+    expect(result).toEqual({ imported: 1, waitingForClassification: 0, pendingReview: 1, cleared: 0 });
+    expect(batches).toHaveLength(1);
   });
 
   it('clears old working chat queue before importing another folder', async () => {
