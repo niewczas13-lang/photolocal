@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Bot, CheckCircle2, Download, Loader2, MessageSquare, RefreshCw, UserPlus } from 'lucide-react';
+import { Bot, CheckCircle2, Loader2, MessageSquare, RefreshCw, Trash2, UserPlus } from 'lucide-react';
 import { api } from '../api';
 import type {
   ChatAcceptReadyResult,
@@ -15,7 +15,6 @@ import type {
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
 import { Card, CardContent } from './ui/card';
-import { Input } from './ui/input';
 import { getSuggestedGoogleChatSpaces } from './chat-space-suggestions';
 
 interface ChatImportPanelProps {
@@ -29,6 +28,7 @@ type LastResult =
   | { type: 'import'; result: ChatImportResult }
   | { type: 'classify-started'; result: ChatClassificationStatus }
   | { type: 'accept'; result: ChatAcceptReadyResult }
+  | { type: 'clear'; result: { cleared: number } }
   | null;
 
 function safeFolderName(value: string): string {
@@ -51,9 +51,8 @@ function formatElapsed(ms: number | null | undefined): string {
 
 export default function ChatImportPanel({ projectId, project, batches, onChanged }: ChatImportPanelProps) {
   const [defaultChatRoot, setDefaultChatRoot] = useState('');
-  const [rootPath, setRootPath] = useState('');
   const [busyAction, setBusyAction] = useState<
-    'spaces' | 'download' | 'import' | 'classify' | 'accept' | 'invites' | 'invite-setup' | 'accept-invite' | null
+    'spaces' | 'download' | 'clear' | 'classify' | 'accept' | 'invites' | 'invite-setup' | 'accept-invite' | null
   >(null);
   const [lastResult, setLastResult] = useState<LastResult>(null);
   const [classificationStatus, setClassificationStatus] = useState<ChatClassificationStatus | null>(null);
@@ -152,7 +151,6 @@ export default function ChatImportPanel({ projectId, project, batches, onChanged
       setDownloadStatus(result);
       setPendingAutoImportKey(result.startedAt ?? null);
       setCompletedAutoImportKey(null);
-      setRootPath(`${defaultChatRoot}\\${safeFolderName(selectedSpace.displayName)}`);
     } catch (error) {
       console.error(error);
       alert('Blad podczas startu pobierania z Google Chat');
@@ -161,13 +159,9 @@ export default function ChatImportPanel({ projectId, project, batches, onChanged
     }
   };
 
-  const runAction = async (action: 'import' | 'classify' | 'accept') => {
+  const runAction = async (action: 'classify' | 'accept') => {
     setBusyAction(action);
     try {
-      if (action === 'import') {
-        const result = await api.importChatFolders(projectId, rootPath);
-        setLastResult({ type: 'import', result });
-      }
       if (action === 'classify') {
         setClassificationStatus({ state: 'RUNNING', processed: 0, total: counts.waiting });
         const result = await api.classifyChatBatches(projectId);
@@ -187,6 +181,27 @@ export default function ChatImportPanel({ projectId, project, batches, onChanged
     }
   };
 
+  const clearQueues = async () => {
+    const toClear = counts.waiting + counts.ready + counts.review;
+    if (toClear === 0) return;
+    const confirmed = window.confirm(
+      `Wyczyscic kolejke Qwen, Do importu i Review? Usunietych zostanie ${toClear} paczek roboczych.`,
+    );
+    if (!confirmed) return;
+
+    setBusyAction('clear');
+    try {
+      const result = await api.clearChatQueues(projectId);
+      setLastResult({ type: 'clear', result });
+      await onChanged();
+    } catch (error) {
+      console.error(error);
+      alert('Blad podczas czyszczenia kolejek Google Chat');
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
   useEffect(() => {
     let cancelled = false;
 
@@ -195,7 +210,6 @@ export default function ChatImportPanel({ projectId, project, batches, onChanged
         const config = await api.getConfig();
         if (!cancelled) {
           setDefaultChatRoot(config.googleChatDownloadRoot);
-          setRootPath((current) => current || config.googleChatDownloadRoot);
         }
       } catch (error) {
         console.error(error);
@@ -260,7 +274,6 @@ export default function ChatImportPanel({ projectId, project, batches, onChanged
     const importDownloaded = async () => {
       setCompletedAutoImportKey(downloadStatus.startedAt ?? null);
       const downloadRoot = `${defaultChatRoot}\\${safeFolderName(downloadStatus.spaceDisplayName ?? '')}`;
-      setRootPath(downloadRoot);
       try {
         const result = await api.importChatFolders(projectId, downloadRoot);
         setLastResult({ type: 'import', result });
@@ -309,7 +322,7 @@ export default function ChatImportPanel({ projectId, project, batches, onChanged
           <div>
             <h3 className="text-lg font-semibold">Import z Google Chat</h3>
             <p className="text-sm text-muted-foreground">
-              Wskaz folder z pobranymi paczkami, potem uruchom klasyfikacje. Pewne wyniki trafia do zakladki Do importu.
+              Pobierz zdjecia z pokoju, a paczki same trafia do kolejki Qwen, Do importu albo Review.
             </p>
           </div>
 
@@ -452,14 +465,6 @@ export default function ChatImportPanel({ projectId, project, batches, onChanged
             )}
           </div>
 
-          <div className="grid md:grid-cols-[1fr_auto] gap-3">
-            <Input value={rootPath} onChange={(event) => setRootPath(event.target.value)} />
-            <Button disabled={!rootPath.trim() || busyAction !== null} onClick={() => void runAction('import')}>
-              {busyAction === 'import' ? <Loader2 size={16} className="mr-2 animate-spin" /> : <Download size={16} className="mr-2" />}
-              Importuj paczki
-            </Button>
-          </div>
-
           <div className="grid sm:grid-cols-5 gap-2">
             <Badge variant="outline" className="justify-center py-2">Czeka na Qwen: {counts.waiting}</Badge>
             <Badge variant="outline" className="justify-center py-2">Do importu: {counts.ready}</Badge>
@@ -476,6 +481,14 @@ export default function ChatImportPanel({ projectId, project, batches, onChanged
             <Button variant="secondary" disabled={busyAction !== null} onClick={() => void runAction('accept')}>
               {busyAction === 'accept' ? <Loader2 size={16} className="mr-2 animate-spin" /> : <CheckCircle2 size={16} className="mr-2" />}
               Importuj zaakceptowane
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={busyAction !== null || counts.waiting + counts.ready + counts.review === 0}
+              onClick={() => void clearQueues()}
+            >
+              {busyAction === 'clear' ? <Loader2 size={16} className="mr-2 animate-spin" /> : <Trash2 size={16} className="mr-2" />}
+              Wyczysc kolejki
             </Button>
           </div>
 
@@ -497,6 +510,9 @@ export default function ChatImportPanel({ projectId, project, batches, onChanged
                   Auto-akceptacja: paczki {lastResult.result.importedBatches}, zdjecia {lastResult.result.importedPhotos},
                   pominiete: {lastResult.result.skippedBatches}.
                 </span>
+              )}
+              {lastResult.type === 'clear' && (
+                <span>Wyczyszczono kolejki robocze: {lastResult.result.cleared} paczek.</span>
               )}
             </div>
           )}

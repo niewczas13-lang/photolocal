@@ -1059,6 +1059,70 @@ describe('projects routes', () => {
     expect(response.json()).toEqual({ imported: 2, waitingForClassification: 1, pendingReview: 1, cleared: 0 });
   });
 
+  it('clears Google Chat working queues for a project', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'photo-local-chat-clear-route-'));
+    process.env.PHOTO_LOCAL_DB = join(dir, 'test.sqlite');
+    process.env.PHOTO_BASE_DIR = join(dir, 'photos');
+
+    const { app, db } = await buildApp();
+    const projects = new ProjectsRepository(db);
+    const chatBatches = new ChatBatchesRepository(db);
+    const project = projects.createProject({
+      name: 'OPP0013',
+      projectDefinition: null,
+      projectType: 'SI',
+      splitterTopology: 'SINGLE',
+      splitterTopologySource: 'AUTO',
+      splitterCount: 1,
+      gpkgFileName: 'OPP0013.gpkg',
+      baseFolder: join(dir, 'photos', 'OPP0013'),
+      addresses: [],
+      dacToAddressCableCount: 0,
+      adssToAddressCableCount: 0,
+      checklistNodes: [],
+    });
+    const statuses = [
+      'WAITING_FOR_CLASSIFICATION',
+      'READY_FOR_IMPORT',
+      'PENDING_REVIEW',
+      'IMPORTED',
+    ] as const;
+
+    for (const status of statuses) {
+      const chatFolder = join(dir, 'chat', status);
+      mkdirSync(chatFolder, { recursive: true });
+      writeFileSync(join(chatFolder, 'photo.png'), 'image');
+      chatBatches.importManifest({
+        projectId: project.id,
+        status,
+        manifest: {
+          source: 'google-chat',
+          spaceName: 'spaces/AAA',
+          spaceDisplayName: 'Budowa',
+          messageName: `spaces/AAA/messages/${status}`,
+          messageText: status,
+          createTime: '2026-04-27T10:00:00Z',
+          folderName: status,
+          folderPath: chatFolder,
+          files: [{ fileName: 'photo.png', contentName: 'photo.png', contentType: 'image/png' }],
+        },
+      });
+    }
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/api/projects/${project.id}/chat-batches/clear-working`,
+      headers: { 'content-type': 'application/json' },
+      payload: JSON.stringify({}),
+    });
+    const remaining = chatBatches.listBatches(project.id).map((batch) => batch.status);
+    await app.close();
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ cleared: 3 });
+    expect(remaining).toEqual(['IMPORTED']);
+  });
+
   it('returns a clear error when Google Chat import folder does not exist', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'photo-local-chat-missing-route-'));
     process.env.PHOTO_LOCAL_DB = join(dir, 'test.sqlite');

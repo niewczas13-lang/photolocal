@@ -6,23 +6,60 @@ import {
   photoProjectRoute,
   projectListRoute,
 } from './app-routing';
+import { Button } from './components/ui/button';
 import CreateProjectDialog from './components/CreateProjectDialog';
+import LoginScreen from './components/LoginScreen';
 import MapWorkspace from './components/MapWorkspace';
 import ProjectList from './components/ProjectList';
 import ProjectSettingsDialog from './components/ProjectSettingsDialog';
 import ProjectView from './components/ProjectView';
-import type { ProjectSummary } from './types';
-import { SmilePlus } from 'lucide-react';
+import type { AuthUser, ProjectSummary } from './types';
+import { LogOut, SmilePlus } from 'lucide-react';
 
 export default function App() {
+  const [authUser, setAuthUser] = useState<AuthUser | null>(null);
+  const [authChecking, setAuthChecking] = useState(true);
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [creating, setCreating] = useState(false);
   const [settingsProjectId, setSettingsProjectId] = useState<string | null>(null);
   const [route, setRoute] = useState(() => parseRouteFromHash(window.location.hash));
 
   useEffect(() => {
-    void api.listProjects().then(setProjects);
+    if (!api.hasAuthToken()) {
+      setAuthChecking(false);
+      return;
+    }
+
+    let cancelled = false;
+    const loadCurrentUser = async () => {
+      try {
+        const user = await api.getCurrentUser();
+        if (!cancelled) setAuthUser(user);
+      } catch (error) {
+        console.error(error);
+      } finally {
+        if (!cancelled) setAuthChecking(false);
+      }
+    };
+
+    void loadCurrentUser();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
+
+  useEffect(() => {
+    if (!authUser) return;
+    void api
+      .listProjects()
+      .then(setProjects)
+      .catch((error) => {
+        console.error(error);
+        setAuthUser(null);
+        setProjects([]);
+      });
+  }, [authUser]);
 
   useEffect(() => {
     const handleHashChange = () => setRoute(parseRouteFromHash(window.location.hash));
@@ -40,6 +77,24 @@ export default function App() {
       current.map((project) => (project.id === updatedProject.id ? updatedProject : project)),
     );
   };
+  const logout = async () => {
+    await api.logout();
+    setAuthUser(null);
+    setProjects([]);
+    window.location.hash = projectListRoute();
+  };
+
+  if (authChecking) {
+    return (
+      <main className="min-h-screen bg-background text-foreground grid place-items-center font-sans">
+        <div className="text-sm text-muted-foreground">Ladowanie...</div>
+      </main>
+    );
+  }
+
+  if (!authUser) {
+    return <LoginScreen onLoggedIn={setAuthUser} />;
+  }
 
   return (
     <main className="min-h-screen bg-background text-foreground flex flex-col font-sans selection:bg-primary/20">
@@ -65,6 +120,13 @@ export default function App() {
             )}
           </div>
         </button>
+        <div className="ml-auto flex items-center gap-3">
+          <span className="text-sm text-muted-foreground">{authUser.username}</span>
+          <Button variant="outline" onClick={() => void logout()}>
+            <LogOut size={16} className="mr-2" />
+            Wyloguj
+          </Button>
+        </div>
       </header>
 
       {/* Main View Area */}

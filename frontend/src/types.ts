@@ -1,6 +1,16 @@
 export type ProjectType = 'SI' | 'KPO';
 export type SplitterTopology = 'SINGLE' | 'CASCADE';
 
+export interface AuthUser {
+  id: string;
+  username: string;
+}
+
+export interface AuthSession {
+  token: string;
+  user: AuthUser;
+}
+
 export interface ProjectSummary {
   id: string;
   name: string;
@@ -269,6 +279,10 @@ export interface ChatImportResult {
   imported: number;
   waitingForClassification: number;
   pendingReview: number;
+  cleared: number;
+}
+
+export interface ChatQueueClearResult {
   cleared: number;
 }
 

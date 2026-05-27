@@ -222,6 +222,20 @@ CREATE TABLE IF NOT EXISTS chat_photo_file_imports (
   UNIQUE(chat_photo_file_id, photo_id)
 );
 
+CREATE TABLE IF NOT EXISTS app_users (
+  id TEXT PRIMARY KEY,
+  username TEXT NOT NULL UNIQUE,
+  password_hash TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS app_sessions (
+  token TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES app_users(id) ON DELETE CASCADE,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  expires_at TEXT
+);
+
 CREATE INDEX IF NOT EXISTS idx_addresses_project_id ON addresses(project_id);
 CREATE INDEX IF NOT EXISTS idx_checklist_nodes_project_id ON checklist_nodes(project_id);
 CREATE INDEX IF NOT EXISTS idx_checklist_nodes_parent_id ON checklist_nodes(parent_id);
@@ -240,3 +254,4 @@ CREATE INDEX IF NOT EXISTS idx_chat_photo_batches_status ON chat_photo_batches(s
 CREATE INDEX IF NOT EXISTS idx_chat_photo_files_batch_id ON chat_photo_files(batch_id);
 CREATE INDEX IF NOT EXISTS idx_chat_photo_file_imports_file_id ON chat_photo_file_imports(chat_photo_file_id);
 CREATE INDEX IF NOT EXISTS idx_chat_photo_file_imports_photo_id ON chat_photo_file_imports(photo_id);
+CREATE INDEX IF NOT EXISTS idx_app_sessions_user_id ON app_sessions(user_id);

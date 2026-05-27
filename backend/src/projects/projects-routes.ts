@@ -413,6 +413,16 @@ export async function registerProjectRoutes(
     }
   });
 
+  app.post('/api/projects/:projectId/chat-batches/clear-working', async (request, reply) => {
+    const { projectId } = request.params as { projectId: string };
+    const project = repository.getProject(projectId);
+
+    if (!project) return reply.status(404).send({ error: 'Project not found' });
+
+    const cleared = chatBatchesRepository.clearWorkingBatches(projectId);
+    return { cleared };
+  });
+
   app.get('/api/projects/:projectId/chat-batches/:batchId/files/:fileId/file', async (request, reply) => {
     const { projectId, batchId, fileId } = request.params as {
       projectId: string;

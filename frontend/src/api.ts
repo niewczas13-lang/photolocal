@@ -1,10 +1,13 @@
 import type {
+  AuthSession,
+  AuthUser,
   ChatAcceptReadyResult,
   ChatBatch,
   ChatBatchStatus,
   ChatClassificationResult,
   ChatClassificationStatus,
   ChatImportResult,
+  ChatQueueClearResult,
   AppConfig,
   ChecklistNode,
   ChecklistNodeDetail,
@@ -26,9 +29,28 @@ import type {
   SharedFolderRoot,
 } from './types';
 
+const AUTH_TOKEN_KEY = 'photo-local-auth-token';
+
+export function getAuthToken(): string | null {
+  return window.localStorage.getItem(AUTH_TOKEN_KEY);
+}
+
+function setAuthToken(token: string): void {
+  window.localStorage.setItem(AUTH_TOKEN_KEY, token);
+}
+
+export function clearAuthToken(): void {
+  window.localStorage.removeItem(AUTH_TOKEN_KEY);
+}
+
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(url, init);
+  const headers = new Headers(init?.headers);
+  const token = getAuthToken();
+  if (token) headers.set('Authorization', `Bearer ${token}`);
+
+  const response = await fetch(url, { ...init, headers });
   if (!response.ok) {
+    if (response.status === 401) clearAuthToken();
     const text = await response.text();
     let message = text || `HTTP ${response.status}`;
     try {
@@ -47,6 +69,29 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  hasAuthToken: () => Boolean(getAuthToken()),
+  login: async (username: string, password: string) => {
+    const session = await request<AuthSession>('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password }),
+    });
+    setAuthToken(session.token);
+    return session;
+  },
+  getCurrentUser: async () => {
+    const result = await request<{ user: AuthUser }>('/api/auth/me');
+    return result.user;
+  },
+  logout: async () => {
+    try {
+      await request<{ ok: true }>('/api/auth/logout', { method: 'POST' });
+    } catch {
+      // The local session should be cleared even if the server token is already invalid.
+    } finally {
+      clearAuthToken();
+    }
+  },
   getConfig: () => request<AppConfig>('/api/config'),
   listSharedFolderRoots: () => request<{ roots: SharedFolderRoot[] }>('/api/shared-folders/roots'),
   listSharedFolderChildren: (path: string) =>
@@ -226,6 +271,12 @@ export const api = {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ rootPath }),
+    }),
+  clearChatQueues: (projectId: string) =>
+    request<ChatQueueClearResult>(`/api/projects/${projectId}/chat-batches/clear-working`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
     }),
   classifyChatBatches: (projectId: string) =>
     request<ChatClassificationStatus>(`/api/projects/${projectId}/chat-batches/classify`, {

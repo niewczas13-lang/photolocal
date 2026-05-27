@@ -2,6 +2,7 @@ import type Database from 'better-sqlite3';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { ensureDefaultUsers } from '../auth/app-auth.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -26,6 +27,7 @@ export function runMigrations(db: Database.Database): void {
   migrateChatReserveLocationConstraint(db, schema);
   migrateMapTrunkCableIdentity(db, schema);
   backfillSystemMetkiFolder(db);
+  ensureDefaultUsers(db);
 }
 
 function tableColumns(db: Database.Database, tableName: string): Set<string> {

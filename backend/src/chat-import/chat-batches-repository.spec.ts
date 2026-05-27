@@ -46,7 +46,7 @@ function createRepository() {
   return { db, repository: new ChatBatchesRepository(db), projectId: project.id, tempDir: dir };
 }
 
-function createManifest(folderPath: string): ChatManifest {
+function createManifest(folderPath: string, messageName = 'spaces/AAA/messages/BBB'): ChatManifest {
   writeFileSync(join(folderPath, 'a.jpeg'), 'image-a');
   writeFileSync(join(folderPath, 'b.png'), 'image-b');
 
@@ -54,7 +54,7 @@ function createManifest(folderPath: string): ChatManifest {
     source: 'google-chat',
     spaceName: 'spaces/AAA',
     spaceDisplayName: 'Budowa',
-    messageName: 'spaces/AAA/messages/BBB',
+    messageName,
     messageText: 'Maleniecka 5',
     createTime: '2026-04-27T10:00:00Z',
     folderName: 'Maleniecka 5',
@@ -157,5 +157,33 @@ describe('ChatBatchesRepository', () => {
     expect(removed).toBe(1);
     expect(remaining.map((file) => file.id)).toEqual([files[1].id]);
     expect(updatedBatch?.fileCount).toBe(1);
+  });
+
+  it('clears only Qwen, ready import and review batches', () => {
+    const { db, repository, projectId, tempDir } = createRepository();
+    const statuses = [
+      'WAITING_FOR_CLASSIFICATION',
+      'READY_FOR_IMPORT',
+      'PENDING_REVIEW',
+      'IMPORTED',
+      'REJECTED',
+    ] as const;
+
+    for (const status of statuses) {
+      const folderPath = join(tempDir, status);
+      mkdirSync(folderPath, { recursive: true });
+      repository.importManifest({
+        projectId,
+        manifest: createManifest(folderPath, `spaces/AAA/messages/${status}`),
+        status,
+      });
+    }
+
+    const cleared = repository.clearWorkingBatches(projectId);
+    const remaining = repository.listBatches(projectId).map((batch) => batch.status);
+    db.close();
+
+    expect(cleared).toBe(3);
+    expect(remaining).toEqual(['IMPORTED', 'REJECTED']);
   });
 });

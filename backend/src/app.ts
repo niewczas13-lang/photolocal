@@ -2,6 +2,7 @@ import multipart from '@fastify/multipart';
 import fastifyStatic from '@fastify/static';
 import Fastify from 'fastify';
 import { existsSync } from 'node:fs';
+import { registerAuthGuard, registerAuthRoutes } from './auth/app-auth.js';
 import { loadConfig } from './config.js';
 import { openDatabase } from './db/connection.js';
 import { runMigrations } from './db/migrations.js';
@@ -13,6 +14,12 @@ import {
 } from './filesystem/shared-folder-browser.js';
 import { acceptChatInvite, listChatInvites, openChatInvitesSetup } from './google-chat/chat-invites.js';
 import { registerProjectRoutes } from './projects/projects-routes.js';
+
+function shouldEnableAuth(): boolean {
+  if (process.env.PHOTO_LOCAL_AUTH === 'enabled') return true;
+  if (process.env.PHOTO_LOCAL_AUTH === 'disabled') return false;
+  return process.env.NODE_ENV !== 'test';
+}
 
 export async function buildApp() {
   const app = Fastify({ logger: true });
@@ -26,6 +33,9 @@ export async function buildApp() {
       files: 100,
     },
   });
+
+  registerAuthRoutes(app, db);
+  if (shouldEnableAuth()) registerAuthGuard(app, db);
 
   app.get('/health', async () => ({ ok: true }));
   app.get('/api/config', async () => ({
