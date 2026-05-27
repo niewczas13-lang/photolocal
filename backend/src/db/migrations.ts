@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { ensureDefaultUsers } from '../auth/app-auth.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+const AUTO_STALE_GPKG_NODE_REASON = 'Nie wystepuje w ostatnio przeliczonym GPKG';
 
 export function runMigrations(db: Database.Database): void {
   const schema = readFileSync(join(__dirname, 'schema.sql'), 'utf8');
@@ -63,6 +64,7 @@ export function runMigrations(db: Database.Database): void {
   migrateChatReserveLocationConstraint(db, schema);
   migrateMapTrunkCableIdentity(db, schema);
   backfillSystemMetkiFolder(db);
+  repairAutoStaleChecklistStatuses(db);
   ensureDefaultUsers(db);
 }
 
@@ -234,4 +236,40 @@ function backfillSystemMetkiFolder(db: Database.Database): void {
   });
 
   tx();
+}
+
+function repairAutoStaleChecklistStatuses(db: Database.Database): void {
+  db.prepare(
+    `WITH RECURSIVE stale_subtree(root_id, node_id) AS (
+       SELECT id, id
+       FROM checklist_nodes
+       WHERE status = 'NOT_APPLICABLE'
+         AND not_applicable_reason = ?
+
+       UNION ALL
+
+       SELECT stale_subtree.root_id, child.id
+       FROM checklist_nodes child
+       JOIN stale_subtree ON child.parent_id = stale_subtree.node_id
+     ),
+     repair_nodes AS (
+       SELECT DISTINCT stale_subtree.root_id AS id
+       FROM stale_subtree
+       JOIN photos ON photos.checklist_node_id = stale_subtree.node_id
+     )
+     UPDATE checklist_nodes
+     SET status = CASE
+           WHEN accepts_photos = 1
+             AND min_photos > 0
+             AND (
+               SELECT COUNT(*)
+               FROM photos
+               WHERE checklist_node_id = checklist_nodes.id
+             ) >= min_photos THEN 'COMPLETE'
+           ELSE 'OPEN'
+         END,
+         not_applicable_reason = NULL,
+         updated_at = CURRENT_TIMESTAMP
+     WHERE id IN (SELECT id FROM repair_nodes)`,
+  ).run(AUTO_STALE_GPKG_NODE_REASON);
 }

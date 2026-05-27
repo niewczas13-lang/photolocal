@@ -104,4 +104,66 @@ describe('runMigrations', () => {
 
     expect(photo.contentHash).toBeNull();
   });
+
+  it('repairs automatic stale checklist statuses when preserved photos exist', () => {
+    const db = new Database(':memory:');
+    runMigrations(db);
+    insertProject(db, 'project-1');
+    db.prepare(
+      `INSERT INTO checklist_nodes (
+        id, project_id, parent_id, name, path, node_type, source,
+        address_id, sort_order, min_photos, accepts_photos, status, not_applicable_reason
+      ) VALUES
+        (
+          'stale-root', 'project-1', NULL, 'OSD2766', 'OSD2766', 'STATIC', 'GPKG',
+          NULL, 0, 0, 0, 'NOT_APPLICABLE', 'Nie wystepuje w ostatnio przeliczonym GPKG'
+        ),
+        (
+          'stale-photo', 'project-1', 'stale-root', 'Malenicka_5', 'OSD2766/Malenicka_5',
+          'CABLE_RESERVE', 'GPKG', NULL, 0, 1, 1, 'NOT_APPLICABLE',
+          'Nie wystepuje w ostatnio przeliczonym GPKG'
+        ),
+        (
+          'manual-skip', 'project-1', NULL, 'Manual', 'Manual', 'STATIC', 'GPKG',
+          NULL, 1, 1, 1, 'NOT_APPLICABLE', 'Klient potwierdzil brak zakresu'
+        )`,
+    ).run();
+    db.prepare(
+      `INSERT INTO photos (
+        id, project_id, checklist_node_id, source_file_name, stored_file_name,
+        storage_path, mime_type, file_size
+      ) VALUES
+        (
+          'photo-stale', 'project-1', 'stale-photo', 'reserve.jpg', 'reserve.jpg',
+          'OSD2766/Malenicka_5/reserve.jpg', 'image/jpeg', 10
+        ),
+        (
+          'photo-manual', 'project-1', 'manual-skip', 'manual.jpg', 'manual.jpg',
+          'Manual/manual.jpg', 'image/jpeg', 10
+        )`,
+    ).run();
+
+    runMigrations(db);
+
+    const rows = db
+      .prepare(
+        `SELECT id, status, not_applicable_reason AS notApplicableReason
+         FROM checklist_nodes
+         WHERE project_id = 'project-1'
+           AND id IN ('manual-skip', 'stale-photo', 'stale-root')
+         ORDER BY id ASC`,
+      )
+      .all() as Array<{ id: string; status: string; notApplicableReason: string | null }>;
+    db.close();
+
+    expect(rows).toEqual([
+      {
+        id: 'manual-skip',
+        status: 'NOT_APPLICABLE',
+        notApplicableReason: 'Klient potwierdzil brak zakresu',
+      },
+      { id: 'stale-photo', status: 'COMPLETE', notApplicableReason: null },
+      { id: 'stale-root', status: 'OPEN', notApplicableReason: null },
+    ]);
+  });
 });

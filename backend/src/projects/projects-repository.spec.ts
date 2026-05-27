@@ -421,7 +421,7 @@ describe('ProjectsRepository', () => {
     });
   });
 
-  it('removes stale recalculated nodes only when they have no assigned photos', () => {
+  it('preserves stale recalculated nodes with photos without marking them not applicable', () => {
     const { db, repository } = createRepository();
 
     const project = repository.createProject({
@@ -556,9 +556,9 @@ describe('ProjectsRepository', () => {
     expect(result.preservedAssignedStaleNodes).toBe(2);
     expect(checklist.some((node) => node.path.startsWith('01_BARTAG_ZS00031'))).toBe(false);
     expect(checklist.find((node) => node.id === 'stale-assigned-photo-node')).toMatchObject({
-      status: 'NOT_APPLICABLE',
+      status: 'COMPLETE',
       photoCount: 1,
-      notApplicableReason: 'Nie wystepuje w ostatnio przeliczonym GPKG',
+      notApplicableReason: null,
     });
     expect(checklist.find((node) => node.path === '01_BARTAG_ZS00033/Zdjecia')).toMatchObject({
       id: 'current-photo-node',
@@ -632,6 +632,100 @@ describe('ProjectsRepository', () => {
       source: 'MANUAL',
     });
     expect(checklist.some((node) => node.id === 'old-gpkg-node')).toBe(false);
+  });
+
+  it('clears old automatic stale flags when a generated checklist node reappears', () => {
+    const { db, repository } = createRepository();
+
+    const project = repository.createProject({
+      name: 'BARTAG',
+      projectDefinition: null,
+      projectType: 'SI',
+      splitterTopology: 'SINGLE',
+      splitterTopologySource: 'AUTO',
+      splitterCount: 1,
+      gpkgFileName: 'old.gpkg',
+      baseFolder: 'C:/photos/BARTAG',
+      addresses: [],
+      dacToAddressCableCount: 0,
+      adssToAddressCableCount: 0,
+      checklistNodes: [
+        {
+          id: 'reserve-old',
+          projectId: 'project-temp',
+          parentId: null,
+          name: 'Malenicka_5',
+          path: 'Zapasy_kabli_instalacyjnych/OSD2766/Malenicka_5',
+          nodeType: 'CABLE_RESERVE',
+          addressId: null,
+          sortOrder: 0,
+          minPhotos: 1,
+          acceptsPhotos: true,
+        },
+      ],
+    });
+
+    repository.addPhoto({
+      id: 'photo-reserve',
+      projectId: project.id,
+      checklistNodeId: 'reserve-old',
+      sourceFileName: 'reserve.jpeg',
+      storedFileName: 'reserve.jpeg',
+      storagePath: 'C:/photos/BARTAG/Zapasy_kabli_instalacyjnych/OSD2766/Malenicka_5/reserve.jpeg',
+      thumbnailPath: null,
+      mimeType: 'image/jpeg',
+      fileSize: 123,
+      lat: null,
+      lng: null,
+      capturedAt: null,
+      reserveLocation: null,
+    });
+    repository.markNotApplicable(
+      project.id,
+      'reserve-old',
+      'Nie wystepuje w ostatnio przeliczonym GPKG',
+    );
+
+    repository.recalculateChecklist({
+      projectId: project.id,
+      projectDefinition: 'BARTAG',
+      projectType: 'SI',
+      splitterTopology: 'SINGLE',
+      splitterTopologySource: 'AUTO',
+      splitterCount: 1,
+      gpkgFileName: 'new.gpkg',
+      addresses: [],
+      dacToAddressCableCount: 1,
+      adssToAddressCableCount: 0,
+      checklistNodes: [
+        {
+          id: 'reserve-new',
+          projectId: project.id,
+          parentId: null,
+          name: 'Malenicka_5',
+          path: 'Zapasy_kabli_instalacyjnych/OSD2766/Malenicka_5',
+          nodeType: 'CABLE_RESERVE',
+          addressId: null,
+          sortOrder: 0,
+          minPhotos: 1,
+          acceptsPhotos: true,
+        },
+      ],
+    });
+
+    const checklist = repository.getChecklist(project.id) as Array<{
+      id: string;
+      status: string;
+      notApplicableReason: string | null;
+      photoCount: number;
+    }>;
+    db.close();
+
+    expect(checklist.find((node) => node.id === 'reserve-old')).toMatchObject({
+      status: 'COMPLETE',
+      notApplicableReason: null,
+      photoCount: 1,
+    });
   });
 
   it('returns project map data and turns address markers green when reserve photos exist', () => {

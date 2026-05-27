@@ -29,6 +29,8 @@ import type {
 import type { GeneratedChecklistNode, ChecklistAddress } from '../checklist/checklist-generator.js';
 import { safeFolderName, toAddressFolderName } from '../utils/path-names.js';
 
+const STALE_GPKG_NODE_REASON = 'Nie wystepuje w ostatnio przeliczonym GPKG';
+
 export interface AddPhotoInput {
   id: string;
   projectId: string;
@@ -1923,6 +1925,23 @@ export class ProjectsRepository {
              sort_order = ?,
              min_photos = ?,
              accepts_photos = ?,
+             status = CASE
+               WHEN status = 'NOT_APPLICABLE'
+                 AND COALESCE(not_applicable_reason, '') != ? THEN status
+               WHEN ? = 1
+                 AND ? > 0
+                 AND (
+                   SELECT COUNT(*)
+                   FROM photos
+                   WHERE checklist_node_id = checklist_nodes.id
+                 ) >= ? THEN 'COMPLETE'
+               ELSE 'OPEN'
+             END,
+             not_applicable_reason = CASE
+               WHEN status = 'NOT_APPLICABLE'
+                 AND COALESCE(not_applicable_reason, '') != ? THEN not_applicable_reason
+               ELSE NULL
+             END,
              updated_at = CURRENT_TIMESTAMP
          WHERE id = ? AND project_id = ?`,
       );
@@ -1946,6 +1965,11 @@ export class ProjectsRepository {
             node.sortOrder,
             node.minPhotos,
             node.acceptsPhotos ? 1 : 0,
+            STALE_GPKG_NODE_REASON,
+            node.acceptsPhotos ? 1 : 0,
+            node.minPhotos,
+            node.minPhotos,
+            STALE_GPKG_NODE_REASON,
             existingId,
             input.projectId,
           );
@@ -2009,13 +2033,28 @@ export class ProjectsRepository {
 
       const updateStaleNode = this.db.prepare(
         `UPDATE checklist_nodes
-         SET status = 'NOT_APPLICABLE',
-             not_applicable_reason = 'Nie wystepuje w ostatnio przeliczonym GPKG',
+         SET status = CASE
+               WHEN status = 'NOT_APPLICABLE'
+                 AND COALESCE(not_applicable_reason, '') != ? THEN status
+               WHEN accepts_photos = 1
+                 AND min_photos > 0
+                 AND (
+                   SELECT COUNT(*)
+                   FROM photos
+                   WHERE checklist_node_id = checklist_nodes.id
+                 ) >= min_photos THEN 'COMPLETE'
+               ELSE 'OPEN'
+             END,
+             not_applicable_reason = CASE
+               WHEN status = 'NOT_APPLICABLE'
+                 AND COALESCE(not_applicable_reason, '') != ? THEN not_applicable_reason
+               ELSE NULL
+             END,
              updated_at = CURRENT_TIMESTAMP
          WHERE id = ? AND project_id = ?`,
       );
       for (const nodeId of staleNodeIdsWithPhotos) {
-        updateStaleNode.run(nodeId, input.projectId);
+        updateStaleNode.run(STALE_GPKG_NODE_REASON, STALE_GPKG_NODE_REASON, nodeId, input.projectId);
       }
       result.preservedAssignedStaleNodes = staleNodeIdsWithPhotos.size;
 
