@@ -25,6 +25,7 @@ import { photoProjectRoute, type MapView } from '../app-routing';
 import { cn } from '../lib/utils';
 import { getMapBoundsPositions } from '../map-bounds';
 import { formatCableLength } from '../map-format';
+import { isMapClickCaptureActive } from '../map-interaction-mode';
 import {
   INFRASTRUCTURE_MAP_PANE,
   INFRASTRUCTURE_POPUP_PANE,
@@ -964,6 +965,12 @@ export default function ProjectMap({ projectId, view, onViewChange }: ProjectMap
     };
   }, [data]);
 
+  const mapClickCaptureActive = isMapClickCaptureActive({
+    addingAddress,
+    addingFreeNote,
+    hasDraftNote: Boolean(draftNotePosition),
+  });
+
   if (loading && !data) {
     return (
       <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
@@ -1162,6 +1169,7 @@ export default function ProjectMap({ projectId, view, onViewChange }: ProjectMap
                           positions={positions}
                           pathOptions={getInfrastructureLineStyle()}
                           pane={INFRASTRUCTURE_MAP_PANE}
+                          interactive={!mapClickCaptureActive}
                         >
                           <Popup pane={INFRASTRUCTURE_POPUP_PANE}>
                             <InfrastructurePopup feature={feature} />
@@ -1178,6 +1186,7 @@ export default function ProjectMap({ projectId, view, onViewChange }: ProjectMap
                         position={position}
                         icon={infrastructurePointIcon(feature)}
                         pane={INFRASTRUCTURE_MAP_PANE}
+                        interactive={!mapClickCaptureActive}
                       >
                         <Popup pane={INFRASTRUCTURE_POPUP_PANE}>
                           <InfrastructurePopup feature={feature} />
@@ -1193,7 +1202,12 @@ export default function ProjectMap({ projectId, view, onViewChange }: ProjectMap
                 const label = polygon.label ?? polygon.osdName;
                 const notePosition = polygonNotePosition(polygon);
                 return (
-                  <GeoJSON key={polygon.id} data={polygon.geojson} style={() => polygonStyle(polygon)}>
+                  <GeoJSON
+                    key={polygon.id}
+                    data={polygon.geojson}
+                    style={() => polygonStyle(polygon)}
+                    interactive={!mapClickCaptureActive}
+                  >
                     <Popup>
                       <div className="project-map-popup">
                         <div className="project-map-popup__title">{label}</div>
@@ -1231,6 +1245,7 @@ export default function ProjectMap({ projectId, view, onViewChange }: ProjectMap
                       key={`${cable.id}-${index}-${styleIndex}`}
                       positions={positions}
                       pathOptions={style}
+                      interactive={!mapClickCaptureActive}
                     >
                       <Popup>
                         <CablePopup
@@ -1251,6 +1266,7 @@ export default function ProjectMap({ projectId, view, onViewChange }: ProjectMap
                   key={node.id}
                   position={[node.lat, node.lng]}
                   icon={markerIcon(node.nodeType, getMarkerTone(node))}
+                  interactive={!mapClickCaptureActive}
                 >
                   <Popup>
                     <NodePopup
@@ -1273,6 +1289,7 @@ export default function ProjectMap({ projectId, view, onViewChange }: ProjectMap
                     'address',
                     address.isNotApplicable ? 'notApplicable' : address.hasReservePhoto ? 'done' : 'addressPending',
                   )}
+                  interactive={!mapClickCaptureActive}
                 >
                   <Popup>
                     <AddressPopup
@@ -1292,6 +1309,7 @@ export default function ProjectMap({ projectId, view, onViewChange }: ProjectMap
                   key={candidate.id}
                   position={[candidate.lat, candidate.lng]}
                   icon={addressCandidateIcon()}
+                  interactive={!mapClickCaptureActive}
                 >
                   <Popup>
                     <AddressCandidatePopup
@@ -1306,7 +1324,12 @@ export default function ProjectMap({ projectId, view, onViewChange }: ProjectMap
 
               {data.notes.map((note) =>
                 note.lat == null || note.lng == null ? null : (
-                  <Marker key={`note-${note.id}`} position={[note.lat, note.lng]} icon={noteMarkerIcon()}>
+                  <Marker
+                    key={`note-${note.id}`}
+                    position={[note.lat, note.lng]}
+                    icon={noteMarkerIcon()}
+                    interactive={!mapClickCaptureActive}
+                  >
                     <Popup>
                       <MapNotePopup
                         note={note}
