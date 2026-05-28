@@ -239,6 +239,7 @@ describe('projects routes', () => {
         distributionPoint: null,
         reserveLocation: 'Doziemny',
         createDistributionNodeType: null,
+        noteBody: 'Dopisane przy zatwierdzaniu adresu',
       }),
     });
     await app.close();
@@ -257,6 +258,11 @@ describe('projects routes', () => {
       street: 'Lesna',
       buildingNo: '7',
       distributionPoint: 'OSTRZESZEWO/OPP0002',
+    });
+    expect(approveResponse.json().notes[0]).toMatchObject({
+      targetType: 'address',
+      targetId: approveResponse.json().addresses[0].id,
+      body: 'Dopisane przy zatwierdzaniu adresu',
     });
   });
 

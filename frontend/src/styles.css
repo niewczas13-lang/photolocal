@@ -926,10 +926,6 @@
   box-shadow: 0 0 0 2px rgb(37 99 235 / 0.12);
 }
 
-.project-map-candidate-card__note button {
-  justify-self: start;
-}
-
 .project-map-candidate-card__actions {
   display: flex;
   flex-wrap: wrap;

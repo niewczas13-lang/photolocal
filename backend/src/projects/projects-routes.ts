@@ -680,6 +680,7 @@ export async function registerProjectRoutes(
       distributionPoint?: unknown;
       reserveLocation?: unknown;
       createDistributionNodeType?: unknown;
+      noteBody?: unknown;
     };
     const project = repository.getProject(projectId);
 
@@ -700,6 +701,7 @@ export async function registerProjectRoutes(
         distributionPoint: toOptionalString(body.distributionPoint),
         reserveLocation: body.reserveLocation,
         createDistributionNodeType: toOptionalDistributionNodeType(body.createDistributionNodeType),
+        noteBody: toOptionalString(body.noteBody),
       });
       return repository.getProjectMap(projectId);
     } catch (error) {

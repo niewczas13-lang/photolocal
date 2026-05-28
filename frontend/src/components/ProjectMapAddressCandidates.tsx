@@ -1,7 +1,6 @@
 import { useMemo, useState } from 'react';
-import { Check, Home, MapPin, StickyNote, Trash2 } from 'lucide-react';
+import { Check, Home, MapPin, Trash2 } from 'lucide-react';
 
-import { buildAddressCandidateNoteInput, type AddressCandidateNoteInput } from '../address-candidate-notes';
 import type {
   ProjectMapAddressCandidate,
   ProjectMapCandidateReserveLocation,
@@ -21,6 +20,7 @@ interface ApproveAddressCandidateInput {
   distributionPoint: string | null;
   reserveLocation: ProjectMapCandidateReserveLocation;
   createDistributionNodeType: 'OSD' | 'OPP' | null;
+  noteBody: string | null;
 }
 
 interface ProjectMapAddressCandidatesProps {
@@ -28,7 +28,6 @@ interface ProjectMapAddressCandidatesProps {
   busyId: string | null;
   onApproveCandidate: (candidateId: string, input: ApproveAddressCandidateInput) => void;
   onRejectCandidate: (candidateId: string) => void;
-  onCreateNote: (input: AddressCandidateNoteInput) => Promise<boolean>;
 }
 
 function formatDistance(value: number | null): string {
@@ -41,18 +40,14 @@ function CandidateCard({
   candidate,
   distributionPoints,
   busy,
-  noteBusy,
   onApprove,
   onReject,
-  onCreateNote,
 }: {
   candidate: ProjectMapAddressCandidate;
   distributionPoints: string[];
   busy: boolean;
-  noteBusy: boolean;
   onApprove: (candidateId: string, input: ApproveAddressCandidateInput) => void;
   onReject: (candidateId: string) => void;
-  onCreateNote: (input: AddressCandidateNoteInput) => Promise<boolean>;
 }) {
   const initialMode: AssignmentMode = candidate.suggestedDistributionPoint
     ? 'auto'
@@ -76,7 +71,6 @@ function CandidateCard({
         ? selectedDistributionPoint
         : manualDistributionPoint;
   const canApprove = city.trim() !== '' && street.trim() !== '' && Boolean(distributionPoint?.trim());
-  const canCreateNote = noteBody.trim() !== '';
 
   return (
     <article className="project-map-candidate-card">
@@ -183,31 +177,15 @@ function CandidateCard({
 
       <div className="project-map-candidate-card__note">
         <label>
-          Notatka do adresu
+          Notatka do adresu po zatwierdzeniu
           <textarea
             value={noteBody}
             rows={3}
             placeholder="Np. brak slupa, sprawdzic numer, klient nieobecny..."
+            disabled={busy}
             onChange={(event) => setNoteBody(event.target.value)}
           />
         </label>
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          disabled={busy || noteBusy || !canCreateNote}
-          onClick={() => {
-            const input = buildAddressCandidateNoteInput(candidate, noteBody);
-            if (!input) return;
-
-            void onCreateNote(input).then((saved) => {
-              if (saved) setNoteBody('');
-            });
-          }}
-        >
-          <StickyNote size={14} />
-          Dodaj notatke
-        </Button>
       </div>
 
       <div className="project-map-candidate-card__actions">
@@ -225,6 +203,7 @@ function CandidateCard({
               distributionPoint: distributionPoint?.trim() || null,
               reserveLocation,
               createDistributionNodeType: assignmentMode === 'manual' ? manualDistributionNodeType : null,
+              noteBody: noteBody.trim() || null,
             })
           }
         >
@@ -245,7 +224,6 @@ export default function ProjectMapAddressCandidates({
   busyId,
   onApproveCandidate,
   onRejectCandidate,
-  onCreateNote,
 }: ProjectMapAddressCandidatesProps) {
   const distributionPoints = useMemo(
     () =>
@@ -276,10 +254,8 @@ export default function ProjectMapAddressCandidates({
             candidate={candidate}
             distributionPoints={distributionPoints}
             busy={busyId === candidate.id}
-            noteBusy={busyId === 'note'}
             onApprove={onApproveCandidate}
             onReject={onRejectCandidate}
-            onCreateNote={onCreateNote}
           />
         ))}
         {data.addressCandidates.length === 0 && (

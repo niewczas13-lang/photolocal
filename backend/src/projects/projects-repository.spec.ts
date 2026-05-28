@@ -996,6 +996,7 @@ describe('ProjectsRepository', () => {
       distributionPoint: 'RADOM/OSD0001',
       reserveLocation: 'Doziemny',
       createDistributionNodeType: null,
+      noteBody: 'Sprawdzic numer na slupku',
     });
     const map = repository.getProjectMap(project.id);
     const checklistPaths = (repository.getChecklist(project.id) as Array<{ path: string }>)
@@ -1015,6 +1016,16 @@ describe('ProjectsRepository', () => {
         label: 'Polna 12, Radom',
         distributionPoint: 'RADOM/OSD0001',
         status: 'PENDING',
+      }),
+    ]);
+    expect(map.notes).toEqual([
+      expect.objectContaining({
+        targetType: 'address',
+        targetId: approved.approvedAddressId,
+        targetLabel: 'Polna 12, Radom',
+        body: 'Sprawdzic numer na slupku',
+        lat: 51.51,
+        lng: 21.21,
       }),
     ]);
     expect(checklistPaths).toEqual([

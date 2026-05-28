@@ -912,6 +912,7 @@ export default function ProjectMap({ projectId, view, onViewChange }: ProjectMap
       distributionPoint: string | null;
       reserveLocation: ProjectMapCandidateReserveLocation;
       createDistributionNodeType: 'OSD' | 'OPP' | null;
+      noteBody?: string | null;
     },
   ) => {
     setBusyId(candidateId);
@@ -1168,7 +1169,6 @@ export default function ProjectMap({ projectId, view, onViewChange }: ProjectMap
           busyId={busyId}
           onApproveCandidate={(candidateId, input) => void approveAddressCandidate(candidateId, input)}
           onRejectCandidate={(candidateId) => void rejectAddressCandidate(candidateId)}
-          onCreateNote={(input) => createMapNote(input)}
         />
       ) : (
         <>

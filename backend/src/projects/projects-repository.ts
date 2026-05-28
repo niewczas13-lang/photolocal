@@ -84,6 +84,7 @@ export interface ApproveMapAddressCandidateInput {
   distributionPoint: string | null;
   reserveLocation: ReserveLocationKind;
   createDistributionNodeType: 'OSD' | 'OPP' | null;
+  noteBody?: string | null;
 }
 
 export interface UpdateMapNoteInput {
@@ -1198,6 +1199,25 @@ export class ProjectsRepository {
         buildingNo: input.buildingNo,
         reserveLocation: input.reserveLocation,
       });
+
+      const noteBody = input.noteBody?.trim() ?? '';
+      if (noteBody) {
+        this.db
+          .prepare(
+            `INSERT INTO map_notes (
+              id, project_id, target_type, target_id, target_label, body, lat, lng
+            ) VALUES (?, ?, 'address', ?, ?, ?, ?, ?)`,
+          )
+          .run(
+            randomUUID(),
+            input.projectId,
+            addressId,
+            buildAddressLabel({ city, street, buildingNo: input.buildingNo }),
+            noteBody,
+            candidate.lat,
+            candidate.lng,
+          );
+      }
 
       this.db
         .prepare(

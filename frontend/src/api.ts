@@ -179,6 +179,7 @@ export const api = {
       distributionPoint: string | null;
       reserveLocation: ProjectMapCandidateReserveLocation;
       createDistributionNodeType: 'OSD' | 'OPP' | null;
+      noteBody?: string | null;
     },
   ) =>
     request<ProjectMapData>(`/api/projects/${projectId}/map/address-candidates/${candidateId}/approve`, {
