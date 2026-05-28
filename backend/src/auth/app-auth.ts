@@ -12,7 +12,7 @@ export interface AuthSession {
   user: AuthUser;
 }
 
-const DEFAULT_USERS = ['aniela', 'pawel', 'jarek', 'piotr'];
+const DEFAULT_USERS = ['aniela', 'pawel', 'jarek', 'piotr', 'karol'];
 const SESSION_DURATION_MS = 30 * 24 * 60 * 60 * 1000;
 const SESSION_COOKIE_NAME = 'photo_local_session';
 
@@ -115,6 +115,33 @@ export function ensureDefaultUsers(db: Database.Database): void {
   });
 
   tx();
+}
+
+export function upsertAppUser(
+  db: Database.Database,
+  username: string,
+  password: string,
+): AuthUser {
+  const normalizedUsername = normalizeUsername(username);
+  if (!normalizedUsername) throw new Error('Username is required');
+  if (!password) throw new Error('Password is required');
+
+  const existing = db
+    .prepare('SELECT id FROM app_users WHERE username = ?')
+    .get(normalizedUsername) as { id: string } | undefined;
+
+  if (existing) {
+    db.prepare('UPDATE app_users SET password_hash = ? WHERE id = ?').run(hashPassword(password), existing.id);
+    return { id: existing.id, username: normalizedUsername };
+  }
+
+  const id = randomUUID();
+  db.prepare(
+    `INSERT INTO app_users (id, username, password_hash)
+     VALUES (?, ?, ?)`,
+  ).run(id, normalizedUsername, hashPassword(password));
+
+  return { id, username: normalizedUsername };
 }
 
 export function authenticateUser(

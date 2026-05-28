@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import { authenticateUser, upsertAppUser } from './app-auth.js';
 import { buildApp } from '../app.js';
 import { ProjectsRepository } from '../projects/projects-repository.js';
 
@@ -33,6 +34,12 @@ describe('app auth', () => {
       headers: { 'content-type': 'application/json' },
       payload: JSON.stringify({ username: 'aniela', password: 'aniela' }),
     });
+    const karolLogin = await app.inject({
+      method: 'POST',
+      url: '/api/auth/login',
+      headers: { 'content-type': 'application/json' },
+      payload: JSON.stringify({ username: 'karol', password: 'karol' }),
+    });
     const token = login.json().token as string;
     const authorized = await app.inject({
       method: 'GET',
@@ -51,6 +58,8 @@ describe('app auth', () => {
     expect(blocked.statusCode).toBe(401);
     expect(badLogin.statusCode).toBe(401);
     expect(login.statusCode).toBe(200);
+    expect(karolLogin.statusCode).toBe(200);
+    expect(karolLogin.json()).toMatchObject({ user: { username: 'karol' } });
     expect(login.json()).toMatchObject({ user: { username: 'aniela' } });
     expect(typeof token).toBe('string');
     expect(token.length).toBeGreaterThan(32);
@@ -59,6 +68,25 @@ describe('app auth', () => {
     expect(me.statusCode).toBe(200);
     expect(me.json()).toMatchObject({ user: { username: 'aniela' } });
     expect(renewedCookie).toContain('photo_local_session=');
+  });
+
+  it('creates or updates a local app user with an explicit password', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'photo-local-auth-upsert-'));
+    process.env.PHOTO_LOCAL_AUTH = 'enabled';
+    process.env.PHOTO_LOCAL_DB = join(dir, 'test.sqlite');
+    process.env.PHOTO_BASE_DIR = join(dir, 'photos');
+
+    const { app, db } = await buildApp();
+
+    const created = upsertAppUser(db, 'Karol', 'inne-haslo');
+    const badPassword = authenticateUser(db, 'karol', 'karol');
+    const goodPassword = authenticateUser(db, 'karol', 'inne-haslo');
+
+    await app.close();
+
+    expect(created.username).toBe('karol');
+    expect(badPassword).toBeNull();
+    expect(goodPassword).toMatchObject({ username: 'karol' });
   });
 
   it('allows browser image requests to use the login session cookie', async () => {

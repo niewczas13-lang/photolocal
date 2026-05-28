@@ -9,6 +9,8 @@
     "start": "npm run build && node dist/server.js",
     "serve": "node dist/server.js",
     "test": "vitest run",
+    "auth:add-user": "tsx src/auth/add-user-cli.ts",
+    "auth:add-user:dist": "node dist/auth/add-user-cli.js",
     "classify:chat": "tsx src/chat-import/classify-chat-folders.ts",
     "hash:photos": "tsx src/photos/hash-project-photos-cli.ts",
     "hash:photos:dist": "node dist/photos/hash-project-photos-cli.js"
