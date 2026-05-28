@@ -7,3 +7,7 @@ export interface MapClickCaptureState {
 export function isMapClickCaptureActive(state: MapClickCaptureState): boolean {
   return state.addingAddress || (state.addingFreeNote && !state.hasDraftNote);
 }
+
+export function getMapClickCaptureClassName(state: MapClickCaptureState): string | null {
+  return isMapClickCaptureActive(state) ? 'project-map-leaflet--click-capture' : null;
+}

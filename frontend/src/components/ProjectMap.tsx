@@ -25,7 +25,7 @@ import { photoProjectRoute, type MapView } from '../app-routing';
 import { cn } from '../lib/utils';
 import { getMapBoundsPositions } from '../map-bounds';
 import { formatCableLength } from '../map-format';
-import { isMapClickCaptureActive } from '../map-interaction-mode';
+import { getMapClickCaptureClassName, isMapClickCaptureActive } from '../map-interaction-mode';
 import {
   INFRASTRUCTURE_MAP_PANE,
   INFRASTRUCTURE_POPUP_PANE,
@@ -263,6 +263,28 @@ function FitBounds({ positions }: { positions: LatLngExpression[] }) {
     if (!bounds.isValid()) return;
     map.fitBounds(bounds, { padding: [32, 32], maxZoom: 18 });
   }, [key, map]);
+
+  return null;
+}
+
+function MapClickCaptureClassController({ className }: { className: string | null }) {
+  const map = useMap();
+
+  useEffect(() => {
+    const container = map.getContainer();
+    const captureClassName = 'project-map-leaflet--click-capture';
+
+    if (className) {
+      container.classList.add(className);
+      map.closePopup();
+    } else {
+      container.classList.remove(captureClassName);
+    }
+
+    return () => {
+      container.classList.remove(captureClassName);
+    };
+  }, [className, map]);
 
   return null;
 }
@@ -970,6 +992,11 @@ export default function ProjectMap({ projectId, view, onViewChange }: ProjectMap
     addingFreeNote,
     hasDraftNote: Boolean(draftNotePosition),
   });
+  const mapClickCaptureClassName = getMapClickCaptureClassName({
+    addingAddress,
+    addingFreeNote,
+    hasDraftNote: Boolean(draftNotePosition),
+  });
 
   if (loading && !data) {
     return (
@@ -1128,6 +1155,7 @@ export default function ProjectMap({ projectId, view, onViewChange }: ProjectMap
                 url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
               />
               <FitBounds positions={boundsPositions} />
+              <MapClickCaptureClassController className={mapClickCaptureClassName} />
               <MapClickNoteCreator
                 enabled={addingFreeNote && !addingAddress}
                 onPick={(lat, lng) => setDraftNotePosition({ lat, lng })}

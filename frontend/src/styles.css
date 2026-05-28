@@ -307,6 +307,16 @@
   background: var(--muted);
 }
 
+.project-map-leaflet--click-capture {
+  cursor: crosshair;
+}
+
+.project-map-leaflet--click-capture .leaflet-interactive,
+.project-map-leaflet--click-capture .leaflet-marker-icon,
+.project-map-leaflet--click-capture .leaflet-marker-shadow {
+  pointer-events: none;
+}
+
 .project-map-marker {
   border: 0;
   background: transparent;
