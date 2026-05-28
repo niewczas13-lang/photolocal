@@ -900,6 +900,36 @@
   font-size: 12px;
 }
 
+.project-map-candidate-card__note {
+  display: grid;
+  gap: 8px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 10px;
+}
+
+.project-map-candidate-card__note textarea {
+  min-height: 72px;
+  resize: vertical;
+  border: 1px solid #cbd5e1;
+  border-radius: 7px;
+  padding: 8px 10px;
+  color: #0f172a;
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.project-map-candidate-card__note textarea:focus {
+  border-color: #2563eb;
+  outline: none;
+  box-shadow: 0 0 0 2px rgb(37 99 235 / 0.12);
+}
+
+.project-map-candidate-card__note button {
+  justify-self: start;
+}
+
 .project-map-candidate-card__actions {
   display: flex;
   flex-wrap: wrap;
