@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import L, { type LatLngExpression, type PathOptions } from 'leaflet';
-import { GeoJSON, MapContainer, Marker, Pane, Polyline, Popup, TileLayer, useMap, useMapEvents } from 'react-leaflet';
+import { GeoJSON, MapContainer, Marker, Pane, Polyline, Popup, TileLayer, useMap } from 'react-leaflet';
 import {
   Cable,
   Circle,
@@ -25,7 +25,11 @@ import { photoProjectRoute, type MapView } from '../app-routing';
 import { cn } from '../lib/utils';
 import { getMapBoundsPositions } from '../map-bounds';
 import { formatCableLength } from '../map-format';
-import { getMapClickCaptureClassName, isMapClickCaptureActive } from '../map-interaction-mode';
+import {
+  getMapClickCaptureClassName,
+  isMapClickCaptureActive,
+  shouldCaptureMapCanvasClick,
+} from '../map-interaction-mode';
 import {
   INFRASTRUCTURE_MAP_PANE,
   INFRASTRUCTURE_POPUP_PANE,
@@ -505,6 +509,43 @@ function MiniPhotoGallery({ projectId, photos }: { projectId: string; photos: Pr
   );
 }
 
+function useCapturedMapClick({
+  enabled,
+  onPick,
+}: {
+  enabled: boolean;
+  onPick: (lat: number, lng: number) => void;
+}) {
+  const map = useMap();
+  const onPickRef = useRef(onPick);
+
+  useEffect(() => {
+    onPickRef.current = onPick;
+  }, [onPick]);
+
+  useEffect(() => {
+    if (!enabled) return;
+
+    const container = map.getContainer();
+    const handleClick = (event: MouseEvent) => {
+      if (!shouldCaptureMapCanvasClick(event.target)) return;
+      if (!enabled) return;
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+
+      const latLng = map.mouseEventToLatLng(event);
+      onPickRef.current(latLng.lat, latLng.lng);
+    };
+
+    container.addEventListener('click', handleClick, true);
+
+    return () => {
+      container.removeEventListener('click', handleClick, true);
+    };
+  }, [enabled, map]);
+}
+
 function MapClickNoteCreator({
   enabled,
   onPick,
@@ -512,12 +553,7 @@ function MapClickNoteCreator({
   enabled: boolean;
   onPick: (lat: number, lng: number) => void;
 }) {
-  useMapEvents({
-    click(event) {
-      if (!enabled) return;
-      onPick(event.latlng.lat, event.latlng.lng);
-    },
-  });
+  useCapturedMapClick({ enabled, onPick });
 
   return null;
 }
@@ -529,12 +565,7 @@ function MapClickAddressCreator({
   enabled: boolean;
   onPick: (lat: number, lng: number) => void;
 }) {
-  useMapEvents({
-    click(event) {
-      if (!enabled) return;
-      onPick(event.latlng.lat, event.latlng.lng);
-    },
-  });
+  useCapturedMapClick({ enabled, onPick });
 
   return null;
 }

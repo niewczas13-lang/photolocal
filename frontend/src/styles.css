@@ -308,13 +308,17 @@
 }
 
 .project-map-leaflet--click-capture {
-  cursor: crosshair;
+  cursor: default !important;
+}
+
+.project-map-leaflet--click-capture * {
+  cursor: default !important;
 }
 
 .project-map-leaflet--click-capture .leaflet-interactive,
 .project-map-leaflet--click-capture .leaflet-marker-icon,
 .project-map-leaflet--click-capture .leaflet-marker-shadow {
-  pointer-events: none;
+  pointer-events: none !important;
 }
 
 .project-map-marker {

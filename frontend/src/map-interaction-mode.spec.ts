@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { getMapClickCaptureClassName, isMapClickCaptureActive } from './map-interaction-mode';
+import {
+  getMapClickCaptureClassName,
+  isMapClickCaptureActive,
+  shouldCaptureMapCanvasClick,
+} from './map-interaction-mode';
 
 describe('isMapClickCaptureActive', () => {
   it('captures map clicks while adding an address even over interactive layers', () => {
@@ -52,5 +56,23 @@ describe('getMapClickCaptureClassName', () => {
         hasDraftNote: false,
       }),
     ).toBeNull();
+  });
+});
+
+describe('shouldCaptureMapCanvasClick', () => {
+  it('captures clicks on map layers while picking a map point', () => {
+    const layerTarget = {
+      closest: (selector: string) => (selector === '.leaflet-interactive' ? layerTarget : null),
+    } as unknown as EventTarget;
+
+    expect(shouldCaptureMapCanvasClick(layerTarget)).toBe(true);
+  });
+
+  it('does not capture clicks on leaflet controls', () => {
+    const controlTarget = {
+      closest: (selector: string) => (selector === '.leaflet-control, .leaflet-popup' ? controlTarget : null),
+    } as unknown as EventTarget;
+
+    expect(shouldCaptureMapCanvasClick(controlTarget)).toBe(false);
   });
 });
