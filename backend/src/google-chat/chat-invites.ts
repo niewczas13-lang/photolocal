@@ -125,6 +125,10 @@ function powerShellSingleQuote(value: string): string {
   return `'${value.replace(/'/g, "''")}'`;
 }
 
+function commandPromptDoubleQuote(value: string): string {
+  return `"${value.replace(/"/g, '\\"')}"`;
+}
+
 function buildInviteBrowserArgs(config: ChatInviteBrowserConfig): string[] {
   const debugPort = inviteDebugPort(config);
   return [
@@ -141,16 +145,19 @@ export function buildInviteBrowserLaunchInfo(input: {
   executablePath: string | null;
 }): ChatInviteBrowserLaunchInfo {
   const args = buildInviteBrowserArgs(input.config);
+  const powerShellCommand = input.executablePath
+    ? `Start-Process -FilePath ${powerShellSingleQuote(input.executablePath)} -ArgumentList @(${args
+        .map(powerShellSingleQuote)
+        .join(', ')})`
+    : null;
   return {
     executablePath: input.executablePath,
     executableName: browserNameFromPath(input.executablePath),
     debugPort: inviteDebugPort(input.config),
     profileDir: input.config.profileDir,
     url: GOOGLE_CHAT_INVITES_URL,
-    command: input.executablePath
-      ? `Start-Process -FilePath ${powerShellSingleQuote(input.executablePath)} -ArgumentList @(${args
-          .map(powerShellSingleQuote)
-          .join(', ')})`
+    command: powerShellCommand
+      ? `powershell -NoProfile -ExecutionPolicy Bypass -Command ${commandPromptDoubleQuote(powerShellCommand)}`
       : null,
   };
 }

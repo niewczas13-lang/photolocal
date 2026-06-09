@@ -669,7 +669,8 @@ export default function ChatImportPanel({ projectId, project, batches, onChanged
                   {inviteLaunch.command ? (
                     <>
                       <p className="mt-2 text-xs text-muted-foreground">
-                        Jesli okno nie wyskoczylo, uruchom te komende na komputerze, na ktorym dziala backend PhotoLocal.
+                        Jesli okno nie wyskoczylo, uruchom na backendzie plik otworz-logowanie-google-chat.bat
+                        z folderu PhotoLocal albo wklej te komende.
                       </p>
                       <pre className="mt-2 max-h-28 overflow-auto whitespace-pre-wrap break-all rounded bg-muted p-2 text-[11px] text-muted-foreground">
                         {inviteLaunch.command}

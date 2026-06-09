@@ -71,6 +71,7 @@ describe('chat invites helpers', () => {
       debugPort: 9333,
       profileDir: 'C:\\PhotoLocal\\backend\\data\\google-chat-browser-profile',
     });
+    expect(launch.command).toContain('powershell -NoProfile -ExecutionPolicy Bypass -Command');
     expect(launch.command).toContain("Start-Process -FilePath 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'");
     expect(launch.command).toContain("'--remote-debugging-port=9333'");
     expect(launch.command).toContain("'--user-data-dir=C:\\PhotoLocal\\backend\\data\\google-chat-browser-profile'");
