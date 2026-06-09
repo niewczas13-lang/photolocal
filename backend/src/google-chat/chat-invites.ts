@@ -26,6 +26,15 @@ export interface ChatInviteSessionStatus {
   checkedAt: string;
 }
 
+export interface ChatInviteBrowserLaunchInfo {
+  executablePath: string | null;
+  executableName: string | null;
+  debugPort: number;
+  profileDir: string;
+  url: string;
+  command: string | null;
+}
+
 export interface ChatInviteDebugInfo {
   steps: string[];
   finalUrl: string | null;
@@ -88,39 +97,82 @@ function inviteDebugPort(config: ChatInviteBrowserConfig): number {
   return config.debugPort ?? 9222;
 }
 
-function chromeCandidates(): string[] {
+function browserCandidates(): string[] {
   return [
+    process.env.GOOGLE_CHAT_BROWSER_PATH ?? '',
     process.env.GOOGLE_CHROME_PATH ?? '',
+    process.env.GOOGLE_EDGE_PATH ?? '',
     'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
     'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+    'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
+    'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
   ].filter(Boolean);
 }
 
-function findChromeExecutable(): string {
-  const chromePath = chromeCandidates().find((candidate) => existsSync(candidate));
-  if (!chromePath) {
-    throw new Error('Nie znaleziono chrome.exe. Ustaw GOOGLE_CHROME_PATH w .env.');
-  }
-  return chromePath;
+function findBrowserExecutable(): string | null {
+  return browserCandidates().find((candidate) => existsSync(candidate)) ?? null;
 }
 
-function launchExternalChrome(config: ChatInviteBrowserConfig, debug: ChatInviteDebugInfo): void {
-  const chromePath = findChromeExecutable();
-  const debugPort = inviteDebugPort(config);
-  debug.steps.push(`Uruchamiam zwykly Chrome: ${chromePath}`);
-  debug.steps.push(`Remote debugging port: ${debugPort}`);
+function browserNameFromPath(executablePath: string | null): string | null {
+  if (!executablePath) return null;
+  const normalized = executablePath.toLowerCase();
+  if (normalized.includes('msedge')) return 'Microsoft Edge';
+  if (normalized.includes('chrome')) return 'Google Chrome';
+  return executablePath.split(/[\\/]/).pop() ?? executablePath;
+}
 
-  const args = [
-      `--remote-debugging-port=${debugPort}`,
-      `--user-data-dir=${config.profileDir}`,
-      '--no-first-run',
+function powerShellSingleQuote(value: string): string {
+  return `'${value.replace(/'/g, "''")}'`;
+}
+
+function buildInviteBrowserArgs(config: ChatInviteBrowserConfig): string[] {
+  const debugPort = inviteDebugPort(config);
+  return [
+    `--remote-debugging-port=${debugPort}`,
+    `--user-data-dir=${config.profileDir}`,
+    '--no-first-run',
     ...(config.headless ? ['--headless=new', '--disable-gpu'] : ['--new-window']),
     GOOGLE_CHAT_INVITES_URL,
   ];
+}
+
+export function buildInviteBrowserLaunchInfo(input: {
+  config: ChatInviteBrowserConfig;
+  executablePath: string | null;
+}): ChatInviteBrowserLaunchInfo {
+  const args = buildInviteBrowserArgs(input.config);
+  return {
+    executablePath: input.executablePath,
+    executableName: browserNameFromPath(input.executablePath),
+    debugPort: inviteDebugPort(input.config),
+    profileDir: input.config.profileDir,
+    url: GOOGLE_CHAT_INVITES_URL,
+    command: input.executablePath
+      ? `Start-Process -FilePath ${powerShellSingleQuote(input.executablePath)} -ArgumentList @(${args
+          .map(powerShellSingleQuote)
+          .join(', ')})`
+      : null,
+  };
+}
+
+function launchExternalChrome(
+  config: ChatInviteBrowserConfig,
+  debug: ChatInviteDebugInfo,
+): ChatInviteBrowserLaunchInfo {
+  const browserPath = findBrowserExecutable();
+  const launch = buildInviteBrowserLaunchInfo({ config, executablePath: browserPath });
+  if (!browserPath) {
+    throw new Error(
+      'Nie znaleziono Google Chrome ani Microsoft Edge. Ustaw GOOGLE_CHAT_BROWSER_PATH albo GOOGLE_CHROME_PATH w .env.',
+    );
+  }
+
+  debug.steps.push(`Uruchamiam przegladarke: ${browserPath}`);
+  debug.steps.push(`Remote debugging port: ${launch.debugPort}`);
 
   const child = spawn(
-    chromePath,
-    args,
+    browserPath,
+    buildInviteBrowserArgs(config),
     {
       detached: true,
       stdio: 'ignore',
@@ -128,6 +180,7 @@ function launchExternalChrome(config: ChatInviteBrowserConfig, debug: ChatInvite
     },
   );
   child.unref();
+  return launch;
 }
 
 async function waitForCdpEndpoint(config: ChatInviteBrowserConfig, debug: ChatInviteDebugInfo): Promise<string> {
@@ -428,7 +481,13 @@ async function clickJoinButton(page: Page, inviteIndex: number): Promise<boolean
 
 export async function listChatInvites(input: {
   config: ChatInviteBrowserConfig;
-}): Promise<{ invites: ChatInviteCandidate[]; url: string; profileDir: string; session: ChatInviteSessionStatus }> {
+}): Promise<{
+  invites: ChatInviteCandidate[];
+  url: string;
+  profileDir: string;
+  session: ChatInviteSessionStatus;
+  launch: ChatInviteBrowserLaunchInfo;
+}> {
   const debug = createDebugInfo();
   const browser = await openInvitesPage(input.config, debug);
   try {
@@ -447,6 +506,10 @@ export async function listChatInvites(input: {
       url: GOOGLE_CHAT_INVITES_URL,
       profileDir: input.config.profileDir,
       session,
+      launch: buildInviteBrowserLaunchInfo({
+        config: input.config,
+        executablePath: findBrowserExecutable(),
+      }),
     };
   } catch (error) {
     debug.error = error instanceof Error ? error.message : String(error);
@@ -493,19 +556,55 @@ export function defaultInviteProfileDir(): string {
 
 export async function openChatInvitesSetup(input: {
   config: ChatInviteBrowserConfig;
-}): Promise<{ started: true; url: string; profileDir: string; session: ChatInviteSessionStatus }> {
+}): Promise<{
+  started: boolean;
+  url: string;
+  profileDir: string;
+  session: ChatInviteSessionStatus;
+  launch: ChatInviteBrowserLaunchInfo;
+  error: string | null;
+  diagnostics: string[];
+}> {
   const debug = createDebugInfo();
+  let launch = buildInviteBrowserLaunchInfo({
+    config: input.config,
+    executablePath: findBrowserExecutable(),
+  });
   debug.steps.push(`Tworze/uzywam profilu Chrome: ${input.config.profileDir}`);
   await mkdir(input.config.profileDir, { recursive: true });
   debug.steps.push('Otwieram zwykly Chrome do logowania i zostawiam okno otwarte');
-  launchExternalChrome({ ...input.config, headless: false }, debug);
-  const session = await readChromeSessionStatus(input.config, debug);
+  try {
+    const visibleConfig = { ...input.config, headless: false };
+    launch = launchExternalChrome(visibleConfig, debug);
+    const session = await readChromeSessionStatus(visibleConfig, debug);
 
-  return {
-    started: true,
-    url: GOOGLE_CHAT_INVITES_URL,
-    profileDir: input.config.profileDir,
-    session,
-  };
+    return {
+      started: true,
+      url: GOOGLE_CHAT_INVITES_URL,
+      profileDir: input.config.profileDir,
+      session,
+      launch,
+      error: null,
+      diagnostics: debug.steps,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    debug.error = message;
+    return {
+      started: false,
+      url: GOOGLE_CHAT_INVITES_URL,
+      profileDir: input.config.profileDir,
+      session: {
+        state: 'UNKNOWN',
+        message: `Nie udalo sie automatycznie otworzyc przegladarki: ${message}`,
+        url: null,
+        title: null,
+        checkedAt: new Date().toISOString(),
+      },
+      launch,
+      error: message,
+      diagnostics: debug.steps,
+    };
+  }
 }
 

@@ -9,6 +9,7 @@ import type {
   ChatImportStatus,
   GoogleChatDownloadStatus,
   GoogleChatInvite,
+  GoogleChatInviteBrowserLaunchInfo,
   GoogleChatInviteSessionStatus,
   GoogleChatSpace,
   ProjectSummary,
@@ -115,6 +116,8 @@ export default function ChatImportPanel({ projectId, project, batches, onChanged
   const [invites, setInvites] = useState<GoogleChatInvite[]>([]);
   const [inviteProfileDir, setInviteProfileDir] = useState('');
   const [inviteSession, setInviteSession] = useState<GoogleChatInviteSessionStatus | null>(null);
+  const [inviteLaunch, setInviteLaunch] = useState<GoogleChatInviteBrowserLaunchInfo | null>(null);
+  const [inviteSetupError, setInviteSetupError] = useState<string | null>(null);
   const [acceptingInviteKey, setAcceptingInviteKey] = useState<string | null>(null);
 
   const counts = useMemo(
@@ -171,9 +174,12 @@ export default function ChatImportPanel({ projectId, project, batches, onChanged
       setInvites(result.invites);
       setInviteProfileDir(result.profileDir);
       setInviteSession(result.session);
+      setInviteLaunch(result.launch ?? null);
+      setInviteSetupError(null);
     } catch (error) {
       console.error(error);
-      alert('Blad podczas pobierania zaproszen Google Chat. Jesli Chrome otworzyl sie pierwszy raz, zaloguj konto bota i sprobuj ponownie.');
+      setInviteSetupError(getErrorMessage(error));
+      alert(`Blad podczas pobierania zaproszen Google Chat: ${getErrorMessage(error)}`);
     } finally {
       setBusyAction(null);
     }
@@ -185,12 +191,21 @@ export default function ChatImportPanel({ projectId, project, batches, onChanged
       const result = await api.openGoogleChatInviteSetup();
       setInviteProfileDir(result.profileDir);
       setInviteSession(result.session);
+      setInviteLaunch(result.launch);
+      setInviteSetupError(result.error);
     } catch (error) {
       console.error(error);
-      alert('Blad podczas otwierania Chrome do logowania Google Chat');
+      setInviteSetupError(getErrorMessage(error));
+      alert(`Blad podczas otwierania przegladarki do logowania Google Chat: ${getErrorMessage(error)}`);
     } finally {
       setBusyAction(null);
     }
+  };
+
+  const copyInviteLaunchCommand = async () => {
+    if (!inviteLaunch?.command) return;
+    await navigator.clipboard.writeText(inviteLaunch.command);
+    alert('Skopiowano komende uruchomienia przegladarki.');
   };
 
   const acceptInvite = async (invite: GoogleChatInvite) => {
@@ -631,6 +646,42 @@ export default function ChatImportPanel({ projectId, project, batches, onChanged
                   'Najpierw kliknij Otworz logowanie. Chrome zostanie otwarty i nie zamknie sie automatycznie, wiec spokojnie zaloguj konto bota. Potem kliknij Zaladuj zaproszenia.'}
               </p>
               {inviteSession?.url && <p className="mt-1 break-all text-xs text-muted-foreground">{inviteSession.url}</p>}
+              {inviteLaunch && (
+                <div className="mt-3 rounded-md border bg-background p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="text-xs text-muted-foreground">
+                      <span className="font-medium text-foreground">
+                        {inviteLaunch.executableName ?? 'Nie wykryto przegladarki'}
+                      </span>
+                      <span> · port {inviteLaunch.debugPort}</span>
+                    </div>
+                    {inviteLaunch.command && (
+                      <Button variant="outline" size="sm" onClick={() => void copyInviteLaunchCommand()}>
+                        Kopiuj komende
+                      </Button>
+                    )}
+                  </div>
+                  {inviteSetupError && (
+                    <p className="mt-2 text-xs text-destructive">
+                      {inviteSetupError}
+                    </p>
+                  )}
+                  {inviteLaunch.command ? (
+                    <>
+                      <p className="mt-2 text-xs text-muted-foreground">
+                        Jesli okno nie wyskoczylo, uruchom te komende na komputerze, na ktorym dziala backend PhotoLocal.
+                      </p>
+                      <pre className="mt-2 max-h-28 overflow-auto whitespace-pre-wrap break-all rounded bg-muted p-2 text-[11px] text-muted-foreground">
+                        {inviteLaunch.command}
+                      </pre>
+                    </>
+                  ) : (
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      Zainstaluj Google Chrome albo Microsoft Edge na backendzie, albo ustaw GOOGLE_CHAT_BROWSER_PATH w pliku .env.
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
 
             {invites.length > 0 ? (

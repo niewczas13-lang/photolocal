@@ -97,6 +97,7 @@ export async function buildApp() {
         config: {
           profileDir: config.googleChatInviteProfileDir,
           headless: config.googleChatInviteHeadless,
+          debugPort: config.googleChatInviteDebugPort,
         },
       });
     } catch (error) {
@@ -112,6 +113,7 @@ export async function buildApp() {
         config: {
           profileDir: config.googleChatInviteProfileDir,
           headless: false,
+          debugPort: config.googleChatInviteDebugPort,
         },
       });
     } catch (error) {
@@ -130,6 +132,7 @@ export async function buildApp() {
         config: {
           profileDir: config.googleChatInviteProfileDir,
           headless: config.googleChatInviteHeadless,
+          debugPort: config.googleChatInviteDebugPort,
         },
         inviteKey: body.inviteKey,
       });

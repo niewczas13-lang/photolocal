@@ -17,6 +17,7 @@ export interface AppConfig {
   googleChatDownloadRoot: string;
   googleChatInviteProfileDir: string;
   googleChatInviteHeadless: boolean;
+  googleChatInviteDebugPort: number;
   adresyAppBaseUrl: string;
   adresyAppApiKey: string | null;
   adresyAppReverseRadiusMeters: number;
@@ -39,6 +40,11 @@ export function loadConfig(): AppConfig {
     ? resolve(process.env.GOOGLE_CHAT_INVITE_PROFILE_DIR)
     : resolve(dirname(dbPath), 'google-chat-browser-profile');
   const googleChatInviteHeadless = process.env.GOOGLE_CHAT_INVITE_HEADLESS !== 'false';
+  const rawGoogleChatInviteDebugPort = Number(process.env.GOOGLE_CHAT_INVITE_DEBUG_PORT ?? 9222);
+  const googleChatInviteDebugPort =
+    Number.isFinite(rawGoogleChatInviteDebugPort) && rawGoogleChatInviteDebugPort > 0
+      ? Math.floor(rawGoogleChatInviteDebugPort)
+      : 9222;
   const adresyAppBaseUrl = process.env.ADRESY_APP_BASE_URL ?? 'https://api.adresy.app/api/v1';
   const adresyAppApiKey = process.env.ADRESY_APP_API_KEY?.trim() || null;
   const adresyAppReverseRadiusMeters = Math.max(1, Number(process.env.ADRESY_APP_REVERSE_RADIUS_METERS ?? 200));
@@ -60,6 +66,7 @@ export function loadConfig(): AppConfig {
     googleChatDownloadRoot,
     googleChatInviteProfileDir,
     googleChatInviteHeadless,
+    googleChatInviteDebugPort,
     adresyAppBaseUrl,
     adresyAppApiKey,
     adresyAppReverseRadiusMeters,

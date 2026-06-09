@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mapRawInviteCandidates } from './chat-invites.js';
+import { buildInviteBrowserLaunchInfo, mapRawInviteCandidates } from './chat-invites.js';
 
 describe('chat invites helpers', () => {
   it('maps raw Google Chat card text to invite candidates', () => {
@@ -54,5 +54,26 @@ describe('chat invites helpers', () => {
       senderEmail: 'niewczas13@gmail.com',
     });
     expect(invite.textPreview).not.toMatch(/Podgl\u0105d|Do\u0142\u0105cz/i);
+  });
+
+  it('builds a manual launch command for the Google Chat browser profile', () => {
+    const launch = buildInviteBrowserLaunchInfo({
+      config: {
+        profileDir: 'C:\\PhotoLocal\\backend\\data\\google-chat-browser-profile',
+        headless: false,
+        debugPort: 9333,
+      },
+      executablePath: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+    });
+
+    expect(launch).toMatchObject({
+      executablePath: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+      debugPort: 9333,
+      profileDir: 'C:\\PhotoLocal\\backend\\data\\google-chat-browser-profile',
+    });
+    expect(launch.command).toContain("Start-Process -FilePath 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'");
+    expect(launch.command).toContain("'--remote-debugging-port=9333'");
+    expect(launch.command).toContain("'--user-data-dir=C:\\PhotoLocal\\backend\\data\\google-chat-browser-profile'");
+    expect(launch.command).toContain('chat.google.com/app/browse');
   });
 });

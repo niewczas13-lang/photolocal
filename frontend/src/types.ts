@@ -443,11 +443,21 @@ export interface GoogleChatInviteSessionStatus {
   checkedAt: string;
 }
 
+export interface GoogleChatInviteBrowserLaunchInfo {
+  executablePath: string | null;
+  executableName: string | null;
+  debugPort: number;
+  profileDir: string;
+  url: string;
+  command: string | null;
+}
+
 export interface GoogleChatInviteListResult {
   invites: GoogleChatInvite[];
   url: string;
   profileDir: string;
   session: GoogleChatInviteSessionStatus;
+  launch?: GoogleChatInviteBrowserLaunchInfo;
 }
 
 export interface GoogleChatInviteAcceptResult {
@@ -456,8 +466,11 @@ export interface GoogleChatInviteAcceptResult {
 }
 
 export interface GoogleChatInviteSetupResult {
-  started: true;
+  started: boolean;
   url: string;
   profileDir: string;
   session: GoogleChatInviteSessionStatus;
+  launch: GoogleChatInviteBrowserLaunchInfo;
+  error: string | null;
+  diagnostics: string[];
 }
