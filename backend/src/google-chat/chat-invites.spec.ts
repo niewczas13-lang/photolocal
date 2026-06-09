@@ -89,7 +89,8 @@ describe('chat invites helpers', () => {
 
     expect(launcher).toMatchObject({
       launcherPath: 'C:\\PhotoLocal\\otworz-logowanie-google-chat.bat',
-      command: 'cmd.exe /c start "" "C:\\PhotoLocal\\otworz-logowanie-google-chat.bat"',
+      command:
+        "powershell -NoProfile -ExecutionPolicy Bypass -Command \"Start-Process -FilePath 'C:\\PhotoLocal\\otworz-logowanie-google-chat.bat'\"",
     });
   });
 });

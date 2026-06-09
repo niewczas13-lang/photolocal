@@ -136,9 +136,10 @@ function commandPromptDoubleQuote(value: string): string {
 }
 
 export function buildInviteLoginLauncherInfo(input: { launcherPath: string }): ChatInviteLoginLauncherInfo {
+  const powerShellCommand = `Start-Process -FilePath ${powerShellSingleQuote(input.launcherPath)}`;
   return {
     launcherPath: input.launcherPath,
-    command: `cmd.exe /c start "" ${commandPromptDoubleQuote(input.launcherPath)}`,
+    command: `powershell -NoProfile -ExecutionPolicy Bypass -Command ${commandPromptDoubleQuote(powerShellCommand)}`,
   };
 }
 
@@ -210,7 +211,13 @@ function launchLoginLauncher(launcherPath: string, debug: ChatInviteDebugInfo): 
 
   const launcher = buildInviteLoginLauncherInfo({ launcherPath });
   debug.steps.push(`Uruchamiam launcher logowania Google Chat: ${launcherPath}`);
-  const child = spawn('cmd.exe', ['/d', '/s', '/c', `start "" "${launcherPath}"`], {
+  const child = spawn('powershell.exe', [
+    '-NoProfile',
+    '-ExecutionPolicy',
+    'Bypass',
+    '-Command',
+    `Start-Process -FilePath ${powerShellSingleQuote(launcherPath)}`,
+  ], {
     detached: true,
     stdio: 'ignore',
     windowsHide: false,
