@@ -143,6 +143,17 @@ export function buildInviteLoginLauncherInfo(input: { launcherPath: string }): C
   };
 }
 
+export function buildInviteLauncherStartedStatus(): ChatInviteSessionStatus {
+  return {
+    state: 'UNKNOWN',
+    message:
+      'Uruchomiono okno logowania Google Chat na komputerze z backendem. Zaloguj konto Google, a potem kliknij Zaladuj zaproszenia.',
+    url: null,
+    title: null,
+    checkedAt: new Date().toISOString(),
+  };
+}
+
 function buildInviteBrowserArgs(config: ChatInviteBrowserConfig): string[] {
   const debugPort = inviteDebugPort(config);
   return [
@@ -620,6 +631,15 @@ export async function openChatInvitesSetup(input: {
     const visibleConfig = { ...input.config, headless: false };
     if (input.config.launcherPath) {
       launchLoginLauncher(input.config.launcherPath, debug);
+      return {
+        started: true,
+        url: GOOGLE_CHAT_INVITES_URL,
+        profileDir: input.config.profileDir,
+        session: buildInviteLauncherStartedStatus(),
+        launch,
+        error: null,
+        diagnostics: debug.steps,
+      };
     } else {
       launch = launchExternalChrome(visibleConfig, debug);
     }

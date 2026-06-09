@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildInviteBrowserLaunchInfo,
+  buildInviteLauncherStartedStatus,
   buildInviteLoginLauncherInfo,
   mapRawInviteCandidates,
 } from './chat-invites.js';
@@ -92,5 +93,17 @@ describe('chat invites helpers', () => {
       command:
         "powershell -NoProfile -ExecutionPolicy Bypass -Command \"Start-Process -FilePath 'C:\\PhotoLocal\\otworz-logowanie-google-chat.bat'\"",
     });
+  });
+
+  it('returns a launcher-started status without requiring Chrome CDP to be ready', () => {
+    const status = buildInviteLauncherStartedStatus();
+
+    expect(status).toMatchObject({
+      state: 'UNKNOWN',
+      url: null,
+      title: null,
+    });
+    expect(status.message).toContain('Uruchomiono okno logowania');
+    expect(status.message).not.toContain('CDP');
   });
 });
