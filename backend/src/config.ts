@@ -40,7 +40,7 @@ export function loadConfig(): AppConfig {
   const googleChatInviteProfileDir = process.env.GOOGLE_CHAT_INVITE_PROFILE_DIR
     ? resolve(process.env.GOOGLE_CHAT_INVITE_PROFILE_DIR)
     : resolve(dirname(dbPath), 'google-chat-browser-profile');
-  const googleChatInviteHeadless = process.env.GOOGLE_CHAT_INVITE_HEADLESS !== 'false';
+  const googleChatInviteHeadless = process.env.GOOGLE_CHAT_INVITE_HEADLESS === 'true';
   const rawGoogleChatInviteDebugPort = Number(process.env.GOOGLE_CHAT_INVITE_DEBUG_PORT ?? 9222);
   const googleChatInviteDebugPort =
     Number.isFinite(rawGoogleChatInviteDebugPort) && rawGoogleChatInviteDebugPort > 0
