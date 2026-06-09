@@ -114,6 +114,7 @@ export async function buildApp() {
           profileDir: config.googleChatInviteProfileDir,
           headless: false,
           debugPort: config.googleChatInviteDebugPort,
+          launcherPath: config.googleChatInviteLauncherPath,
         },
       });
     } catch (error) {

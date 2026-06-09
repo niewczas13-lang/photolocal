@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { buildInviteBrowserLaunchInfo, mapRawInviteCandidates } from './chat-invites.js';
+import {
+  buildInviteBrowserLaunchInfo,
+  buildInviteLoginLauncherInfo,
+  mapRawInviteCandidates,
+} from './chat-invites.js';
 
 describe('chat invites helpers', () => {
   it('maps raw Google Chat card text to invite candidates', () => {
@@ -76,5 +80,16 @@ describe('chat invites helpers', () => {
     expect(launch.command).toContain("'--remote-debugging-port=9333'");
     expect(launch.command).toContain("'--user-data-dir=C:\\PhotoLocal\\backend\\data\\google-chat-browser-profile'");
     expect(launch.command).toContain('chat.google.com/app/browse');
+  });
+
+  it('builds a CMD launcher command for the PhotoLocal Google Chat login bat', () => {
+    const launcher = buildInviteLoginLauncherInfo({
+      launcherPath: 'C:\\PhotoLocal\\otworz-logowanie-google-chat.bat',
+    });
+
+    expect(launcher).toMatchObject({
+      launcherPath: 'C:\\PhotoLocal\\otworz-logowanie-google-chat.bat',
+      command: 'cmd.exe /c start "" "C:\\PhotoLocal\\otworz-logowanie-google-chat.bat"',
+    });
   });
 });

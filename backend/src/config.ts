@@ -18,6 +18,7 @@ export interface AppConfig {
   googleChatInviteProfileDir: string;
   googleChatInviteHeadless: boolean;
   googleChatInviteDebugPort: number;
+  googleChatInviteLauncherPath: string;
   adresyAppBaseUrl: string;
   adresyAppApiKey: string | null;
   adresyAppReverseRadiusMeters: number;
@@ -45,6 +46,7 @@ export function loadConfig(): AppConfig {
     Number.isFinite(rawGoogleChatInviteDebugPort) && rawGoogleChatInviteDebugPort > 0
       ? Math.floor(rawGoogleChatInviteDebugPort)
       : 9222;
+  const googleChatInviteLauncherPath = resolve(__dirname, '../../otworz-logowanie-google-chat.bat');
   const adresyAppBaseUrl = process.env.ADRESY_APP_BASE_URL ?? 'https://api.adresy.app/api/v1';
   const adresyAppApiKey = process.env.ADRESY_APP_API_KEY?.trim() || null;
   const adresyAppReverseRadiusMeters = Math.max(1, Number(process.env.ADRESY_APP_REVERSE_RADIUS_METERS ?? 200));
@@ -67,6 +69,7 @@ export function loadConfig(): AppConfig {
     googleChatInviteProfileDir,
     googleChatInviteHeadless,
     googleChatInviteDebugPort,
+    googleChatInviteLauncherPath,
     adresyAppBaseUrl,
     adresyAppApiKey,
     adresyAppReverseRadiusMeters,

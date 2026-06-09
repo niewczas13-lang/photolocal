@@ -35,6 +35,11 @@ export interface ChatInviteBrowserLaunchInfo {
   command: string | null;
 }
 
+export interface ChatInviteLoginLauncherInfo {
+  launcherPath: string;
+  command: string;
+}
+
 export interface ChatInviteDebugInfo {
   steps: string[];
   finalUrl: string | null;
@@ -51,6 +56,7 @@ export interface ChatInviteBrowserConfig {
   profileDir: string;
   headless: boolean;
   debugPort?: number;
+  launcherPath?: string;
 }
 
 interface RawInviteCandidate {
@@ -129,6 +135,13 @@ function commandPromptDoubleQuote(value: string): string {
   return `"${value.replace(/"/g, '\\"')}"`;
 }
 
+export function buildInviteLoginLauncherInfo(input: { launcherPath: string }): ChatInviteLoginLauncherInfo {
+  return {
+    launcherPath: input.launcherPath,
+    command: `cmd.exe /c start "" ${commandPromptDoubleQuote(input.launcherPath)}`,
+  };
+}
+
 function buildInviteBrowserArgs(config: ChatInviteBrowserConfig): string[] {
   const debugPort = inviteDebugPort(config);
   return [
@@ -188,6 +201,22 @@ function launchExternalChrome(
   );
   child.unref();
   return launch;
+}
+
+function launchLoginLauncher(launcherPath: string, debug: ChatInviteDebugInfo): ChatInviteLoginLauncherInfo {
+  if (!existsSync(launcherPath)) {
+    throw new Error(`Nie znaleziono launchera logowania Google Chat: ${launcherPath}`);
+  }
+
+  const launcher = buildInviteLoginLauncherInfo({ launcherPath });
+  debug.steps.push(`Uruchamiam launcher logowania Google Chat: ${launcherPath}`);
+  const child = spawn('cmd.exe', ['/d', '/s', '/c', `start "" "${launcherPath}"`], {
+    detached: true,
+    stdio: 'ignore',
+    windowsHide: false,
+  });
+  child.unref();
+  return launcher;
 }
 
 async function waitForCdpEndpoint(config: ChatInviteBrowserConfig, debug: ChatInviteDebugInfo): Promise<string> {
@@ -579,10 +608,14 @@ export async function openChatInvitesSetup(input: {
   });
   debug.steps.push(`Tworze/uzywam profilu Chrome: ${input.config.profileDir}`);
   await mkdir(input.config.profileDir, { recursive: true });
-  debug.steps.push('Otwieram zwykly Chrome do logowania i zostawiam okno otwarte');
+  debug.steps.push('Otwieram launcher logowania Google Chat i zostawiam okno otwarte');
   try {
     const visibleConfig = { ...input.config, headless: false };
-    launch = launchExternalChrome(visibleConfig, debug);
+    if (input.config.launcherPath) {
+      launchLoginLauncher(input.config.launcherPath, debug);
+    } else {
+      launch = launchExternalChrome(visibleConfig, debug);
+    }
     const session = await readChromeSessionStatus(visibleConfig, debug);
 
     return {
