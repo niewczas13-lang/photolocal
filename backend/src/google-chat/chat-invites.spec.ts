@@ -90,9 +90,9 @@ describe('chat invites helpers', () => {
 
     expect(launcher).toMatchObject({
       launcherPath: 'C:\\PhotoLocal\\otworz-logowanie-google-chat.bat',
-      command:
-        "powershell -NoProfile -ExecutionPolicy Bypass -Command \"Start-Process -FilePath 'C:\\PhotoLocal\\otworz-logowanie-google-chat.bat'\"",
+      command: 'cmd.exe /d /k "C:\\PhotoLocal\\otworz-logowanie-google-chat.bat"',
     });
+    expect(launcher.command).not.toContain('start ""');
   });
 
   it('returns a launcher-started status without requiring Chrome CDP to be ready', () => {

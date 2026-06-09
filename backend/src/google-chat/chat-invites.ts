@@ -136,10 +136,9 @@ function commandPromptDoubleQuote(value: string): string {
 }
 
 export function buildInviteLoginLauncherInfo(input: { launcherPath: string }): ChatInviteLoginLauncherInfo {
-  const powerShellCommand = `Start-Process -FilePath ${powerShellSingleQuote(input.launcherPath)}`;
   return {
     launcherPath: input.launcherPath,
-    command: `powershell -NoProfile -ExecutionPolicy Bypass -Command ${commandPromptDoubleQuote(powerShellCommand)}`,
+    command: `cmd.exe /d /k ${commandPromptDoubleQuote(input.launcherPath)}`,
   };
 }
 
@@ -222,13 +221,7 @@ function launchLoginLauncher(launcherPath: string, debug: ChatInviteDebugInfo): 
 
   const launcher = buildInviteLoginLauncherInfo({ launcherPath });
   debug.steps.push(`Uruchamiam launcher logowania Google Chat: ${launcherPath}`);
-  const child = spawn('powershell.exe', [
-    '-NoProfile',
-    '-ExecutionPolicy',
-    'Bypass',
-    '-Command',
-    `Start-Process -FilePath ${powerShellSingleQuote(launcherPath)}`,
-  ], {
+  const child = spawn('cmd.exe', ['/d', '/k', launcherPath], {
     detached: true,
     stdio: 'ignore',
     windowsHide: false,
@@ -631,15 +624,6 @@ export async function openChatInvitesSetup(input: {
     const visibleConfig = { ...input.config, headless: false };
     if (input.config.launcherPath) {
       launchLoginLauncher(input.config.launcherPath, debug);
-      return {
-        started: true,
-        url: GOOGLE_CHAT_INVITES_URL,
-        profileDir: input.config.profileDir,
-        session: buildInviteLauncherStartedStatus(),
-        launch,
-        error: null,
-        diagnostics: debug.steps,
-      };
     } else {
       launch = launchExternalChrome(visibleConfig, debug);
     }
