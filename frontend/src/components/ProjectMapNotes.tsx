@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ImagePlus, MapPin, Save, StickyNote, Trash2 } from 'lucide-react';
+import { ImagePlus, LocateFixed, MapPin, Save, StickyNote, Trash2 } from 'lucide-react';
 
 import type { ProjectMapNote } from '../types';
+import { getMapNoteFocusPosition } from '../map-note-focus';
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
 
@@ -11,6 +12,7 @@ interface ProjectMapNotesProps {
   onUpdateNote: (noteId: string, body: string, lat: number | null, lng: number | null) => void;
   onDeleteNote: (noteId: string) => void;
   onUploadNotePhoto: (noteId: string, file: File) => void;
+  onShowOnMap: (note: ProjectMapNote) => void;
 }
 
 function noteTargetLabel(note: ProjectMapNote): string {
@@ -63,14 +65,17 @@ function ProjectMapNoteCard({
   onUpdateNote,
   onDeleteNote,
   onUploadNotePhoto,
+  onShowOnMap,
 }: {
   note: ProjectMapNote;
   busy: boolean;
   onUpdateNote: ProjectMapNotesProps['onUpdateNote'];
   onDeleteNote: ProjectMapNotesProps['onDeleteNote'];
   onUploadNotePhoto: ProjectMapNotesProps['onUploadNotePhoto'];
+  onShowOnMap: ProjectMapNotesProps['onShowOnMap'];
 }) {
   const [body, setBody] = useState(note.body);
+  const focusPosition = getMapNoteFocusPosition(note);
 
   useEffect(() => {
     setBody(note.body);
@@ -124,6 +129,16 @@ function ProjectMapNoteCard({
           type="button"
           size="sm"
           variant="outline"
+          onClick={() => onShowOnMap(note)}
+          disabled={busy || !focusPosition}
+        >
+          <LocateFixed size={14} />
+          Pokaz
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
           className="project-map-note-card__delete"
           onClick={() => onDeleteNote(note.id)}
           disabled={busy}
@@ -142,6 +157,7 @@ export default function ProjectMapNotes({
   onUpdateNote,
   onDeleteNote,
   onUploadNotePhoto,
+  onShowOnMap,
 }: ProjectMapNotesProps) {
   const sortedNotes = useMemo(
     () =>
@@ -172,6 +188,7 @@ export default function ProjectMapNotes({
             onUpdateNote={onUpdateNote}
             onDeleteNote={onDeleteNote}
             onUploadNotePhoto={onUploadNotePhoto}
+            onShowOnMap={onShowOnMap}
           />
         ))}
 

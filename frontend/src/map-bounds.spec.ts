@@ -20,6 +20,8 @@ describe('map bounds', () => {
           hasReservePhoto: false,
           status: 'PENDING',
           isNotApplicable: false,
+          isManuallyAdded: false,
+          oplConsentConfirmed: false,
           photos: [],
         },
       ],

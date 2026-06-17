@@ -20,6 +20,7 @@ interface ApproveAddressCandidateInput {
   distributionPoint: string | null;
   reserveLocation: ProjectMapCandidateReserveLocation;
   createDistributionNodeType: 'OSD' | 'OPP' | null;
+  oplConsentConfirmed: boolean;
   noteBody: string | null;
 }
 
@@ -62,6 +63,7 @@ function CandidateCard({
   const [manualDistributionPoint, setManualDistributionPoint] = useState('');
   const [manualDistributionNodeType, setManualDistributionNodeType] = useState<'OSD' | 'OPP'>('OSD');
   const [reserveLocation, setReserveLocation] = useState<ProjectMapCandidateReserveLocation>('Doziemny');
+  const [oplConsentConfirmed, setOplConsentConfirmed] = useState(false);
   const [noteBody, setNoteBody] = useState('');
 
   const distributionPoint =
@@ -175,6 +177,16 @@ function CandidateCard({
         {candidate.lat.toFixed(6)}, {candidate.lng.toFixed(6)}
       </div>
 
+      <label className="project-map-candidate-card__consent">
+        <input
+          type="checkbox"
+          checked={oplConsentConfirmed}
+          disabled={busy}
+          onChange={(event) => setOplConsentConfirmed(event.currentTarget.checked)}
+        />
+        <span>Zgoda OPL</span>
+      </label>
+
       <div className="project-map-candidate-card__note">
         <label>
           Notatka do adresu po zatwierdzeniu
@@ -203,6 +215,7 @@ function CandidateCard({
               distributionPoint: distributionPoint?.trim() || null,
               reserveLocation,
               createDistributionNodeType: assignmentMode === 'manual' ? manualDistributionNodeType : null,
+              oplConsentConfirmed,
               noteBody: noteBody.trim() || null,
             })
           }

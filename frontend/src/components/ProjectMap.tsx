@@ -25,6 +25,7 @@ import { photoProjectRoute, type MapView } from '../app-routing';
 import { cn } from '../lib/utils';
 import { getMapBoundsPositions } from '../map-bounds';
 import { formatCableLength } from '../map-format';
+import { getMapNoteFocusPosition, type MapNoteFocusPosition } from '../map-note-focus';
 import {
   getMapClickCaptureClassName,
   isMapClickCaptureActive,
@@ -44,6 +45,7 @@ import {
   STATUS_LABELS,
 } from '../map-status-actions';
 import {
+  getAddressMarkerTone,
   getCableLineStyles,
   getMarkerTone,
   getMarkerToneStyle,
@@ -150,11 +152,12 @@ function collectGeometryPositions(value: unknown): LatLngExpression[] {
   return [];
 }
 
-function markerIcon(kind: 'address' | 'OSD' | 'OPP' | 'ZS', tone: MarkerTone): L.DivIcon {
+function markerIcon(kind: 'address' | 'OSD' | 'OPP' | 'ZS', tone: MarkerTone, attention = false): L.DivIcon {
   const style = getMarkerToneStyle(tone);
+  const attentionHtml = attention ? '<span class="project-map-marker__attention">!</span>' : '';
   return L.divIcon({
     className: 'project-map-marker',
-    html: `<span class="project-map-marker__shape project-map-marker__shape--${kind.toLowerCase()}" style="--map-marker-color: ${style.color}; --map-marker-border: ${style.border};"></span>`,
+    html: `<span class="project-map-marker__shape project-map-marker__shape--${kind.toLowerCase()}" style="--map-marker-color: ${style.color}; --map-marker-border: ${style.border}; --map-marker-background: ${style.background ?? style.color};">${attentionHtml}</span>`,
     iconSize: [24, 24],
     iconAnchor: [12, 12],
     popupAnchor: [0, -12],
@@ -267,6 +270,20 @@ function FitBounds({ positions }: { positions: LatLngExpression[] }) {
     if (!bounds.isValid()) return;
     map.fitBounds(bounds, { padding: [32, 32], maxZoom: 18 });
   }, [key, map]);
+
+  return null;
+}
+
+function MapFocusTarget({ target }: { target: (MapNoteFocusPosition & { id: string }) | null }) {
+  const map = useMap();
+
+  useEffect(() => {
+    if (!target) return;
+    map.flyTo([target.lat, target.lng], Math.max(map.getZoom(), 18), {
+      animate: true,
+      duration: 0.45,
+    });
+  }, [target, map]);
 
   return null;
 }
@@ -449,6 +466,44 @@ function MapNotePopup({
         </Button>
       </div>
     </div>
+  );
+}
+
+function MapNoteMarker({
+  note,
+  focused,
+  busy,
+  onUpdate,
+  onDelete,
+  onUpload,
+}: {
+  note: ProjectMapNote;
+  focused: boolean;
+  busy: boolean;
+  onUpdate: (noteId: string, body: string, lat: number | null, lng: number | null) => void;
+  onDelete: (noteId: string) => void;
+  onUpload: (noteId: string, file: File) => void;
+}) {
+  const markerRef = useRef<L.Marker | null>(null);
+
+  useEffect(() => {
+    if (focused) markerRef.current?.openPopup();
+  }, [focused, note.id]);
+
+  if (note.lat == null || note.lng == null) return null;
+
+  return (
+    <Marker ref={markerRef} position={[note.lat, note.lng]} icon={noteMarkerIcon()}>
+      <Popup>
+        <MapNotePopup
+          note={note}
+          busy={busy}
+          onUpdate={onUpdate}
+          onDelete={onDelete}
+          onUpload={onUpload}
+        />
+      </Popup>
+    </Marker>
   );
 }
 
@@ -732,6 +787,7 @@ function AddressPopup({
   address,
   notes,
   onMarkNotApplicable,
+  onOplConsentChange,
   onCreateNote,
   busy,
 }: {
@@ -739,6 +795,7 @@ function AddressPopup({
   address: ProjectMapAddress;
   notes: ProjectMapNote[];
   onMarkNotApplicable: (addressId: string) => void;
+  onOplConsentChange: (addressId: string, confirmed: boolean) => void;
   onCreateNote: (input: CreateMapNoteInput) => void;
   busy: boolean;
 }) {
@@ -756,6 +813,17 @@ function AddressPopup({
             : 'Brak zdjecia zapasu'}
       </Badge>
       <MiniPhotoGallery projectId={projectId} photos={address.photos} />
+      {address.isManuallyAdded && (
+        <label className="project-map-popup__checkbox">
+          <input
+            type="checkbox"
+            checked={address.oplConsentConfirmed}
+            disabled={busy}
+            onChange={(event) => onOplConsentChange(address.id, event.currentTarget.checked)}
+          />
+          <span>Zgoda OPL</span>
+        </label>
+      )}
       {!addressReady && (
         <Button
           type="button"
@@ -834,6 +902,7 @@ export default function ProjectMap({ projectId, view, onViewChange }: ProjectMap
   const [addingAddress, setAddingAddress] = useState(false);
   const [showInfrastructure, setShowInfrastructure] = useState(false);
   const [draftNotePosition, setDraftNotePosition] = useState<{ lat: number; lng: number } | null>(null);
+  const [focusedNote, setFocusedNote] = useState<(MapNoteFocusPosition & { id: string }) | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -880,6 +949,18 @@ export default function ProjectMap({ projectId, view, onViewChange }: ProjectMap
     setError(null);
     try {
       setData(await api.markMapAddressNotApplicable(projectId, addressId, 'Oznaczone z mapy jako nie dotyczy'));
+    } catch (err) {
+      setError(getErrorMessage(err));
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const updateAddressOplConsent = async (addressId: string, confirmed: boolean) => {
+    setBusyId(addressId);
+    setError(null);
+    try {
+      setData(await api.updateMapAddressOplConsent(projectId, addressId, confirmed));
     } catch (err) {
       setError(getErrorMessage(err));
     } finally {
@@ -987,6 +1068,13 @@ export default function ProjectMap({ projectId, view, onViewChange }: ProjectMap
     } finally {
       setBusyId(null);
     }
+  };
+
+  const showNoteOnMap = (note: ProjectMapNote) => {
+    const position = getMapNoteFocusPosition(note);
+    if (!position) return;
+    setFocusedNote({ id: note.id, ...position });
+    onViewChange('map');
   };
 
   const boundsPositions = useMemo(() => {
@@ -1162,6 +1250,7 @@ export default function ProjectMap({ projectId, view, onViewChange }: ProjectMap
           onUpdateNote={(noteId, body, lat, lng) => void updateMapNote(noteId, body, lat, lng)}
           onDeleteNote={(noteId) => void deleteMapNote(noteId)}
           onUploadNotePhoto={(noteId, file) => void uploadMapNotePhoto(noteId, file)}
+          onShowOnMap={showNoteOnMap}
         />
       ) : view === 'address-candidates' ? (
         <ProjectMapAddressCandidates
@@ -1187,6 +1276,7 @@ export default function ProjectMap({ projectId, view, onViewChange }: ProjectMap
                 url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
               />
               <FitBounds positions={boundsPositions} />
+              <MapFocusTarget target={focusedNote} />
               <MapClickCaptureClassController className={mapClickCaptureClassName} />
               <MapClickNoteCreator
                 enabled={addingFreeNote && !addingAddress}
@@ -1341,28 +1431,32 @@ export default function ProjectMap({ projectId, view, onViewChange }: ProjectMap
                 </Marker>
               ))}
 
-              {data.addresses.map((address) => (
-                <Marker
-                  key={address.id}
-                  position={[address.lat, address.lng]}
-                  icon={markerIcon(
-                    'address',
-                    address.isNotApplicable ? 'notApplicable' : address.hasReservePhoto ? 'done' : 'addressPending',
-                  )}
-                  interactive={!mapClickCaptureActive}
-                >
-                  <Popup>
-                    <AddressPopup
-                      projectId={projectId}
-                      address={address}
-                      notes={notesForTarget(data.notes, 'address', address.id)}
-                      onMarkNotApplicable={(addressId) => void markAddressNotApplicable(addressId)}
-                      onCreateNote={(input) => void createMapNote(input)}
-                      busy={busyId === address.id || busyId === 'note'}
-                    />
-                  </Popup>
-                </Marker>
-              ))}
+              {data.addresses.map((address) => {
+                const needsOplConsent =
+                  address.isManuallyAdded && !address.oplConsentConfirmed && !address.isNotApplicable;
+                return (
+                  <Marker
+                    key={address.id}
+                    position={[address.lat, address.lng]}
+                    icon={markerIcon('address', getAddressMarkerTone(address), needsOplConsent)}
+                    interactive={!mapClickCaptureActive}
+                  >
+                    <Popup>
+                      <AddressPopup
+                        projectId={projectId}
+                        address={address}
+                        notes={notesForTarget(data.notes, 'address', address.id)}
+                        onMarkNotApplicable={(addressId) => void markAddressNotApplicable(addressId)}
+                        onOplConsentChange={(addressId, confirmed) =>
+                          void updateAddressOplConsent(addressId, confirmed)
+                        }
+                        onCreateNote={(input) => void createMapNote(input)}
+                        busy={busyId === address.id || busyId === 'note'}
+                      />
+                    </Popup>
+                  </Marker>
+                );
+              })}
 
               {data.addressCandidates.map((candidate) => (
                 <Marker
@@ -1382,31 +1476,24 @@ export default function ProjectMap({ projectId, view, onViewChange }: ProjectMap
                 </Marker>
               ))}
 
-              {data.notes.map((note) =>
-                note.lat == null || note.lng == null ? null : (
-                  <Marker
-                    key={`note-${note.id}`}
-                    position={[note.lat, note.lng]}
-                    icon={noteMarkerIcon()}
-                    interactive={!mapClickCaptureActive}
-                  >
-                    <Popup>
-                      <MapNotePopup
-                        note={note}
-                        busy={busyId === note.id}
-                        onUpdate={(noteId, body, lat, lng) => void updateMapNote(noteId, body, lat, lng)}
-                        onDelete={(noteId) => void deleteMapNote(noteId)}
-                        onUpload={(noteId, file) => void uploadMapNotePhoto(noteId, file)}
-                      />
-                    </Popup>
-                  </Marker>
-                ),
-              )}
+              {data.notes.map((note) => (
+                <MapNoteMarker
+                  key={`note-${note.id}`}
+                  note={note}
+                  focused={focusedNote?.id === note.id}
+                  busy={busyId === note.id}
+                  onUpdate={(noteId, body, lat, lng) => void updateMapNote(noteId, body, lat, lng)}
+                  onDelete={(noteId) => void deleteMapNote(noteId)}
+                  onUpload={(noteId, file) => void uploadMapNotePhoto(noteId, file)}
+                />
+              ))}
             </MapContainer>
           </div>
 
           <div className="project-map-legend" aria-hidden="true">
             <span><span className="project-map-dot project-map-dot--red" /> adres bez zapasu</span>
+            <span><span className="project-map-dot project-map-dot--manual-pending" /> adres dodany recznie</span>
+            <span><span className="project-map-dot project-map-dot--manual-done" /> reczny ze zdjeciem</span>
             <span><span className="project-map-dot project-map-dot--gray" /> adres nie dotyczy</span>
             <span><span className="project-map-dot project-map-dot--blue" /> adres do dodania</span>
             <span><span className="project-map-dot project-map-dot--orange" /> punkt ze zdjeciem</span>

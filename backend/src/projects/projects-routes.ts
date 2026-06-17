@@ -204,6 +204,10 @@ function toOptionalDistributionNodeType(value: unknown): 'OSD' | 'OPP' | null {
   return value === 'OSD' || value === 'OPP' ? value : null;
 }
 
+function toRequiredBoolean(value: unknown): boolean | null {
+  return typeof value === 'boolean' ? value : null;
+}
+
 function toUniqueStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return [
@@ -636,6 +640,25 @@ export async function registerProjectRoutes(
     }
   });
 
+  app.patch('/api/projects/:projectId/map/addresses/:addressId/opl-consent', async (request, reply) => {
+    const { projectId, addressId } = request.params as { projectId: string; addressId: string };
+    const body = request.body as { confirmed?: unknown };
+    const project = repository.getProject(projectId);
+    const confirmed = toRequiredBoolean(body.confirmed);
+
+    if (!project) return reply.status(404).send({ error: 'Project not found' });
+    if (confirmed == null) return reply.status(400).send({ error: 'Confirmed must be true or false' });
+
+    try {
+      repository.updateAddressOplConsent(projectId, addressId, confirmed);
+      return repository.getProjectMap(projectId);
+    } catch (error) {
+      return reply.status(404).send({
+        error: error instanceof Error ? error.message : 'Map address not found',
+      });
+    }
+  });
+
   app.post('/api/projects/:projectId/map/address-candidates/reverse', async (request, reply) => {
     const { projectId } = request.params as { projectId: string };
     const body = request.body as { lat?: unknown; lng?: unknown };
@@ -680,6 +703,7 @@ export async function registerProjectRoutes(
       distributionPoint?: unknown;
       reserveLocation?: unknown;
       createDistributionNodeType?: unknown;
+      oplConsentConfirmed?: unknown;
       noteBody?: unknown;
     };
     const project = repository.getProject(projectId);
@@ -701,6 +725,7 @@ export async function registerProjectRoutes(
         distributionPoint: toOptionalString(body.distributionPoint),
         reserveLocation: body.reserveLocation,
         createDistributionNodeType: toOptionalDistributionNodeType(body.createDistributionNodeType),
+        oplConsentConfirmed: body.oplConsentConfirmed === true,
         noteBody: toOptionalString(body.noteBody),
       });
       return repository.getProjectMap(projectId);

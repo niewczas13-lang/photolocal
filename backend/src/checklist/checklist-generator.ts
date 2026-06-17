@@ -136,7 +136,7 @@ export function generateChecklistNodes(input: GenerateChecklistInput): Generated
     }
   }
 
-  const wykopyId = addNode(null, 'Wykopy/Przeciski', 'Wykopy_Przeciski', 'STATIC', null, 1, 0, false);
+  const wykopyId = addNode(null, 'Wykopy/Przeciski', 'Wykopy_Przeciski', 'STATIC', null, 1, 0, true);
   addNode(wykopyId, 'Prace_zanikowe', 'Wykopy_Przeciski/Prace_zanikowe', 'STATIC', null, 0, 1, true);
 
   const pgeId = addNode(null, 'Podwieszenie_kabla_PGE', 'Podwieszenie_kabla_PGE', 'STATIC', null, 2, 0, false);

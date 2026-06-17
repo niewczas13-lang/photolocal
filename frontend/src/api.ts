@@ -161,6 +161,12 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ reason }),
     }),
+  updateMapAddressOplConsent: (projectId: string, addressId: string, confirmed: boolean) =>
+    request<ProjectMapData>(`/api/projects/${projectId}/map/addresses/${addressId}/opl-consent`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ confirmed }),
+    }),
   reverseGeocodeMapAddressCandidate: (projectId: string, lat: number, lng: number) =>
     request<ProjectMapData>(`/api/projects/${projectId}/map/address-candidates/reverse`, {
       method: 'POST',
@@ -179,6 +185,7 @@ export const api = {
       distributionPoint: string | null;
       reserveLocation: ProjectMapCandidateReserveLocation;
       createDistributionNodeType: 'OSD' | 'OPP' | null;
+      oplConsentConfirmed?: boolean;
       noteBody?: string | null;
     },
   ) =>

@@ -239,8 +239,16 @@ describe('projects routes', () => {
         distributionPoint: null,
         reserveLocation: 'Doziemny',
         createDistributionNodeType: null,
+        oplConsentConfirmed: false,
         noteBody: 'Dopisane przy zatwierdzaniu adresu',
       }),
+    });
+    const addressId = approveResponse.json().addresses[0].id as string;
+    const consentResponse = await app.inject({
+      method: 'PATCH',
+      url: `/api/projects/${project.id}/map/addresses/${addressId}/opl-consent`,
+      headers: { 'content-type': 'application/json' },
+      payload: JSON.stringify({ confirmed: true }),
     });
     await app.close();
     db.close();
@@ -258,6 +266,14 @@ describe('projects routes', () => {
       street: 'Lesna',
       buildingNo: '7',
       distributionPoint: 'OSTRZESZEWO/OPP0002',
+      isManuallyAdded: true,
+      oplConsentConfirmed: false,
+    });
+    expect(consentResponse.statusCode).toBe(200);
+    expect(consentResponse.json().addresses[0]).toMatchObject({
+      id: addressId,
+      isManuallyAdded: true,
+      oplConsentConfirmed: true,
     });
     expect(approveResponse.json().notes[0]).toMatchObject({
       targetType: 'address',

@@ -1,15 +1,26 @@
 import type {
+  ProjectMapAddress,
   ProjectMapCableRoutingType,
   ProjectMapCableStatus,
   ProjectMapInfraNode,
   ProjectMapNodeStatus,
 } from './types';
 
-export type MarkerTone = 'addressPending' | 'notApplicable' | 'done' | 'nodePhoto' | 'osd' | 'opp' | 'zs';
+export type MarkerTone =
+  | 'addressPending'
+  | 'manualAddressPending'
+  | 'manualAddressDone'
+  | 'notApplicable'
+  | 'done'
+  | 'nodePhoto'
+  | 'osd'
+  | 'opp'
+  | 'zs';
 
 export interface MarkerToneStyle {
   color: string;
   border: string;
+  background?: string;
 }
 
 export interface CableLineStyle {
@@ -98,8 +109,30 @@ export function getMarkerTone(
   return 'zs';
 }
 
+export function getAddressMarkerTone(
+  address: Pick<ProjectMapAddress, 'hasReservePhoto' | 'isNotApplicable' | 'isManuallyAdded'>,
+): MarkerTone {
+  if (address.isNotApplicable) return 'notApplicable';
+  if (address.isManuallyAdded) return address.hasReservePhoto ? 'manualAddressDone' : 'manualAddressPending';
+  return address.hasReservePhoto ? 'done' : 'addressPending';
+}
+
 export function getMarkerToneStyle(tone: MarkerTone): MarkerToneStyle {
   if (tone === 'done') return { color: '#16a34a', border: '#166534' };
+  if (tone === 'manualAddressPending') {
+    return {
+      color: '#fb923c',
+      border: '#991b1b',
+      background: 'repeating-linear-gradient(135deg, #fb923c 0 4px, #dc2626 4px 8px)',
+    };
+  }
+  if (tone === 'manualAddressDone') {
+    return {
+      color: '#fb923c',
+      border: '#166534',
+      background: 'repeating-linear-gradient(135deg, #fb923c 0 4px, #16a34a 4px 8px)',
+    };
+  }
   if (tone === 'nodePhoto') return { color: '#f97316', border: '#c2410c' };
   if (tone === 'notApplicable') return { color: '#94a3b8', border: '#475569' };
   if (tone === 'osd') return { color: '#2563eb', border: '#1d4ed8' };

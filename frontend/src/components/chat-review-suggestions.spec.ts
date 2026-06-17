@@ -15,6 +15,12 @@ const candidates: CandidateNode[] = [
     nodeType: 'CABLE_RESERVE',
   },
   {
+    id: 'excavation',
+    name: 'Wykopy/Przeciski',
+    path: 'Wykopy_Przeciski',
+    nodeType: 'STATIC',
+  },
+  {
     id: 'work',
     name: 'Prace_zanikowe',
     path: 'Wykopy_Przeciski/Prace_zanikowe',
@@ -53,9 +59,40 @@ describe('chat review suggestions', () => {
       'notes',
       'pge',
       'hanging',
-      'work',
+      'excavation',
     ]);
     expect(suggested.some(({ candidate }) => candidate.id === 'address-5')).toBe(false);
+  });
+
+  it('routes ordinary excavation and jacking batches to the Wykopy/Przeciski folder', () => {
+    const suggested = getSuggestedCandidates({
+      batch: { messageText: 'wykop pod kabel i przecisk pod droga', folderName: '2026-06-01_wykopy' },
+      candidates,
+      selected: new Set(),
+      query: '',
+    });
+
+    expect(suggested[0]).toMatchObject({
+      candidate: expect.objectContaining({ id: 'excavation' }),
+      score: 95,
+    });
+  });
+
+  it('routes restoration and backfilling batches to Prace zanikowe', () => {
+    const suggested = getSuggestedCandidates({
+      batch: {
+        messageText: 'odtworzenie nawierzchni po przecisku, zasypanie i zageszczenie',
+        folderName: '2026-06-02_odtworzenie',
+      },
+      candidates,
+      selected: new Set(),
+      query: '',
+    });
+
+    expect(suggested[0]).toMatchObject({
+      candidate: expect.objectContaining({ id: 'work' }),
+    });
+    expect(suggested[0].score).toBeGreaterThan(suggested.find(({ candidate }) => candidate.id === 'excavation')!.score);
   });
 
   it('keeps address matches first when the batch text contains a real address', () => {
@@ -92,6 +129,10 @@ describe('chat review suggestions', () => {
     expect(getCandidateDisplay(candidates.find((candidate) => candidate.id === 'work')!)).toEqual({
       primary: 'Wykopy/Przeciski',
       secondary: 'Prace zanikowe',
+    });
+    expect(getCandidateDisplay(candidates.find((candidate) => candidate.id === 'excavation')!)).toEqual({
+      primary: 'Wykopy/Przeciski',
+      secondary: 'Wykopy_Przeciski',
     });
   });
 });

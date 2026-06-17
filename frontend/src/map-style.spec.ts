@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   getCableLineStyle,
   getCableLineStyles,
+  getAddressMarkerTone,
   getMarkerTone,
   getMarkerToneStyle,
   isCableReady,
@@ -90,8 +91,43 @@ describe('map styling', () => {
   });
 
   it('uses gray for map addresses marked as not applicable', () => {
+    expect(
+      getAddressMarkerTone({
+        hasReservePhoto: false,
+        isNotApplicable: true,
+        isManuallyAdded: true,
+      }),
+    ).toBe('notApplicable');
     expect(getMarkerToneStyle('notApplicable')).toMatchObject({
       color: '#94a3b8',
+    });
+  });
+
+  it('uses striped manual address tones until and after reserve photos arrive', () => {
+    expect(
+      getAddressMarkerTone({
+        hasReservePhoto: false,
+        isNotApplicable: false,
+        isManuallyAdded: true,
+      }),
+    ).toBe('manualAddressPending');
+    expect(getMarkerToneStyle('manualAddressPending')).toMatchObject({
+      color: '#fb923c',
+      border: '#991b1b',
+      background: expect.stringContaining('#dc2626'),
+    });
+
+    expect(
+      getAddressMarkerTone({
+        hasReservePhoto: true,
+        isNotApplicable: false,
+        isManuallyAdded: true,
+      }),
+    ).toBe('manualAddressDone');
+    expect(getMarkerToneStyle('manualAddressDone')).toMatchObject({
+      color: '#fb923c',
+      border: '#166534',
+      background: expect.stringContaining('#16a34a'),
     });
   });
 });

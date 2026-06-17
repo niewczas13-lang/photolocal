@@ -84,6 +84,7 @@ export interface ApproveMapAddressCandidateInput {
   distributionPoint: string | null;
   reserveLocation: ReserveLocationKind;
   createDistributionNodeType: 'OSD' | 'OPP' | null;
+  oplConsentConfirmed?: boolean;
   noteBody?: string | null;
 }
 
@@ -1123,7 +1124,14 @@ export class ProjectsRepository {
 
       const existingAddressRows = this.db
         .prepare(
-          `SELECT id, city, street, building_no AS buildingNo, distribution_point AS distributionPoint
+          `SELECT
+             id,
+             city,
+             street,
+             building_no AS buildingNo,
+             distribution_point AS distributionPoint,
+             source,
+             opl_consent_confirmed AS oplConsentConfirmed
            FROM addresses
            WHERE project_id = ?`,
         )
@@ -1133,6 +1141,8 @@ export class ProjectsRepository {
         street: string;
         buildingNo: string | null;
         distributionPoint: string | null;
+        source: 'GPKG' | 'MANUAL_MAP';
+        oplConsentConfirmed: number;
       }>;
       const targetKey = getAddressMergeKey({
         city,
@@ -1142,6 +1152,8 @@ export class ProjectsRepository {
       });
       const existingAddress = existingAddressRows.find((address) => getAddressMergeKey(address) === targetKey);
       const addressId = existingAddress?.id ?? randomUUID();
+      const oplConsentConfirmed = input.oplConsentConfirmed ? 1 : 0;
+      const addressSource = existingAddress?.source === 'GPKG' ? 'GPKG' : 'MANUAL_MAP';
 
       if (existingAddress) {
         this.db
@@ -1154,7 +1166,9 @@ export class ProjectsRepository {
                  parcel_number = ?,
                  distribution_point = ?,
                  lat = ?,
-                 lng = ?
+                 lng = ?,
+                 source = ?,
+                 opl_consent_confirmed = ?
              WHERE project_id = ? AND id = ?`,
           )
           .run(
@@ -1166,6 +1180,8 @@ export class ProjectsRepository {
             distributionPoint,
             candidate.lat,
             candidate.lng,
+            addressSource,
+            addressSource === 'GPKG' ? existingAddress.oplConsentConfirmed : oplConsentConfirmed,
             input.projectId,
             addressId,
           );
@@ -1174,8 +1190,8 @@ export class ProjectsRepository {
           .prepare(
             `INSERT INTO addresses (
               id, project_id, city, street, building_no, property_id, parcel_number,
-              distribution_point, lat, lng, household_count, business_unit_count
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0)`,
+              distribution_point, lat, lng, household_count, business_unit_count, source, opl_consent_confirmed
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, 'MANUAL_MAP', ?)`,
           )
           .run(
             addressId,
@@ -1188,6 +1204,7 @@ export class ProjectsRepository {
             distributionPoint,
             candidate.lat,
             candidate.lng,
+            oplConsentConfirmed,
           );
       }
 
@@ -1277,6 +1294,19 @@ export class ProjectsRepository {
     return rejected;
   }
 
+  updateAddressOplConsent(projectId: string, addressId: string, confirmed: boolean): void {
+    const result = this.db
+      .prepare(
+        `UPDATE addresses
+         SET opl_consent_confirmed = ?
+         WHERE project_id = ? AND id = ?`,
+      )
+      .run(confirmed ? 1 : 0, projectId, addressId);
+
+    if (result.changes === 0) throw new Error('Address not found');
+    this.db.prepare(`UPDATE projects SET updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(projectId);
+  }
+
   getProjectMap(projectId: string): ProjectMapRecord {
     const addressRows = this.db
       .prepare(
@@ -1288,6 +1318,8 @@ export class ProjectsRepository {
           address.distribution_point AS distributionPoint,
           address.lat,
           address.lng,
+          address.source,
+          address.opl_consent_confirmed AS oplConsentConfirmed,
           COUNT(photo.id) AS reservePhotoCount,
           COUNT(DISTINCT CASE WHEN node.status = 'NOT_APPLICABLE' THEN node.id END) AS notApplicableReserveNodeCount
         FROM addresses address
@@ -1311,6 +1343,8 @@ export class ProjectsRepository {
       distributionPoint: string | null;
       lat: number;
       lng: number;
+      source: 'GPKG' | 'MANUAL_MAP';
+      oplConsentConfirmed: number;
       reservePhotoCount: number;
       notApplicableReserveNodeCount: number;
     }>;
@@ -1367,6 +1401,8 @@ export class ProjectsRepository {
         hasReservePhoto: reservePhotoCount > 0,
         status,
         isNotApplicable,
+        isManuallyAdded: address.source === 'MANUAL_MAP',
+        oplConsentConfirmed: Number(address.oplConsentConfirmed) === 1,
         photos: photosByAddressId.get(address.id) ?? [],
       };
     });
@@ -1867,7 +1903,8 @@ export class ProjectsRepository {
            lat = ?,
            lng = ?,
            household_count = ?,
-           business_unit_count = ?
+           business_unit_count = ?,
+           source = 'GPKG'
          WHERE id = ?
            AND project_id = ?`,
       );

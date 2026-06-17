@@ -16,6 +16,43 @@ function insertProject(db: Database.Database, id: string): void {
 }
 
 describe('runMigrations', () => {
+  it('adds manual address consent columns and enables Wykopy/Przeciski for ordinary photos', () => {
+    const db = new Database(':memory:');
+    runMigrations(db);
+    insertProject(db, 'project-1');
+    db.prepare(
+      `INSERT INTO checklist_nodes (
+        id, project_id, parent_id, name, path, node_type, source,
+        address_id, sort_order, min_photos, accepts_photos, status
+      ) VALUES
+        (
+          'wykopy-root', 'project-1', NULL, 'Wykopy/Przeciski', 'Wykopy_Przeciski', 'STATIC', 'GPKG',
+          NULL, 1, 0, 0, 'OPEN'
+        ),
+        (
+          'prace-zanikowe', 'project-1', 'wykopy-root', 'Prace_zanikowe', 'Wykopy_Przeciski/Prace_zanikowe',
+          'STATIC', 'GPKG', NULL, 0, 1, 1, 'OPEN'
+        )`,
+    ).run();
+
+    runMigrations(db);
+
+    const addressColumns = db.prepare(`PRAGMA table_info(addresses)`).all() as Array<{ name: string }>;
+    const wykopy = db
+      .prepare(
+        `SELECT accepts_photos AS acceptsPhotos
+         FROM checklist_nodes
+         WHERE project_id = 'project-1' AND path = 'Wykopy_Przeciski'`,
+      )
+      .get() as { acceptsPhotos: number };
+    db.close();
+
+    expect(addressColumns.map((column) => column.name)).toEqual(
+      expect.arrayContaining(['source', 'opl_consent_confirmed']),
+    );
+    expect(wykopy.acceptsPhotos).toBe(1);
+  });
+
   it('creates the project photo hash cache table', () => {
     const db = new Database(':memory:');
     runMigrations(db);

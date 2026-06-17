@@ -50,6 +50,20 @@ export function runMigrations(db: Database.Database): void {
   }
 
   try {
+    db.exec("ALTER TABLE addresses ADD COLUMN source TEXT NOT NULL DEFAULT 'GPKG' CHECK (source IN ('GPKG', 'MANUAL_MAP'));");
+  } catch (e) {
+    // Ignore error if column already exists
+  }
+
+  try {
+    db.exec(
+      'ALTER TABLE addresses ADD COLUMN opl_consent_confirmed INTEGER NOT NULL DEFAULT 0 CHECK (opl_consent_confirmed IN (0, 1));',
+    );
+  } catch (e) {
+    // Ignore error if column already exists
+  }
+
+  try {
     db.exec("ALTER TABLE chat_photo_batches ADD COLUMN source_messages TEXT NOT NULL DEFAULT '[]';");
   } catch (e) {
     // Ignore error if column already exists
@@ -64,6 +78,7 @@ export function runMigrations(db: Database.Database): void {
   migrateChatReserveLocationConstraint(db, schema);
   migrateMapTrunkCableIdentity(db, schema);
   backfillSystemMetkiFolder(db);
+  backfillWykopyPrzeciskiPhotoTarget(db);
   repairAutoStaleChecklistStatuses(db);
   ensureDefaultUsers(db);
 }
@@ -232,6 +247,37 @@ function backfillSystemMetkiFolder(db: Database.Database): void {
 
       updateChild.run(root.id, child.id);
       moveRootPhotos.run(child.id, project.id, root.id);
+    }
+  });
+
+  tx();
+}
+
+function backfillWykopyPrzeciskiPhotoTarget(db: Database.Database): void {
+  const projects = db.prepare('SELECT id FROM projects').all() as Array<{ id: string }>;
+  const insertRoot = db.prepare(
+    `INSERT OR IGNORE INTO checklist_nodes (
+      id, project_id, parent_id, name, path, node_type, source, address_id,
+      sort_order, min_photos, accepts_photos, status
+    ) VALUES (?, ?, NULL, 'Wykopy/Przeciski', 'Wykopy_Przeciski', 'STATIC', 'GPKG', NULL, 1, 0, 1, 'OPEN')`,
+  );
+  const updateRoot = db.prepare(
+    `UPDATE checklist_nodes
+     SET parent_id = NULL,
+         name = 'Wykopy/Przeciski',
+         node_type = 'STATIC',
+         address_id = NULL,
+         sort_order = 1,
+         min_photos = 0,
+         accepts_photos = 1,
+         updated_at = CURRENT_TIMESTAMP
+     WHERE project_id = ? AND path = 'Wykopy_Przeciski'`,
+  );
+
+  const tx = db.transaction(() => {
+    for (const project of projects) {
+      insertRoot.run(`system-wykopy-przeciski-${project.id}`, project.id);
+      updateRoot.run(project.id);
     }
   });
 

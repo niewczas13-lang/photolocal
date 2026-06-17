@@ -352,7 +352,7 @@
   margin: 5px 4px 4px;
   border: 1px solid var(--map-marker-border);
   border-radius: 2px;
-  background: var(--map-marker-color);
+  background: var(--map-marker-background, var(--map-marker-color));
 }
 
 .project-map-marker__shape--address::before {
@@ -366,7 +366,26 @@
   border-top: 1px solid var(--map-marker-border);
   border-left: 1px solid var(--map-marker-border);
   border-top-left-radius: 2px;
-  background: var(--map-marker-color);
+  background: var(--map-marker-background, var(--map-marker-color));
+}
+
+.project-map-marker__attention {
+  position: absolute;
+  z-index: 2;
+  top: -12px;
+  right: -9px;
+  display: inline-flex;
+  width: 15px;
+  height: 15px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #92400e;
+  border-radius: 999px;
+  background: #fef3c7;
+  color: #92400e;
+  font-size: 11px;
+  font-weight: 900;
+  line-height: 1;
 }
 
 .project-map-marker__shape--osd {
@@ -382,7 +401,7 @@
   height: 22px;
   border: 2px solid var(--map-marker-border);
   border-radius: 999px;
-  background: var(--map-marker-color);
+  background: var(--map-marker-background, var(--map-marker-color));
 }
 
 .project-map-marker__shape--zs {
@@ -390,7 +409,7 @@
   height: 22px;
   border: 2px solid var(--map-marker-border);
   border-radius: 2px;
-  background: var(--map-marker-color);
+  background: var(--map-marker-background, var(--map-marker-color));
 }
 
 .project-map-note-marker {
@@ -528,6 +547,24 @@
 
 .project-map-popup__single-action {
   justify-content: center;
+}
+
+.project-map-popup__checkbox {
+  display: inline-flex;
+  width: max-content;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid #fed7aa;
+  border-radius: 999px;
+  background: #fff7ed;
+  padding: 5px 9px;
+  color: #9a3412;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.project-map-popup__checkbox input {
+  margin: 0;
 }
 
 .project-map-mini-gallery {
@@ -898,6 +935,24 @@
   gap: 5px;
   color: var(--muted-foreground);
   font-size: 12px;
+}
+
+.project-map-candidate-card__consent {
+  display: inline-flex;
+  width: max-content;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #fed7aa;
+  border-radius: 999px;
+  background: #fff7ed;
+  padding: 7px 10px;
+  color: #9a3412;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.project-map-candidate-card__consent input {
+  margin: 0;
 }
 
 .project-map-candidate-card__note {
@@ -1432,6 +1487,16 @@
 
 .project-map-dot--red {
   background: #dc2626;
+}
+
+.project-map-dot--manual-pending {
+  border: 1px solid #991b1b;
+  background: repeating-linear-gradient(135deg, #fb923c 0 4px, #dc2626 4px 8px);
+}
+
+.project-map-dot--manual-done {
+  border: 1px solid #166534;
+  background: repeating-linear-gradient(135deg, #fb923c 0 4px, #16a34a 4px 8px);
 }
 
 .project-map-dot--orange {

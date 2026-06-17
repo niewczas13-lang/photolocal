@@ -98,6 +98,8 @@ export interface ProjectMapAddress {
   hasReservePhoto: boolean;
   status: ProjectMapAddressStatus;
   isNotApplicable: boolean;
+  isManuallyAdded: boolean;
+  oplConsentConfirmed: boolean;
   photos: ProjectMapPhoto[];
 }
 

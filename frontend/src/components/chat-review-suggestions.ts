@@ -106,10 +106,33 @@ function isGenericWorkCandidate(candidate: CandidateNode): boolean {
   );
 }
 
+function isWykopyRootCandidate(path: string): boolean {
+  return path === 'wykopy przeciski';
+}
+
+function isPraceZanikoweCandidate(path: string): boolean {
+  return path.includes('wykopy przeciski') && path.includes('prace zanikowe');
+}
+
+function hasExcavationSignal(source: string): boolean {
+  return /\b(wykop|wykopy|przecisk|przejsc|przejazd|rura|rury|rurociag|kanaliz)\w*\b/.test(source);
+}
+
+function hasRestorationSignal(source: string): boolean {
+  return /\b(odtwor|nawierzch|zasyp|zageszcz|ubij|asfalt|kostk|humus|trawnik)\w*\b/.test(source);
+}
+
 function scoreGenericWorkCandidate(source: string, candidate: CandidateNode): number {
   const path = normalize(candidate.path);
-  if (path.includes('wykopy przeciski') && /\b(wykop|wykopy|przecisk|przejsc|przejazd|rura)\b/.test(source)) {
-    return 95;
+  if (isPraceZanikoweCandidate(path)) {
+    if (hasRestorationSignal(source)) return 98;
+    if (hasExcavationSignal(source)) return 15;
+    return 20;
+  }
+  if (isWykopyRootCandidate(path)) {
+    if (hasRestorationSignal(source)) return 45;
+    if (hasExcavationSignal(source)) return 95;
+    return 25;
   }
   if (path.includes('notatki z budowy') && /\b(notatk|uwag|brak|nie ma|problem|map)\b/.test(source)) {
     return 90;

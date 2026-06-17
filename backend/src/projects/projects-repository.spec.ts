@@ -996,8 +996,10 @@ describe('ProjectsRepository', () => {
       distributionPoint: 'RADOM/OSD0001',
       reserveLocation: 'Doziemny',
       createDistributionNodeType: null,
+      oplConsentConfirmed: false,
       noteBody: 'Sprawdzic numer na slupku',
     });
+    repository.updateAddressOplConsent(project.id, approved.approvedAddressId!, true);
     const map = repository.getProjectMap(project.id);
     const checklistPaths = (repository.getChecklist(project.id) as Array<{ path: string }>)
       .map((node) => node.path)
@@ -1016,6 +1018,8 @@ describe('ProjectsRepository', () => {
         label: 'Polna 12, Radom',
         distributionPoint: 'RADOM/OSD0001',
         status: 'PENDING',
+        isManuallyAdded: true,
+        oplConsentConfirmed: true,
       }),
     ]);
     expect(map.notes).toEqual([

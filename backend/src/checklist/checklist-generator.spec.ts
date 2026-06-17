@@ -16,6 +16,29 @@ const baseAddress = {
 };
 
 describe('generateChecklistNodes', () => {
+  it('lets ordinary excavation photos go directly to Wykopy/Przeciski while keeping Prace zanikowe separate', () => {
+    const nodes = generateChecklistNodes({
+      projectId: 'project-1',
+      projectName: 'Projekt',
+      projectType: 'SI',
+      splitterTopology: 'SINGLE',
+      addresses: [],
+      dacToAddressCableEntries: [],
+      adssToAddressCableEntries: [],
+    });
+
+    expect(nodes.find((node) => node.path === 'Wykopy_Przeciski')).toMatchObject({
+      name: 'Wykopy/Przeciski',
+      acceptsPhotos: true,
+      minPhotos: 0,
+    });
+    expect(nodes.find((node) => node.path === 'Wykopy_Przeciski/Prace_zanikowe')).toMatchObject({
+      name: 'Prace_zanikowe',
+      acceptsPhotos: true,
+      minPhotos: 1,
+    });
+  });
+
   it('adds the system Metki folder with a photo child to every project checklist', () => {
     const nodes = generateChecklistNodes({
       projectId: 'project-1',

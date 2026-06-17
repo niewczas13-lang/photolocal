@@ -30,7 +30,9 @@ CREATE TABLE IF NOT EXISTS addresses (
   lat REAL,
   lng REAL,
   household_count INTEGER NOT NULL DEFAULT 0,
-  business_unit_count INTEGER NOT NULL DEFAULT 0
+  business_unit_count INTEGER NOT NULL DEFAULT 0,
+  source TEXT NOT NULL DEFAULT 'GPKG' CHECK (source IN ('GPKG', 'MANUAL_MAP')),
+  opl_consent_confirmed INTEGER NOT NULL DEFAULT 0 CHECK (opl_consent_confirmed IN (0, 1))
 );
 
 CREATE TABLE IF NOT EXISTS checklist_nodes (
