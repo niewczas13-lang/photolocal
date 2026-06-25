@@ -16,6 +16,9 @@ function mapData(overrides: Partial<ProjectMapData> = {}): ProjectMapData {
         lng: 20.55,
         reservePhotoCount: 0,
         hasReservePhoto: false,
+        isAerialReserve: false,
+        hasDistributionPhoto: false,
+        usesDistributionPhotoForCompletion: false,
         status: 'PENDING',
         isNotApplicable: false,
         isManuallyAdded: false,
@@ -33,6 +36,9 @@ function mapData(overrides: Partial<ProjectMapData> = {}): ProjectMapData {
         lng: 20.57,
         reservePhotoCount: 1,
         hasReservePhoto: true,
+        isAerialReserve: false,
+        hasDistributionPhoto: false,
+        usesDistributionPhotoForCompletion: false,
         status: 'COMPLETE',
         isNotApplicable: false,
         isManuallyAdded: false,
@@ -288,6 +294,9 @@ describe('map task list', () => {
             lng: 21.1,
             reservePhotoCount: 0,
             hasReservePhoto: false,
+            isAerialReserve: false,
+            hasDistributionPhoto: false,
+            usesDistributionPhotoForCompletion: false,
             status: 'NOT_APPLICABLE',
             isNotApplicable: true,
             isManuallyAdded: false,
@@ -305,6 +314,86 @@ describe('map task list', () => {
           statusLabel: 'Nie dotyczy',
           summary: 'Adres oznaczony jako nie dotyczy',
           stage: 'done',
+        }),
+      ]),
+    );
+  });
+
+  it('describes aerial address reserves as complete when a distribution photo covers them', () => {
+    const rows = getMapTaskRows(
+      mapData({
+        addresses: [
+          {
+            id: 'address-aerial',
+            label: 'Ziolowa 1',
+            city: 'Radom',
+            street: 'Ziolowa',
+            buildingNo: '1',
+            distributionPoint: 'RADOM/OSD0001',
+            lat: 51.4,
+            lng: 21.1,
+            reservePhotoCount: 0,
+            hasReservePhoto: true,
+            isAerialReserve: true,
+            hasDistributionPhoto: true,
+            usesDistributionPhotoForCompletion: true,
+            status: 'COMPLETE',
+            isNotApplicable: false,
+            isManuallyAdded: false,
+            oplConsentConfirmed: false,
+            photos: [],
+          },
+        ],
+      }),
+    );
+
+    expect(rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'address-address-aerial',
+          statusLabel: 'OSD/OPP jest',
+          summary: 'Adres napowietrzny potwierdzony zdjeciem punktu',
+          stage: 'done',
+        }),
+      ]),
+    );
+  });
+
+  it('keeps KPO aerial address reserves as missing reserve work', () => {
+    const rows = getMapTaskRows(
+      mapData({
+        addresses: [
+          {
+            id: 'address-kpo-aerial',
+            label: 'Ziolowa 1',
+            city: 'Radom',
+            street: 'Ziolowa',
+            buildingNo: '1',
+            distributionPoint: 'RADOM/OSD0001',
+            lat: 51.4,
+            lng: 21.1,
+            reservePhotoCount: 0,
+            hasReservePhoto: false,
+            isAerialReserve: true,
+            hasDistributionPhoto: false,
+            usesDistributionPhotoForCompletion: false,
+            status: 'PENDING',
+            isNotApplicable: false,
+            isManuallyAdded: false,
+            oplConsentConfirmed: false,
+            photos: [],
+          },
+        ],
+      }),
+    );
+
+    expect(rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'address-address-kpo-aerial',
+          statusLabel: 'Brak zapasu',
+          summary: 'Zapas do uzupelnienia',
+          stage: 'todo',
         }),
       ]),
     );

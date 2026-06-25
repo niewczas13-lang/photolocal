@@ -1308,6 +1308,11 @@ export class ProjectsRepository {
   }
 
   getProjectMap(projectId: string): ProjectMapRecord {
+    const projectRow = this.db
+      .prepare(`SELECT project_type AS projectType FROM projects WHERE id = ?`)
+      .get(projectId) as { projectType: ProjectType } | undefined;
+    const projectType = projectRow?.projectType ?? 'SI';
+
     const addressRows = this.db
       .prepare(
         `SELECT
@@ -1321,6 +1326,9 @@ export class ProjectsRepository {
           address.source,
           address.opl_consent_confirmed AS oplConsentConfirmed,
           COUNT(photo.id) AS reservePhotoCount,
+          COUNT(DISTINCT CASE
+            WHEN node.path LIKE 'Zapasy_kabli_napowietrznych/%' THEN node.id
+          END) AS aerialReserveNodeCount,
           COUNT(DISTINCT CASE WHEN node.status = 'NOT_APPLICABLE' THEN node.id END) AS notApplicableReserveNodeCount
         FROM addresses address
         LEFT JOIN checklist_nodes node
@@ -1346,6 +1354,7 @@ export class ProjectsRepository {
       source: 'GPKG' | 'MANUAL_MAP';
       oplConsentConfirmed: number;
       reservePhotoCount: number;
+      aerialReserveNodeCount: number;
       notApplicableReserveNodeCount: number;
     }>;
 
@@ -1380,10 +1389,58 @@ export class ProjectsRepository {
       photosByAddressId.set(photo.addressId, photos);
     }
 
+    const photoNodeRows = this.db
+      .prepare(
+        `SELECT
+          node.name,
+          node.path,
+          photo.id,
+          photo.checklist_node_id AS checklistNodeId,
+          photo.stored_file_name AS storedFileName,
+          photo.reserve_location AS reserveLocation,
+          photo.uploaded_at AS uploadedAt
+        FROM checklist_nodes node
+        JOIN photos photo ON photo.checklist_node_id = node.id
+        WHERE node.project_id = ?
+          AND node.node_type != 'CABLE_RESERVE'
+        ORDER BY photo.uploaded_at DESC, photo.id ASC`,
+      )
+      .all(projectId) as Array<{
+      name: string;
+      path: string;
+      id: string;
+      checklistNodeId: string;
+      storedFileName: string;
+      reserveLocation: string | null;
+      uploadedAt: string;
+    }>;
+
+    const distributionPhotoKeys = photoNodeRows.map((photoNode) => ({
+      nameKey: normalizeSearchKey(photoNode.name),
+      pathKey: normalizeSearchKey(photoNode.path),
+    }));
+    const hasDistributionPhoto = (distributionPoint: string | null): boolean => {
+      const nodeKey = normalizeSearchKey(distributionPoint);
+      const terminalKey = normalizeSearchKey(normalizeMapNodeTerminalKey(distributionPoint));
+      if (!nodeKey && !terminalKey) return false;
+
+      return distributionPhotoKeys.some(({ nameKey, pathKey }) => {
+        const matchesNode = Boolean(nodeKey) && (nameKey === nodeKey || pathKey.includes(nodeKey));
+        const matchesTerminal =
+          Boolean(terminalKey) && (nameKey === terminalKey || pathKey.includes(terminalKey));
+        return matchesNode || matchesTerminal;
+      });
+    };
+
     const addresses = addressRows.map((address) => {
       const reservePhotoCount = Number(address.reservePhotoCount);
-      const isNotApplicable = reservePhotoCount === 0 && Number(address.notApplicableReserveNodeCount) > 0;
-      const status: ProjectMapAddressStatus = reservePhotoCount > 0
+      const isAerialReserve = Number(address.aerialReserveNodeCount) > 0;
+      const usesDistributionPhotoForCompletion = projectType === 'SI' && isAerialReserve;
+      const hasDistributionPointPhoto = isAerialReserve && hasDistributionPhoto(address.distributionPoint);
+      const hasEffectiveReservePhoto =
+        reservePhotoCount > 0 || (usesDistributionPhotoForCompletion && hasDistributionPointPhoto);
+      const isNotApplicable = !hasEffectiveReservePhoto && Number(address.notApplicableReserveNodeCount) > 0;
+      const status: ProjectMapAddressStatus = hasEffectiveReservePhoto
         ? 'COMPLETE'
         : isNotApplicable
           ? 'NOT_APPLICABLE'
@@ -1398,7 +1455,10 @@ export class ProjectsRepository {
         lat: Number(address.lat),
         lng: Number(address.lng),
         reservePhotoCount,
-        hasReservePhoto: reservePhotoCount > 0,
+        hasReservePhoto: hasEffectiveReservePhoto,
+        isAerialReserve,
+        hasDistributionPhoto: hasDistributionPointPhoto,
+        usesDistributionPhotoForCompletion,
         status,
         isNotApplicable,
         isManuallyAdded: address.source === 'MANUAL_MAP',
@@ -1523,32 +1583,6 @@ export class ProjectsRepository {
         : Number(cable.installationLengthMeters),
       status: cable.status,
     }));
-
-    const photoNodeRows = this.db
-      .prepare(
-        `SELECT
-          node.name,
-          node.path,
-          photo.id,
-          photo.checklist_node_id AS checklistNodeId,
-          photo.stored_file_name AS storedFileName,
-          photo.reserve_location AS reserveLocation,
-          photo.uploaded_at AS uploadedAt
-        FROM checklist_nodes node
-        JOIN photos photo ON photo.checklist_node_id = node.id
-        WHERE node.project_id = ?
-          AND node.node_type != 'CABLE_RESERVE'
-        ORDER BY photo.uploaded_at DESC, photo.id ASC`,
-      )
-      .all(projectId) as Array<{
-      name: string;
-      path: string;
-      id: string;
-      checklistNodeId: string;
-      storedFileName: string;
-      reserveLocation: string | null;
-      uploadedAt: string;
-    }>;
 
     const infraRows = this.db
       .prepare(

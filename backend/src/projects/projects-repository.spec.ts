@@ -867,6 +867,239 @@ describe('ProjectsRepository', () => {
     });
   });
 
+  it('treats aerial address reserves as complete when their distribution point has photos', () => {
+    const { db, repository } = createRepository();
+
+    const project = repository.createProject({
+      name: 'MAPA ADSS',
+      projectDefinition: null,
+      projectType: 'SI',
+      splitterTopology: 'SINGLE',
+      splitterTopologySource: 'AUTO',
+      splitterCount: 1,
+      gpkgFileName: 'mapa.gpkg',
+      baseFolder: 'C:/photos/MAPA_ADSS',
+      addresses: [
+        {
+          id: 'address-aerial-1',
+          city: 'Radom',
+          street: 'Ziolowa',
+          buildingNo: '1',
+          propertyId: 'pa-1',
+          parcelNumber: null,
+          distributionPoint: 'RADOM/OSD0001',
+          lat: 51.4,
+          lng: 21.1,
+          householdCount: 1,
+          businessUnitCount: 0,
+        },
+      ],
+      dacToAddressCableCount: 0,
+      adssToAddressCableCount: 1,
+      checklistNodes: [
+        {
+          id: 'node-osd-details',
+          projectId: 'project-temp',
+          parentId: null,
+          name: 'Szczegoly_skrzynki',
+          path: 'Szczegoly_skrzynki/RADOM_OSD0001',
+          nodeType: 'DISTRIBUTION',
+          addressId: null,
+          sortOrder: 0,
+          minPhotos: 1,
+          acceptsPhotos: true,
+        },
+        {
+          id: 'reserve-aerial-address-1',
+          projectId: 'project-temp',
+          parentId: null,
+          name: 'UL_ZIOLOWA_1',
+          path: 'Zapasy_kabli_napowietrznych/RADOM_OSD0001/UL_ZIOLOWA_1',
+          nodeType: 'CABLE_RESERVE',
+          addressId: 'address-aerial-1',
+          sortOrder: 1,
+          minPhotos: 1,
+          acceptsPhotos: true,
+        },
+      ],
+      polygons: [
+        {
+          osdName: 'RADOM/OSD0001',
+          label: 'RADOM/OSD0001',
+          geojson: { type: 'Polygon', coordinates: [] },
+          households: 1,
+          paCount: 1,
+          cableRef: 'ADSS-1',
+        },
+      ],
+      trunkCables: [],
+      infraNodes: [
+        {
+          nodeType: 'OSD',
+          name: 'RADOM/OSD0001',
+          label: 'RADOM/OSD0001',
+          lat: 51.5,
+          lng: 21.2,
+        },
+      ],
+    });
+
+    let map = repository.getProjectMap(project.id);
+    expect(map.addresses[0]).toMatchObject({
+      id: 'address-aerial-1',
+      isAerialReserve: true,
+      hasDistributionPhoto: false,
+      usesDistributionPhotoForCompletion: true,
+      hasReservePhoto: false,
+      reservePhotoCount: 0,
+      status: 'PENDING',
+    });
+    expect(map.polygons[0]).toMatchObject({
+      addressTotal: 1,
+      addressWithReservePhoto: 0,
+    });
+
+    repository.addPhoto({
+      id: 'photo-osd',
+      projectId: project.id,
+      checklistNodeId: 'node-osd-details',
+      sourceFileName: 'osd.jpeg',
+      storedFileName: 'osd.jpeg',
+      storagePath: 'C:/photos/MAPA_ADSS/osd.jpeg',
+      thumbnailPath: null,
+      mimeType: 'image/jpeg',
+      fileSize: 123,
+      lat: null,
+      lng: null,
+      capturedAt: null,
+      reserveLocation: null,
+    });
+
+    map = repository.getProjectMap(project.id);
+    db.close();
+
+    expect(map.addresses[0]).toMatchObject({
+      isAerialReserve: true,
+      hasDistributionPhoto: true,
+      usesDistributionPhotoForCompletion: true,
+      hasReservePhoto: true,
+      reservePhotoCount: 0,
+      status: 'COMPLETE',
+    });
+    expect(map.polygons[0]).toMatchObject({
+      addressWithReservePhoto: 1,
+    });
+  });
+
+  it('keeps KPO aerial address reserves pending until the address reserve itself has photos', () => {
+    const { db, repository } = createRepository();
+
+    const project = repository.createProject({
+      name: 'MAPA KPO ADSS',
+      projectDefinition: null,
+      projectType: 'KPO',
+      splitterTopology: 'SINGLE',
+      splitterTopologySource: 'AUTO',
+      splitterCount: 1,
+      gpkgFileName: 'mapa.gpkg',
+      baseFolder: 'C:/photos/MAPA_KPO_ADSS',
+      addresses: [
+        {
+          id: 'address-kpo-aerial-1',
+          city: 'Radom',
+          street: 'Ziolowa',
+          buildingNo: '1',
+          propertyId: 'pa-1',
+          parcelNumber: null,
+          distributionPoint: 'RADOM/OSD0001',
+          lat: 51.4,
+          lng: 21.1,
+          householdCount: 1,
+          businessUnitCount: 0,
+        },
+      ],
+      dacToAddressCableCount: 0,
+      adssToAddressCableCount: 1,
+      checklistNodes: [
+        {
+          id: 'node-kpo-osd-details',
+          projectId: 'project-temp',
+          parentId: null,
+          name: 'Szczegoly_skrzynki',
+          path: 'Szczegoly_skrzynki/RADOM_OSD0001',
+          nodeType: 'DISTRIBUTION',
+          addressId: null,
+          sortOrder: 0,
+          minPhotos: 1,
+          acceptsPhotos: true,
+        },
+        {
+          id: 'reserve-kpo-aerial-address-1',
+          projectId: 'project-temp',
+          parentId: null,
+          name: 'UL_ZIOLOWA_1',
+          path: 'Zapasy_kabli_napowietrznych/RADOM_OSD0001/UL_ZIOLOWA_1',
+          nodeType: 'CABLE_RESERVE',
+          addressId: 'address-kpo-aerial-1',
+          sortOrder: 1,
+          minPhotos: 1,
+          acceptsPhotos: true,
+        },
+      ],
+      polygons: [
+        {
+          osdName: 'RADOM/OSD0001',
+          label: 'RADOM/OSD0001',
+          geojson: { type: 'Polygon', coordinates: [] },
+          households: 1,
+          paCount: 1,
+          cableRef: 'ADSS-1',
+        },
+      ],
+      trunkCables: [],
+      infraNodes: [
+        {
+          nodeType: 'OSD',
+          name: 'RADOM/OSD0001',
+          label: 'RADOM/OSD0001',
+          lat: 51.5,
+          lng: 21.2,
+        },
+      ],
+    });
+
+    repository.addPhoto({
+      id: 'photo-kpo-osd',
+      projectId: project.id,
+      checklistNodeId: 'node-kpo-osd-details',
+      sourceFileName: 'osd.jpeg',
+      storedFileName: 'osd.jpeg',
+      storagePath: 'C:/photos/MAPA_KPO_ADSS/osd.jpeg',
+      thumbnailPath: null,
+      mimeType: 'image/jpeg',
+      fileSize: 123,
+      lat: null,
+      lng: null,
+      capturedAt: null,
+      reserveLocation: null,
+    });
+
+    const map = repository.getProjectMap(project.id);
+    db.close();
+
+    expect(map.addresses[0]).toMatchObject({
+      id: 'address-kpo-aerial-1',
+      isAerialReserve: true,
+      usesDistributionPhotoForCompletion: false,
+      hasReservePhoto: false,
+      reservePhotoCount: 0,
+      status: 'PENDING',
+    });
+    expect(map.polygons[0]).toMatchObject({
+      addressWithReservePhoto: 0,
+    });
+  });
+
   it('stores clicked address candidates without creating checklist folders', () => {
     const { db, repository } = createRepository();
 

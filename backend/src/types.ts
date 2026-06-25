@@ -96,6 +96,9 @@ export interface ProjectMapAddress {
   lng: number;
   reservePhotoCount: number;
   hasReservePhoto: boolean;
+  isAerialReserve: boolean;
+  hasDistributionPhoto: boolean;
+  usesDistributionPhotoForCompletion: boolean;
   status: ProjectMapAddressStatus;
   isNotApplicable: boolean;
   isManuallyAdded: boolean;

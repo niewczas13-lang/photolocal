@@ -94,6 +94,8 @@ describe('map styling', () => {
     expect(
       getAddressMarkerTone({
         hasReservePhoto: false,
+        isAerialReserve: false,
+        usesDistributionPhotoForCompletion: false,
         isNotApplicable: true,
         isManuallyAdded: true,
       }),
@@ -107,6 +109,8 @@ describe('map styling', () => {
     expect(
       getAddressMarkerTone({
         hasReservePhoto: false,
+        isAerialReserve: false,
+        usesDistributionPhotoForCompletion: false,
         isNotApplicable: false,
         isManuallyAdded: true,
       }),
@@ -120,6 +124,8 @@ describe('map styling', () => {
     expect(
       getAddressMarkerTone({
         hasReservePhoto: true,
+        isAerialReserve: false,
+        usesDistributionPhotoForCompletion: false,
         isNotApplicable: false,
         isManuallyAdded: true,
       }),
@@ -129,5 +135,41 @@ describe('map styling', () => {
       border: '#166534',
       background: expect.stringContaining('#16a34a'),
     });
+  });
+
+  it('uses light blue for aerial address reserves until distribution photos complete them', () => {
+    const kpoAerialAddress = {
+      hasReservePhoto: false,
+      isAerialReserve: true,
+      usesDistributionPhotoForCompletion: false,
+      isNotApplicable: false,
+      isManuallyAdded: false,
+    };
+
+    expect(getAddressMarkerTone(kpoAerialAddress)).toBe('addressPending');
+
+    expect(
+      getAddressMarkerTone({
+        hasReservePhoto: false,
+        isAerialReserve: true,
+        usesDistributionPhotoForCompletion: true,
+        isNotApplicable: false,
+        isManuallyAdded: false,
+      }),
+    ).toBe('aerialAddressPending');
+    expect(getMarkerToneStyle('aerialAddressPending')).toMatchObject({
+      color: '#93c5fd',
+      border: '#2563eb',
+    });
+
+    expect(
+      getAddressMarkerTone({
+        hasReservePhoto: true,
+        isAerialReserve: true,
+        usesDistributionPhotoForCompletion: true,
+        isNotApplicable: false,
+        isManuallyAdded: false,
+      }),
+    ).toBe('done');
   });
 });

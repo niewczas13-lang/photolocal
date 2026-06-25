@@ -1489,6 +1489,11 @@
   background: #dc2626;
 }
 
+.project-map-dot--aerial {
+  border: 1px solid #2563eb;
+  background: #93c5fd;
+}
+
 .project-map-dot--manual-pending {
   border: 1px solid #991b1b;
   background: repeating-linear-gradient(135deg, #fb923c 0 4px, #dc2626 4px 8px);

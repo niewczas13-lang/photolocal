@@ -8,6 +8,7 @@ import type {
 
 export type MarkerTone =
   | 'addressPending'
+  | 'aerialAddressPending'
   | 'manualAddressPending'
   | 'manualAddressDone'
   | 'notApplicable'
@@ -110,10 +111,18 @@ export function getMarkerTone(
 }
 
 export function getAddressMarkerTone(
-  address: Pick<ProjectMapAddress, 'hasReservePhoto' | 'isNotApplicable' | 'isManuallyAdded'>,
+  address: Pick<
+    ProjectMapAddress,
+    | 'hasReservePhoto'
+    | 'isAerialReserve'
+    | 'usesDistributionPhotoForCompletion'
+    | 'isNotApplicable'
+    | 'isManuallyAdded'
+  >,
 ): MarkerTone {
   if (address.isNotApplicable) return 'notApplicable';
   if (address.isManuallyAdded) return address.hasReservePhoto ? 'manualAddressDone' : 'manualAddressPending';
+  if (address.usesDistributionPhotoForCompletion && !address.hasReservePhoto) return 'aerialAddressPending';
   return address.hasReservePhoto ? 'done' : 'addressPending';
 }
 
@@ -135,6 +144,7 @@ export function getMarkerToneStyle(tone: MarkerTone): MarkerToneStyle {
   }
   if (tone === 'nodePhoto') return { color: '#f97316', border: '#c2410c' };
   if (tone === 'notApplicable') return { color: '#94a3b8', border: '#475569' };
+  if (tone === 'aerialAddressPending') return { color: '#93c5fd', border: '#2563eb' };
   if (tone === 'osd') return { color: '#2563eb', border: '#1d4ed8' };
   if (tone === 'opp') return { color: '#9333ea', border: '#7e22ce' };
   if (tone === 'zs') return { color: '#0891b2', border: '#0e7490' };

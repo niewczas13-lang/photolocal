@@ -800,18 +800,21 @@ function AddressPopup({
   busy: boolean;
 }) {
   const addressReady = address.hasReservePhoto || address.isNotApplicable;
+  const statusLabel = address.isNotApplicable
+    ? 'Nie dotyczy'
+    : address.usesDistributionPhotoForCompletion && address.hasDistributionPhoto && address.reservePhotoCount === 0
+      ? 'OSD/OPP ze zdjeciem'
+      : address.hasReservePhoto
+        ? 'Zapas ze zdjeciem'
+        : address.usesDistributionPhotoForCompletion
+          ? 'Napowietrzny'
+          : 'Brak zdjecia zapasu';
 
   return (
     <div className="project-map-popup">
       <div className="project-map-popup__title">{address.label}</div>
       <div className="project-map-popup__meta">{address.distributionPoint ?? 'Bez punktu dystrybucyjnego'}</div>
-      <Badge variant={addressReady ? 'default' : 'outline'}>
-        {address.isNotApplicable
-          ? 'Nie dotyczy'
-          : address.hasReservePhoto
-            ? 'Zapas ze zdjeciem'
-            : 'Brak zdjecia zapasu'}
-      </Badge>
+      <Badge variant={addressReady ? 'default' : 'outline'}>{statusLabel}</Badge>
       <MiniPhotoGallery projectId={projectId} photos={address.photos} />
       {address.isManuallyAdded && (
         <label className="project-map-popup__checkbox">
@@ -1492,6 +1495,7 @@ export default function ProjectMap({ projectId, view, onViewChange }: ProjectMap
 
           <div className="project-map-legend" aria-hidden="true">
             <span><span className="project-map-dot project-map-dot--red" /> adres bez zapasu</span>
+            <span><span className="project-map-dot project-map-dot--aerial" /> adres napowietrzny</span>
             <span><span className="project-map-dot project-map-dot--manual-pending" /> adres dodany recznie</span>
             <span><span className="project-map-dot project-map-dot--manual-done" /> reczny ze zdjeciem</span>
             <span><span className="project-map-dot project-map-dot--gray" /> adres nie dotyczy</span>

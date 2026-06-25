@@ -170,18 +170,35 @@ function nodeTask(node: ProjectMapInfraNode): MapTaskRow {
 
 function addressTask(address: ProjectMapAddress): MapTaskRow {
   const isDone = address.hasReservePhoto || address.isNotApplicable;
+  const isAerialCoveredByDistribution =
+    address.usesDistributionPhotoForCompletion && address.hasDistributionPhoto && address.reservePhotoCount === 0;
+  const statusLabel = address.isNotApplicable
+    ? 'Nie dotyczy'
+    : isAerialCoveredByDistribution
+      ? 'OSD/OPP jest'
+      : address.hasReservePhoto
+        ? 'Zapas jest'
+        : address.usesDistributionPhotoForCompletion
+          ? 'Napowietrzny'
+          : 'Brak zapasu';
+  const summary = address.isNotApplicable
+    ? 'Adres oznaczony jako nie dotyczy'
+    : isAerialCoveredByDistribution
+      ? 'Adres napowietrzny potwierdzony zdjeciem punktu'
+      : address.hasReservePhoto
+        ? 'Zapas uzupelniony'
+        : address.usesDistributionPhotoForCompletion
+          ? 'Adres napowietrzny czeka na zdjecie OSD/OPP'
+          : 'Zapas do uzupelnienia';
+
   return {
     id: `address-${address.id}`,
     sourceId: address.id,
     kind: 'address',
     title: address.label,
     subtitle: address.distributionPoint ?? 'Bez punktu dystrybucyjnego',
-    statusLabel: address.isNotApplicable ? 'Nie dotyczy' : address.hasReservePhoto ? 'Zapas jest' : 'Brak zapasu',
-    summary: address.isNotApplicable
-      ? 'Adres oznaczony jako nie dotyczy'
-      : address.hasReservePhoto
-        ? 'Zapas uzupelniony'
-        : 'Zapas do uzupelnienia',
+    statusLabel,
+    summary,
     stage: isDone ? 'done' : 'todo',
   };
 }
