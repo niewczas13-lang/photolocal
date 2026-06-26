@@ -326,12 +326,6 @@ export interface ChatClassificationResult {
   pendingReview: number;
 }
 
-export interface ChatAcceptReadyResult {
-  importedBatches: number;
-  importedPhotos: number;
-  skippedBatches: number;
-}
-
 export interface ChatClassificationStatus {
   state: 'IDLE' | 'RUNNING' | 'COMPLETED' | 'FAILED';
   processed: number;

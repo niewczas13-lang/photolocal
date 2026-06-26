@@ -106,6 +106,17 @@ describe('chat review suggestions', () => {
     expect(suggested[0].candidate.id).toBe('address-5');
   });
 
+  it('puts the folder selected by classification before other suggestions', () => {
+    const suggested = getSuggestedCandidates({
+      batch: { messageText: 'Malenicka 5 zapas', folderName: '2025-10-17_Malenicka 5' },
+      candidates,
+      selected: new Set(['address-7']),
+      query: '',
+    });
+
+    expect(suggested[0].candidate.id).toBe('address-7');
+  });
+
   it('still allows searching address folders manually', () => {
     const suggested = getSuggestedCandidates({
       batch: { messageText: '', folderName: '2025-10-16_Brak opisu' },

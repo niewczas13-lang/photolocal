@@ -180,6 +180,11 @@ export function getSuggestedCandidates(input: {
         score > 0 ||
         (query && (normalize(candidate.name).includes(query) || normalize(candidate.path).includes(query))),
     )
-    .sort((left, right) => right.score - left.score || left.candidate.name.localeCompare(right.candidate.name))
+    .sort((left, right) => {
+      const leftSelected = input.selected.has(left.candidate.id);
+      const rightSelected = input.selected.has(right.candidate.id);
+      if (leftSelected !== rightSelected) return leftSelected ? -1 : 1;
+      return right.score - left.score || left.candidate.name.localeCompare(right.candidate.name);
+    })
     .slice(0, limit);
 }

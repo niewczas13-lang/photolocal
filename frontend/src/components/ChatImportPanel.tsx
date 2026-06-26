@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, Bot, CheckCircle2, Circle, Loader2, MessageSquare, RefreshCw, Trash2, UserPlus } from 'lucide-react';
 import { api } from '../api';
 import type {
-  ChatAcceptReadyResult,
   ChatBatch,
   ChatClassificationStatus,
   ChatImportResult,
@@ -35,7 +34,6 @@ interface ChatImportPanelProps {
 type LastResult =
   | { type: 'import'; result: ChatImportResult }
   | { type: 'classify-started'; result: ChatClassificationStatus }
-  | { type: 'accept'; result: ChatAcceptReadyResult }
   | { type: 'clear'; result: { cleared: number } }
   | null;
 
@@ -100,7 +98,7 @@ export default function ChatImportPanel({ projectId, project, batches, onChanged
   const [isChangingSpace, setIsChangingSpace] = useState(false);
   const [lastDownloadAt, setLastDownloadAt] = useState<string | null>(project.googleChatLastDownloadAt);
   const [busyAction, setBusyAction] = useState<
-    'spaces' | 'download' | 'clear' | 'classify' | 'accept' | 'invites' | 'invite-setup' | 'accept-invite' | null
+    'spaces' | 'download' | 'clear' | 'classify' | 'invites' | 'invite-setup' | 'accept-invite' | null
   >(null);
   const [lastResult, setLastResult] = useState<LastResult>(null);
   const [classificationStatus, setClassificationStatus] = useState<ChatClassificationStatus | null>(null);
@@ -294,7 +292,7 @@ export default function ChatImportPanel({ projectId, project, batches, onChanged
     }
   };
 
-  const runAction = async (action: 'classify' | 'accept') => {
+  const runAction = async (action: 'classify') => {
     setBusyAction(action);
     try {
       if (action === 'classify') {
@@ -302,10 +300,6 @@ export default function ChatImportPanel({ projectId, project, batches, onChanged
         const result = await api.classifyChatBatches(projectId);
         setLastResult({ type: 'classify-started', result });
         setClassificationStatus(result);
-      }
-      if (action === 'accept') {
-        const result = await api.acceptReadyChatBatches(projectId);
-        setLastResult({ type: 'accept', result });
       }
       await onChanged();
     } catch (error) {
@@ -821,10 +815,6 @@ export default function ChatImportPanel({ projectId, project, batches, onChanged
               {busyAction === 'classify' ? <Loader2 size={16} className="mr-2 animate-spin" /> : <Bot size={16} className="mr-2" />}
               Weryfikuj Qwen
             </Button>
-            <Button variant="secondary" disabled={busyAction !== null || operationRunning} onClick={() => void runAction('accept')}>
-              {busyAction === 'accept' ? <Loader2 size={16} className="mr-2 animate-spin" /> : <CheckCircle2 size={16} className="mr-2" />}
-              Importuj zaakceptowane
-            </Button>
             <Button
               variant="destructive"
               disabled={busyAction !== null || operationRunning || counts.waiting + counts.ready + counts.review === 0}
@@ -846,12 +836,6 @@ export default function ChatImportPanel({ projectId, project, batches, onChanged
               {lastResult.type === 'classify-started' && (
                 <span>
                   Qwen wystartowal w tle. Postep widac ponizej.
-                </span>
-              )}
-              {lastResult.type === 'accept' && (
-                <span>
-                  Auto-akceptacja: paczki {lastResult.result.importedBatches}, zdjecia {lastResult.result.importedPhotos},
-                  pominiete: {lastResult.result.skippedBatches}.
                 </span>
               )}
               {lastResult.type === 'clear' && (

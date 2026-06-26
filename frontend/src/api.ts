@@ -1,7 +1,6 @@
 import type {
   AuthSession,
   AuthUser,
-  ChatAcceptReadyResult,
   ChatBatch,
   ChatBatchStatus,
   ChatClassificationResult,
@@ -297,12 +296,6 @@ export const api = {
     }),
   getChatClassificationStatus: (projectId: string) =>
     request<ChatClassificationStatus>(`/api/projects/${projectId}/chat-batches/classify/status`),
-  acceptReadyChatBatches: (projectId: string) =>
-    request<ChatAcceptReadyResult>(`/api/projects/${projectId}/chat-batches/accept-ready`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({}),
-    }),
   acceptChatBatch: (
     projectId: string,
     batchId: string,
