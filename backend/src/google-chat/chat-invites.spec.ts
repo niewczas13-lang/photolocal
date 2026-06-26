@@ -3,7 +3,9 @@ import {
   buildInviteBrowserLaunchInfo,
   buildInviteLauncherStartedStatus,
   buildInviteLoginLauncherInfo,
+  chatInviteActionFromLabel,
   mapRawInviteCandidates,
+  selectChromeSessionTarget,
 } from './chat-invites.js';
 
 describe('chat invites helpers', () => {
@@ -59,6 +61,47 @@ describe('chat invites helpers', () => {
       senderEmail: 'niewczas13@gmail.com',
     });
     expect(invite.textPreview).not.toMatch(/Podgl\u0105d|Do\u0142\u0105cz/i);
+  });
+
+  it('treats the new Wyswietl action as an invite card action', () => {
+    expect(chatInviteActionFromLabel('Wyświetl')).toBe('view');
+    expect(chatInviteActionFromLabel('Wyswietl')).toBe('view');
+    expect(chatInviteActionFromLabel('Dołącz')).toBe('join');
+    expect(chatInviteActionFromLabel('Join')).toBe('join');
+  });
+
+  it('strips the new Wyswietl action from mapped invite previews', () => {
+    const [invite] = mapRawInviteCandidates(
+      [
+        {
+          buttonIndex: 0,
+          text: 'PURDA 03 X/04017463\nZaproszenie od: bot@example.com\nWyświetl',
+        },
+      ],
+    );
+
+    expect(invite).toMatchObject({
+      roomName: 'PURDA 03 X/04017463',
+      senderEmail: 'bot@example.com',
+    });
+    expect(invite.textPreview).not.toMatch(/Wy\u015bwietl|Wyswietl|View/i);
+  });
+
+  it('prefers an opened Google Chat page over a stale Google login page', () => {
+    const target = selectChromeSessionTarget([
+      {
+        type: 'page',
+        title: 'Logowanie',
+        url: 'https://accounts.google.com/v3/signin/confirmidentifier',
+      },
+      {
+        type: 'page',
+        title: 'Google Chat',
+        url: 'https://chat.google.com/app/browse?q=&smembership=not_joined&sorganization=all',
+      },
+    ]);
+
+    expect(target?.url).toContain('chat.google.com');
   });
 
   it('builds a manual launch command for the Google Chat browser profile', () => {

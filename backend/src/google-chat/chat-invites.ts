@@ -61,10 +61,13 @@ export interface ChatInviteBrowserConfig {
 
 interface RawInviteCandidate {
   buttonIndex: number;
+  action?: ChatInviteAction;
   text: string;
 }
 
-interface ChromeTargetInfo {
+export type ChatInviteAction = 'join' | 'view';
+
+export interface ChromeTargetInfo {
   url?: string;
   title?: string;
   type?: string;
@@ -83,6 +86,20 @@ function normalizePolishText(value: string): string {
     .replace(/[\u017a\u0179\u017c\u017b]/g, 'z')
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase();
+}
+
+export function chatInviteActionFromLabel(label: string): ChatInviteAction | null {
+  const normalized = normalizePolishText(label);
+  if (normalized.includes('dolacz') || normalized.includes('join')) return 'join';
+  if (
+    normalized.includes('wyswietl') ||
+    normalized.includes('view') ||
+    normalized.includes('podglad') ||
+    normalized.includes('preview')
+  ) {
+    return 'view';
+  }
+  return null;
 }
 
 function createDebugInfo(): ChatInviteDebugInfo {
@@ -287,6 +304,16 @@ function sessionStatusFromTarget(target: ChromeTargetInfo | null): ChatInviteSes
   };
 }
 
+export function selectChromeSessionTarget(targets: ChromeTargetInfo[]): ChromeTargetInfo | null {
+  const pageTargets = targets.filter((target) => target.type === 'page');
+  return (
+    pageTargets.find((target) => target.url?.includes('chat.google.com')) ??
+    pageTargets.find((target) => target.url?.includes('accounts.google.com')) ??
+    pageTargets[0] ??
+    null
+  );
+}
+
 async function readChromeSessionStatus(
   config: ChatInviteBrowserConfig,
   debug: ChatInviteDebugInfo,
@@ -302,13 +329,9 @@ async function readChromeSessionStatus(
       const response = await fetch(listUrl);
       if (response.ok) {
         const targets = (await response.json()) as ChromeTargetInfo[];
-        lastTarget =
-          targets.find((target) => target.type === 'page' && target.url?.includes('accounts.google.com')) ??
-          targets.find((target) => target.type === 'page' && target.url?.includes('chat.google.com')) ??
-          targets.find((target) => target.type === 'page') ??
-          null;
+        lastTarget = selectChromeSessionTarget(targets);
         const status = sessionStatusFromTarget(lastTarget);
-        if (status.state === 'NEEDS_LOGIN') return status;
+        if (status.state === 'NEEDS_LOGIN' && Date.now() - startedAt > 3_000) return status;
         if (status.state === 'ACTIVE') activeTarget = lastTarget;
         if (activeTarget && Date.now() - startedAt > 3_000) return sessionStatusFromTarget(activeTarget);
       }
@@ -331,8 +354,10 @@ function firstEmail(text: string): string | null {
 
 function stripInviteActionText(text: string): string {
   return text
-    .replace(/(?:Podgl(?:\u0105d|ad)|Preview)\s*(?:Do(?:\u0142\u0105cz|lacz)|Join)?\s*$/i, '')
-    .replace(/(?:Do(?:\u0142\u0105cz|lacz)|Join)\s*$/i, '')
+    .replace(
+      /(?:(?:Podgl(?:\u0105d|ad)|Preview|Wy(?:\u015bwietl|swietl)|Wyswietl|View|Do(?:\u0142\u0105cz|lacz)|Join)\s*)+$/i,
+      '',
+    )
     .trim();
 }
 
@@ -397,12 +422,19 @@ async function openInvitesPage(
   const cdpUrl = await waitForCdpEndpoint(config, debug);
   const browser = await chromium.connectOverCDP(cdpUrl);
   const context = browser.contexts()[0] ?? (await browser.newContext());
-  const page = context.pages()[0] ?? (await context.newPage());
+  const page =
+    context.pages().find((candidate) => candidate.url().includes('chat.google.com')) ?? (await context.newPage());
   page.setDefaultTimeout(20_000);
+  await page.bringToFront().catch(() => undefined);
   debug.steps.push(`Otwieram ${GOOGLE_CHAT_INVITES_URL}`);
   await page.goto(GOOGLE_CHAT_INVITES_URL, { waitUntil: 'domcontentloaded' });
-  debug.steps.push('DOM zaladowany, czekam 3s na dane Google Chat');
-  await page.waitForTimeout(3_000);
+  debug.steps.push('DOM zaladowany, czekam na dane Google Chat');
+  await page
+    .waitForFunction(() => (document.body?.innerText ?? '').replace(/\s+/g, ' ').trim().length > 100, null, {
+      timeout: 10_000,
+    })
+    .catch(() => undefined);
+  await page.waitForTimeout(2_000);
   debug.finalUrl = page.url();
   debug.title = await page.title().catch(() => null);
 
@@ -427,6 +459,30 @@ async function collectPageDebug(page: Page): Promise<Omit<ChatInviteDebugInfo, '
         .replace(/[źŹżŻ]/g, 'z')
         .replace(/[\u0300-\u036f]/g, '')
         .toLowerCase();
+    const actionFromLabel = (value: string): 'join' | 'view' | null => {
+      const normalized = value
+        .normalize('NFKD')
+        .replace(/[\u0142\u0141]/g, 'l')
+        .replace(/[\u0105\u0104]/g, 'a')
+        .replace(/[\u0107\u0106]/g, 'c')
+        .replace(/[\u0119\u0118]/g, 'e')
+        .replace(/[\u0144\u0143]/g, 'n')
+        .replace(/[\u00f3\u00d3]/g, 'o')
+        .replace(/[\u015b\u015a]/g, 's')
+        .replace(/[\u017a\u0179\u017c\u017b]/g, 'z')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase();
+      if (normalized.includes('dolacz') || normalized.includes('join')) return 'join';
+      if (
+        normalized.includes('wyswietl') ||
+        normalized.includes('view') ||
+        normalized.includes('podglad') ||
+        normalized.includes('preview')
+      ) {
+        return 'view';
+      }
+      return null;
+    };
     const buttons = Array.from(document.querySelectorAll('button, [role="button"]'));
     const buttonLabels = buttons.map((button) =>
       [
@@ -438,7 +494,7 @@ async function collectPageDebug(page: Page): Promise<Omit<ChatInviteDebugInfo, '
         .replace(/\s+/g, ' ')
         .trim(),
     );
-    const joinButtonCount = buttonLabels.filter((label) => /\b(dolacz|join)\b/i.test(normalizeLabel(label))).length;
+    const joinButtonCount = buttonLabels.filter((label) => actionFromLabel(label) === 'join').length;
     return {
       finalUrl: window.location.href,
       title: document.title,
@@ -465,21 +521,55 @@ async function extractRawInviteCandidates(page: Page): Promise<RawInviteCandidat
         .replace(/[źŹżŻ]/g, 'z')
         .replace(/[\u0300-\u036f]/g, '')
         .toLowerCase();
+    const actionFromLabel = (value: string): 'join' | 'view' | null => {
+      const normalized = value
+        .normalize('NFKD')
+        .replace(/[\u0142\u0141]/g, 'l')
+        .replace(/[\u0105\u0104]/g, 'a')
+        .replace(/[\u0107\u0106]/g, 'c')
+        .replace(/[\u0119\u0118]/g, 'e')
+        .replace(/[\u0144\u0143]/g, 'n')
+        .replace(/[\u00f3\u00d3]/g, 'o')
+        .replace(/[\u015b\u015a]/g, 's')
+        .replace(/[\u017a\u0179\u017c\u017b]/g, 'z')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase();
+      if (normalized.includes('dolacz') || normalized.includes('join')) return 'join';
+      if (
+        normalized.includes('wyswietl') ||
+        normalized.includes('view') ||
+        normalized.includes('podglad') ||
+        normalized.includes('preview')
+      ) {
+        return 'view';
+      }
+      return null;
+    };
     const buttons = Array.from(document.querySelectorAll('button, [role="button"]'));
-    const joinButtons = buttons.filter((button) => {
-      const label = [
-        button.textContent ?? '',
-        button.getAttribute('aria-label') ?? '',
-        button.getAttribute('data-tooltip') ?? '',
-      ].join(' ');
-      return /\b(dolacz|join)\b/i.test(normalizeLabel(label));
-    });
+    const actionButtons = buttons
+      .map((button) => {
+        const label = [
+          button.textContent ?? '',
+          button.getAttribute('aria-label') ?? '',
+          button.getAttribute('data-tooltip') ?? '',
+        ].join(' ');
+        return {
+          action: actionFromLabel(label),
+          button,
+        };
+      })
+      .filter((entry): entry is { action: 'join' | 'view'; button: Element } => entry.action !== null);
 
-    return joinButtons.map((button, buttonIndex) => {
+    return actionButtons.map(({ action, button }, buttonIndex) => {
       let container: Element | null = button;
       for (let depth = 0; depth < 8 && container?.parentElement; depth += 1) {
         const parentText = container.parentElement.textContent?.trim() ?? '';
-        if (parentText.length > 80) {
+        const normalizedParentText = normalizeLabel(parentText);
+        if (
+          parentText.length > 80 ||
+          normalizedParentText.includes('zaproszenie') ||
+          normalizedParentText.includes('invite')
+        ) {
           container = container.parentElement;
           break;
         }
@@ -488,13 +578,14 @@ async function extractRawInviteCandidates(page: Page): Promise<RawInviteCandidat
 
       return {
         buttonIndex,
+        action,
         text: (container?.textContent ?? button.textContent ?? '').trim(),
       };
     });
   });
 }
 
-async function clickJoinButton(page: Page, inviteIndex: number): Promise<boolean> {
+async function clickInviteActionButton(page: Page, actionButtonIndex: number): Promise<ChatInviteAction | null> {
   return page.evaluate((targetIndex) => {
     const normalizeLabel = (value: string): string =>
       value
@@ -509,21 +600,90 @@ async function clickJoinButton(page: Page, inviteIndex: number): Promise<boolean
         .replace(/[\u017a\u0179\u017c\u017b]/g, 'z')
         .replace(/[\u0300-\u036f]/g, '')
         .toLowerCase();
+    const actionFromLabel = (value: string): 'join' | 'view' | null => {
+      const normalized = normalizeLabel(value);
+      if (normalized.includes('dolacz') || normalized.includes('join')) return 'join';
+      if (
+        normalized.includes('wyswietl') ||
+        normalized.includes('view') ||
+        normalized.includes('podglad') ||
+        normalized.includes('preview')
+      ) {
+        return 'view';
+      }
+      return null;
+    };
     const buttons = Array.from(document.querySelectorAll('button, [role="button"]'));
-    const joinButtons = buttons.filter((button) => {
-      const label = [
-        button.textContent ?? '',
-        button.getAttribute('aria-label') ?? '',
-        button.getAttribute('data-tooltip') ?? '',
-      ].join(' ');
-      return /\b(dolacz|join)\b/i.test(normalizeLabel(label));
+    const actionButtons = buttons
+      .map((button) => {
+        const label = [
+          button.textContent ?? '',
+          button.getAttribute('aria-label') ?? '',
+          button.getAttribute('data-tooltip') ?? '',
+        ].join(' ');
+        return {
+          action: actionFromLabel(label),
+          button,
+        };
+      })
+      .filter((entry): entry is { action: 'join' | 'view'; button: Element } => entry.action !== null);
+    const target = actionButtons[targetIndex];
+    if (!target) return null;
+    const targetButton = target.button;
+    if (!(targetButton instanceof HTMLElement)) return null;
+    targetButton.scrollIntoView({ block: 'center', inline: 'center' });
+    targetButton.click();
+    return target.action;
+  }, actionButtonIndex);
+}
+
+async function clickVisibleJoinButton(page: Page): Promise<boolean> {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const clicked = await page.evaluate(() => {
+      const normalizeLabel = (value: string): string =>
+        value
+          .normalize('NFKD')
+          .replace(/[\u0142\u0141]/g, 'l')
+          .replace(/[\u0105\u0104]/g, 'a')
+          .replace(/[\u0107\u0106]/g, 'c')
+          .replace(/[\u0119\u0118]/g, 'e')
+          .replace(/[\u0144\u0143]/g, 'n')
+          .replace(/[\u00f3\u00d3]/g, 'o')
+          .replace(/[\u015b\u015a]/g, 's')
+          .replace(/[\u017a\u0179\u017c\u017b]/g, 'z')
+          .replace(/[\u0300-\u036f]/g, '')
+          .toLowerCase();
+      const labelFromButton = (button: Element): string =>
+        [
+          button.textContent ?? '',
+          button.getAttribute('aria-label') ?? '',
+          button.getAttribute('data-tooltip') ?? '',
+        ].join(' ');
+      const isVisible = (button: Element): button is HTMLElement => {
+        if (!(button instanceof HTMLElement)) return false;
+        const style = window.getComputedStyle(button);
+        const rect = button.getBoundingClientRect();
+        return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0;
+      };
+      const joinButtons = Array.from(document.querySelectorAll('button, [role="button"]'))
+        .filter(isVisible)
+        .map((button) => ({
+          button,
+          label: normalizeLabel(labelFromButton(button)),
+          rect: button.getBoundingClientRect(),
+        }))
+        .filter((entry) => entry.label.includes('dolacz') || entry.label.includes('join'))
+        .sort((first, second) => second.rect.width * second.rect.height - first.rect.width * first.rect.height);
+      const target = joinButtons[0]?.button;
+      if (!(target instanceof HTMLElement)) return false;
+      target.scrollIntoView({ block: 'center', inline: 'center' });
+      target.click();
+      return true;
     });
-    const target = joinButtons[targetIndex];
-    if (!(target instanceof HTMLElement)) return false;
-    target.scrollIntoView({ block: 'center', inline: 'center' });
-    target.click();
-    return true;
-  }, inviteIndex);
+    if (clicked) return true;
+    await page.waitForTimeout(500);
+  }
+  return false;
 }
 
 export async function listChatInvites(input: {
@@ -582,10 +742,18 @@ export async function acceptChatInvite(input: {
     const invite = inviteIndex >= 0 ? invites[inviteIndex] : null;
     if (!invite) return { accepted: false, invite };
 
-    debug.steps.push(`Klikam Dolacz dla zaproszenia ${invite.key} na pozycji ${inviteIndex}`);
-    const clicked = await clickJoinButton(browser.page, inviteIndex);
-    if (!clicked) {
-      throw new Error(`Nie znaleziono przycisku Dolacz dla zaproszenia ${invite.key}`);
+    const candidate = rawCandidates[inviteIndex];
+    debug.steps.push(`Klikam akcje zaproszenia ${invite.key} na pozycji ${inviteIndex}`);
+    const action = await clickInviteActionButton(browser.page, candidate.buttonIndex);
+    if (!action) {
+      throw new Error(`Nie znaleziono przycisku Wyswietl/Dolacz dla zaproszenia ${invite.key}`);
+    }
+    if (action === 'view') {
+      debug.steps.push('Kliknieto Wyswietl, czekam na finalny przycisk Dolacz');
+      const joined = await clickVisibleJoinButton(browser.page);
+      if (!joined) {
+        throw new Error(`Nie znaleziono finalnego przycisku Dolacz dla zaproszenia ${invite.key}`);
+      }
     }
     await browser.page.waitForTimeout(2_000);
     return { accepted: true, invite };
