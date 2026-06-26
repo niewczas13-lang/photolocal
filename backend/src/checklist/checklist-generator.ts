@@ -12,6 +12,7 @@ import { safeFolderName, toAddressFolderName } from '../utils/path-names.js';
 
 export interface ChecklistAddress extends AddressInput {
   id: string;
+  hasAerialReserve?: boolean;
 }
 
 export interface GenerateChecklistInput {
@@ -93,6 +94,49 @@ function cableEntryMatchesAddress(
   );
 }
 
+function getTerminalPointCounts(
+  addresses: ChecklistAddress[],
+  passiveInfraNodes: MapInfraNodeInput[] = [],
+): Map<string, number> {
+  const distributionPoints = new Set<string>();
+  for (const address of addresses) {
+    distributionPoints.add(normalizeDistributionPointName(address.distributionPoint));
+  }
+  for (const node of passiveInfraNodes) {
+    if (node.nodeType === 'OPP' || node.nodeType === 'OSD') {
+      distributionPoints.add(normalizeDistributionPointName(node.name));
+    }
+  }
+
+  const terminalPointCounts = new Map<string, number>();
+  for (const dp of distributionPoints) {
+    const terminalKey = normalizeCableEntry(getDistributionPointTerminalName(dp));
+    if (!terminalKey) continue;
+    terminalPointCounts.set(terminalKey, (terminalPointCounts.get(terminalKey) ?? 0) + 1);
+  }
+  return terminalPointCounts;
+}
+
+function canUseTerminalDistributionPoint(dp: string, terminalPointCounts: Map<string, number>): boolean {
+  const terminalKey = normalizeCableEntry(getDistributionPointTerminalName(dp));
+  return terminalKey.length > 0 && (terminalPointCounts.get(terminalKey) ?? 0) === 1;
+}
+
+export function markAerialAddressReserves(
+  addresses: ChecklistAddress[],
+  adssToAddressCableEntries: string[],
+  passiveInfraNodes: MapInfraNodeInput[] = [],
+): ChecklistAddress[] {
+  const terminalPointCounts = getTerminalPointCounts(addresses, passiveInfraNodes);
+  return addresses.map((address) => {
+    const dp = normalizeDistributionPointName(address.distributionPoint);
+    const hasAerialReserve = adssToAddressCableEntries.some((entry) =>
+      cableEntryMatchesAddress(entry, address, canUseTerminalDistributionPoint(dp, terminalPointCounts)),
+    );
+    return { ...address, hasAerialReserve };
+  });
+}
+
 export function generateChecklistNodes(input: GenerateChecklistInput): GeneratedChecklistNode[] {
   const nodes: GeneratedChecklistNode[] = [];
   const pathToId = new Map<string, string>();
@@ -165,16 +209,7 @@ export function generateChecklistNodes(input: GenerateChecklistInput): Generated
     const dp = normalizeDistributionPointName(node.name);
     if (!dpGroups.has(dp)) dpGroups.set(dp, []);
   }
-  const terminalPointCounts = new Map<string, number>();
-  for (const dp of dpGroups.keys()) {
-    const terminalKey = normalizeCableEntry(getDistributionPointTerminalName(dp));
-    if (!terminalKey) continue;
-    terminalPointCounts.set(terminalKey, (terminalPointCounts.get(terminalKey) ?? 0) + 1);
-  }
-  const canUseTerminalDistributionPoint = (dp: string): boolean => {
-    const terminalKey = normalizeCableEntry(getDistributionPointTerminalName(dp));
-    return terminalKey.length > 0 && (terminalPointCounts.get(terminalKey) ?? 0) === 1;
-  };
+  const terminalPointCounts = getTerminalPointCounts(input.addresses, input.passiveInfraNodes);
 
   let dpSort = 100;
   for (const dp of dpGroups.keys()) {
@@ -213,7 +248,7 @@ export function generateChecklistNodes(input: GenerateChecklistInput): Generated
     const safeDp = safeFolderName(dp);
     let dpId: string | null = null;
     let addrSort = 0;
-    const allowTerminalDistributionPointMatch = canUseTerminalDistributionPoint(dp);
+    const allowTerminalDistributionPointMatch = canUseTerminalDistributionPoint(dp, terminalPointCounts);
     for (const address of addresses) {
       const isDac = input.dacToAddressCableEntries.some((entry) =>
         cableEntryMatchesAddress(entry, address, allowTerminalDistributionPointMatch),
@@ -242,7 +277,7 @@ export function generateChecklistNodes(input: GenerateChecklistInput): Generated
       const safeDp = safeFolderName(dp);
       let dpId: string | null = null;
       let addrSort = 0;
-      const allowTerminalDistributionPointMatch = canUseTerminalDistributionPoint(dp);
+      const allowTerminalDistributionPointMatch = canUseTerminalDistributionPoint(dp, terminalPointCounts);
       for (const address of addresses) {
         const isAdss = input.adssToAddressCableEntries.some((entry) =>
           cableEntryMatchesAddress(entry, address, allowTerminalDistributionPointMatch),

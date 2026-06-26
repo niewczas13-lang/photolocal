@@ -1100,6 +1100,195 @@ describe('ProjectsRepository', () => {
     });
   });
 
+  it('marks SI aerial addresses from address metadata without creating aerial photo folders', () => {
+    const { db, repository } = createRepository();
+
+    const project = repository.createProject({
+      name: 'MAPA SI ADSS',
+      projectDefinition: null,
+      projectType: 'SI',
+      splitterTopology: 'SINGLE',
+      splitterTopologySource: 'AUTO',
+      splitterCount: 1,
+      gpkgFileName: 'mapa.gpkg',
+      baseFolder: 'C:/photos/MAPA_SI_ADSS',
+      addresses: [
+        {
+          id: 'address-si-aerial-1',
+          city: 'Radom',
+          street: 'Ziolowa',
+          buildingNo: '1',
+          propertyId: 'pa-1',
+          parcelNumber: null,
+          distributionPoint: 'RADOM/OSD0001',
+          lat: 51.4,
+          lng: 21.1,
+          householdCount: 1,
+          businessUnitCount: 0,
+          hasAerialReserve: true,
+        },
+      ],
+      dacToAddressCableCount: 0,
+      adssToAddressCableCount: 1,
+      checklistNodes: [
+        {
+          id: 'node-si-osd-details',
+          projectId: 'project-temp',
+          parentId: null,
+          name: 'Szczegoly_skrzynki',
+          path: 'Szczegoly_skrzynki/RADOM_OSD0001',
+          nodeType: 'DISTRIBUTION',
+          addressId: null,
+          sortOrder: 0,
+          minPhotos: 1,
+          acceptsPhotos: true,
+        },
+      ],
+      polygons: [
+        {
+          osdName: 'RADOM/OSD0001',
+          label: 'RADOM/OSD0001',
+          geojson: { type: 'Polygon', coordinates: [] },
+          households: 1,
+          paCount: 1,
+          cableRef: 'ADSS-1',
+        },
+      ],
+      trunkCables: [],
+      infraNodes: [
+        {
+          nodeType: 'OSD',
+          name: 'RADOM/OSD0001',
+          label: 'RADOM/OSD0001',
+          lat: 51.5,
+          lng: 21.2,
+        },
+      ],
+    });
+
+    let map = repository.getProjectMap(project.id);
+    expect(map.addresses[0]).toMatchObject({
+      id: 'address-si-aerial-1',
+      isAerialReserve: true,
+      usesDistributionPhotoForCompletion: true,
+      hasReservePhoto: false,
+      reservePhotoCount: 0,
+      status: 'PENDING',
+    });
+    expect(
+      db
+        .prepare(
+          `SELECT COUNT(*) AS count
+           FROM checklist_nodes
+           WHERE project_id = ?
+             AND path LIKE 'Zapasy_kabli_napowietrznych/%'`,
+        )
+        .get(project.id),
+    ).toMatchObject({ count: 0 });
+
+    repository.addPhoto({
+      id: 'photo-si-osd',
+      projectId: project.id,
+      checklistNodeId: 'node-si-osd-details',
+      sourceFileName: 'osd.jpeg',
+      storedFileName: 'osd.jpeg',
+      storagePath: 'C:/photos/MAPA_SI_ADSS/osd.jpeg',
+      thumbnailPath: null,
+      mimeType: 'image/jpeg',
+      fileSize: 123,
+      lat: null,
+      lng: null,
+      capturedAt: null,
+      reserveLocation: null,
+    });
+
+    map = repository.getProjectMap(project.id);
+    db.close();
+
+    expect(map.addresses[0]).toMatchObject({
+      isAerialReserve: true,
+      hasDistributionPhoto: true,
+      hasReservePhoto: true,
+      reservePhotoCount: 0,
+      status: 'COMPLETE',
+    });
+    expect(map.polygons[0]).toMatchObject({
+      addressWithReservePhoto: 1,
+    });
+  });
+
+  it('updates SI aerial address metadata during recalculation', () => {
+    const { db, repository } = createRepository();
+
+    const project = repository.createProject({
+      name: 'MAPA SI RECALC ADSS',
+      projectDefinition: null,
+      projectType: 'SI',
+      splitterTopology: 'SINGLE',
+      splitterTopologySource: 'AUTO',
+      splitterCount: 1,
+      gpkgFileName: 'mapa-old.gpkg',
+      baseFolder: 'C:/photos/MAPA_SI_RECALC_ADSS',
+      addresses: [
+        {
+          id: 'address-si-recalc-1',
+          city: 'Radom',
+          street: 'Ziolowa',
+          buildingNo: '1',
+          propertyId: 'pa-1',
+          parcelNumber: null,
+          distributionPoint: 'RADOM/OSD0001',
+          lat: 51.4,
+          lng: 21.1,
+          householdCount: 1,
+          businessUnitCount: 0,
+        },
+      ],
+      dacToAddressCableCount: 0,
+      adssToAddressCableCount: 0,
+      checklistNodes: [],
+    });
+
+    repository.recalculateChecklist({
+      projectId: project.id,
+      projectDefinition: null,
+      projectType: 'SI',
+      splitterTopology: 'SINGLE',
+      splitterTopologySource: 'AUTO',
+      splitterCount: 1,
+      gpkgFileName: 'mapa-new.gpkg',
+      addresses: [
+        {
+          id: 'address-si-recalc-new',
+          city: 'Radom',
+          street: 'Ziolowa',
+          buildingNo: '1',
+          propertyId: 'pa-1',
+          parcelNumber: null,
+          distributionPoint: 'RADOM/OSD0001',
+          lat: 51.4,
+          lng: 21.1,
+          householdCount: 1,
+          businessUnitCount: 0,
+          hasAerialReserve: true,
+        },
+      ],
+      dacToAddressCableCount: 0,
+      adssToAddressCableCount: 1,
+      checklistNodes: [],
+    });
+
+    const map = repository.getProjectMap(project.id);
+    db.close();
+
+    expect(map.addresses[0]).toMatchObject({
+      id: 'address-si-recalc-1',
+      isAerialReserve: true,
+      usesDistributionPhotoForCompletion: true,
+      status: 'PENDING',
+    });
+  });
+
   it('stores clicked address candidates without creating checklist folders', () => {
     const { db, repository } = createRepository();
 

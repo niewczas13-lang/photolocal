@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { generateChecklistNodes } from './checklist-generator.js';
+import { generateChecklistNodes, markAerialAddressReserves } from './checklist-generator.js';
 
 const baseAddress = {
   id: 'addr-1',
@@ -93,6 +93,22 @@ describe('generateChecklistNodes', () => {
 
     expect(nodes.some((node) => node.path === 'Zapasy_kabli_instalacyjnych')).toBe(true);
     expect(nodes.some((node) => node.path === 'Zapasy_kabli_instalacyjnych/OSD2640/WRONCKIEJ_13')).toBe(true);
+    expect(nodes.some((node) => node.path.startsWith('Zapasy_kabli_napowietrznych'))).toBe(false);
+  });
+
+  it('marks SI addresses served by ADSS without creating aerial reserve folders', () => {
+    const addresses = markAerialAddressReserves([baseAddress], ['WRONCKIEJ 13']);
+    const nodes = generateChecklistNodes({
+      projectId: 'project-1',
+      projectName: 'Projekt',
+      projectType: 'SI',
+      splitterTopology: 'SINGLE',
+      addresses,
+      dacToAddressCableEntries: [],
+      adssToAddressCableEntries: ['WRONCKIEJ 13'],
+    });
+
+    expect(addresses[0]).toMatchObject({ hasAerialReserve: true });
     expect(nodes.some((node) => node.path.startsWith('Zapasy_kabli_napowietrznych'))).toBe(false);
   });
 

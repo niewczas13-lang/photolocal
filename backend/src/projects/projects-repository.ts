@@ -722,8 +722,8 @@ export class ProjectsRepository {
       const insertAddress = this.db.prepare(
         `INSERT INTO addresses (
           id, project_id, city, street, building_no, property_id, parcel_number,
-          distribution_point, lat, lng, household_count, business_unit_count
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          distribution_point, lat, lng, household_count, business_unit_count, has_aerial_reserve
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       );
 
       for (const address of input.addresses) {
@@ -740,6 +740,7 @@ export class ProjectsRepository {
           address.lng,
           address.householdCount,
           address.businessUnitCount,
+          address.hasAerialReserve ? 1 : 0,
         );
       }
 
@@ -1167,6 +1168,7 @@ export class ProjectsRepository {
                  distribution_point = ?,
                  lat = ?,
                  lng = ?,
+                 has_aerial_reserve = ?,
                  source = ?,
                  opl_consent_confirmed = ?
              WHERE project_id = ? AND id = ?`,
@@ -1180,6 +1182,7 @@ export class ProjectsRepository {
             distributionPoint,
             candidate.lat,
             candidate.lng,
+            input.reserveLocation === 'Napowietrzny' ? 1 : 0,
             addressSource,
             addressSource === 'GPKG' ? existingAddress.oplConsentConfirmed : oplConsentConfirmed,
             input.projectId,
@@ -1190,8 +1193,8 @@ export class ProjectsRepository {
           .prepare(
             `INSERT INTO addresses (
               id, project_id, city, street, building_no, property_id, parcel_number,
-              distribution_point, lat, lng, household_count, business_unit_count, source, opl_consent_confirmed
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, 'MANUAL_MAP', ?)`,
+              distribution_point, lat, lng, household_count, business_unit_count, has_aerial_reserve, source, opl_consent_confirmed
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, 'MANUAL_MAP', ?)`,
           )
           .run(
             addressId,
@@ -1204,6 +1207,7 @@ export class ProjectsRepository {
             distributionPoint,
             candidate.lat,
             candidate.lng,
+            input.reserveLocation === 'Napowietrzny' ? 1 : 0,
             oplConsentConfirmed,
           );
       }
@@ -1325,6 +1329,7 @@ export class ProjectsRepository {
           address.lng,
           address.source,
           address.opl_consent_confirmed AS oplConsentConfirmed,
+          address.has_aerial_reserve AS hasAerialReserve,
           COUNT(photo.id) AS reservePhotoCount,
           COUNT(DISTINCT CASE
             WHEN node.path LIKE 'Zapasy_kabli_napowietrznych/%' THEN node.id
@@ -1353,6 +1358,7 @@ export class ProjectsRepository {
       lng: number;
       source: 'GPKG' | 'MANUAL_MAP';
       oplConsentConfirmed: number;
+      hasAerialReserve: number;
       reservePhotoCount: number;
       aerialReserveNodeCount: number;
       notApplicableReserveNodeCount: number;
@@ -1434,7 +1440,7 @@ export class ProjectsRepository {
 
     const addresses = addressRows.map((address) => {
       const reservePhotoCount = Number(address.reservePhotoCount);
-      const isAerialReserve = Number(address.aerialReserveNodeCount) > 0;
+      const isAerialReserve = Number(address.hasAerialReserve) === 1 || Number(address.aerialReserveNodeCount) > 0;
       const usesDistributionPhotoForCompletion = projectType === 'SI' && isAerialReserve;
       const hasDistributionPointPhoto = isAerialReserve && hasDistributionPhoto(address.distributionPoint);
       const hasEffectiveReservePhoto =
@@ -1923,8 +1929,8 @@ export class ProjectsRepository {
       const insertAddress = this.db.prepare(
         `INSERT INTO addresses (
           id, project_id, city, street, building_no, property_id, parcel_number,
-          distribution_point, lat, lng, household_count, business_unit_count
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          distribution_point, lat, lng, household_count, business_unit_count, has_aerial_reserve
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       );
       const updateAddress = this.db.prepare(
         `UPDATE addresses
@@ -1938,6 +1944,7 @@ export class ProjectsRepository {
            lng = ?,
            household_count = ?,
            business_unit_count = ?,
+           has_aerial_reserve = ?,
            source = 'GPKG'
          WHERE id = ?
            AND project_id = ?`,
@@ -1958,6 +1965,7 @@ export class ProjectsRepository {
             address.lng,
             address.householdCount,
             address.businessUnitCount,
+            address.hasAerialReserve ? 1 : 0,
             existingId,
             input.projectId,
           );
@@ -1979,6 +1987,7 @@ export class ProjectsRepository {
           address.lng,
           address.householdCount,
           address.businessUnitCount,
+          address.hasAerialReserve ? 1 : 0,
         );
         addressKeyToId.set(key, address.id);
         generatedAddressIdToActualId.set(address.id, address.id);

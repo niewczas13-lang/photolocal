@@ -64,6 +64,14 @@ export function runMigrations(db: Database.Database): void {
   }
 
   try {
+    db.exec(
+      'ALTER TABLE addresses ADD COLUMN has_aerial_reserve INTEGER NOT NULL DEFAULT 0 CHECK (has_aerial_reserve IN (0, 1));',
+    );
+  } catch (e) {
+    // Ignore error if column already exists
+  }
+
+  try {
     db.exec("ALTER TABLE chat_photo_batches ADD COLUMN source_messages TEXT NOT NULL DEFAULT '[]';");
   } catch (e) {
     // Ignore error if column already exists

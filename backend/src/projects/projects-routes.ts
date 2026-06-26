@@ -41,7 +41,7 @@ import {
   listGoogleChatSpaces,
   startGoogleChatDownload,
 } from '../google-chat/google-chat-downloader.js';
-import { generateChecklistNodes } from '../checklist/checklist-generator.js';
+import { generateChecklistNodes, markAerialAddressReserves } from '../checklist/checklist-generator.js';
 import type { ChecklistAddress, GeneratedChecklistNode } from '../checklist/checklist-generator.js';
 import { loadConfig } from '../config.js';
 import type {
@@ -126,10 +126,14 @@ function prepareChecklistFromGpkg(input: {
     input.manualTopology && input.manualTopology !== 'AUTO'
       ? input.manualTopology
       : extracted.suggestedSplitterTopology;
-  const addresses = extracted.addresses.map((addr) => ({
-    ...addr,
-    id: randomUUID(),
-  }));
+  const addresses = markAerialAddressReserves(
+    extracted.addresses.map((addr) => ({
+      ...addr,
+      id: randomUUID(),
+    })),
+    extracted.adssToAddressCableEntries,
+    extracted.passiveInfraNodes,
+  );
 
   return {
     projectDefinition: extracted.suggestedProjectDefinition ?? null,
