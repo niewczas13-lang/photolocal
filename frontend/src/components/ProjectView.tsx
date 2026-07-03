@@ -444,6 +444,11 @@ export default function ProjectView({
       await refreshChecklist(result.targetNodeId);
       await refreshNodeDetail(result.targetNodeId);
       onTabChange('photos', result.targetNodeId);
+      if (result.missingFiles > 0) {
+        alert(
+          `Typ folderu zostal zmieniony, ale ${result.missingFiles} plikow zdjec nie bylo juz na dysku. Rekordy w bazie zostaly przeniesione logicznie.`,
+        );
+      }
     } catch (err) {
       console.error(err);
       alert(`Blad podczas zmiany typu folderu zapasu:\n${getErrorMessage(err)}`);

@@ -241,6 +241,17 @@ async function removeFileIfExists(path: string | null): Promise<void> {
   }
 }
 
+async function moveFileIfExists(sourcePath: string, targetPath: string): Promise<boolean> {
+  await mkdir(dirname(targetPath), { recursive: true });
+  try {
+    await rename(sourcePath, targetPath);
+    return true;
+  } catch (error) {
+    if (isMissingFileError(error)) return false;
+    throw error;
+  }
+}
+
 export interface RegisterProjectRoutesOptions {
   addressGeocoder?: AddressGeocoder;
 }
@@ -1177,6 +1188,7 @@ export async function registerProjectRoutes(
     const photos = repository.getNodePhotos(projectId, nodeId);
     let existingCount = repository.countPhotosForNode(targetNode.id, reserveLocation);
     let moved = 0;
+    let missingFiles = 0;
 
     for (const photo of photos) {
       const sameLogicalFolder = targetNode.id === sourceNode.id;
@@ -1192,8 +1204,8 @@ export async function registerProjectRoutes(
         sourceFileName: photo.sourceFileName,
       });
 
-      await mkdir(dirname(target.absolutePath), { recursive: true });
-      await rename(photo.storagePath, target.absolutePath);
+      const fileMoved = await moveFileIfExists(photo.storagePath, target.absolutePath);
+      if (!fileMoved) missingFiles += 1;
 
       if (sameLogicalFolder) {
         repository.updatePhotoRecord(photo.id, {
@@ -1227,6 +1239,7 @@ export async function registerProjectRoutes(
       reserveLocation,
       sourceNodeId: sourceNode.id,
       targetNodeId: targetNode.id,
+      missingFiles,
     };
   });
 

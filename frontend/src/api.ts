@@ -377,6 +377,7 @@ export const api = {
   changeReserveFolderLocation: (projectId: string, nodeId: string, reserveLocation: ReserveLocation) =>
     request<{
       moved: number;
+      missingFiles: number;
       reserveLocation: ReserveLocation;
       sourceNodeId: string;
       targetNodeId: string;
