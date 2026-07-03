@@ -12,6 +12,15 @@ export interface AuthSession {
   user: AuthUser;
 }
 
+export interface AppUserPasswordInfo {
+  id: string;
+  username: string;
+  createdAt: string;
+  hashType: string;
+  defaultPasswordWorks: boolean;
+  displayedPassword: string | null;
+}
+
 const DEFAULT_USERS = ['aniela', 'pawel', 'jarek', 'piotr', 'karol'];
 const SESSION_DURATION_MS = 30 * 24 * 60 * 60 * 1000;
 const SESSION_COOKIE_NAME = 'photo_local_session';
@@ -142,6 +151,33 @@ export function upsertAppUser(
   ).run(id, normalizedUsername, hashPassword(password));
 
   return { id, username: normalizedUsername };
+}
+
+export function listAppUsers(db: Database.Database): AppUserPasswordInfo[] {
+  const rows = db
+    .prepare(
+      `SELECT
+        id,
+        username,
+        password_hash AS passwordHash,
+        created_at AS createdAt
+       FROM app_users
+       ORDER BY username COLLATE NOCASE ASC`,
+    )
+    .all() as Array<{ id: string; username: string; passwordHash: string; createdAt: string }>;
+
+  return rows.map((row) => {
+    const defaultPasswordWorks = verifyPassword(row.username, row.passwordHash);
+    const [hashType] = row.passwordHash.split(':');
+    return {
+      id: row.id,
+      username: row.username,
+      createdAt: row.createdAt,
+      hashType: hashType || 'unknown',
+      defaultPasswordWorks,
+      displayedPassword: defaultPasswordWorks ? row.username : null,
+    };
+  });
 }
 
 export function authenticateUser(

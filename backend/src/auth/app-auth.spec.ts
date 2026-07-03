@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { authenticateUser, upsertAppUser } from './app-auth.js';
+import { authenticateUser, listAppUsers, upsertAppUser } from './app-auth.js';
 import { buildApp } from '../app.js';
 import { ProjectsRepository } from '../projects/projects-repository.js';
 
@@ -87,6 +87,35 @@ describe('app auth', () => {
     expect(created.username).toBe('karol');
     expect(badPassword).toBeNull();
     expect(goodPassword).toMatchObject({ username: 'karol' });
+  });
+
+  it('lists users and marks whether the password is still the default login password', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'photo-local-auth-list-'));
+    process.env.PHOTO_LOCAL_AUTH = 'enabled';
+    process.env.PHOTO_LOCAL_DB = join(dir, 'test.sqlite');
+    process.env.PHOTO_BASE_DIR = join(dir, 'photos');
+
+    const { app, db } = await buildApp();
+    upsertAppUser(db, 'Karol', 'inne-haslo');
+
+    const users = listAppUsers(db);
+
+    await app.close();
+
+    expect(users).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          username: 'aniela',
+          defaultPasswordWorks: true,
+          displayedPassword: 'aniela',
+        }),
+        expect.objectContaining({
+          username: 'karol',
+          defaultPasswordWorks: false,
+          displayedPassword: null,
+        }),
+      ]),
+    );
   });
 
   it('allows browser image requests to use the login session cookie', async () => {
