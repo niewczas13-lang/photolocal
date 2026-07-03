@@ -28,6 +28,7 @@ import type {
 } from '../types.js';
 import type { GeneratedChecklistNode, ChecklistAddress } from '../checklist/checklist-generator.js';
 import { listKnownProjectPhotoHashes } from '../photos/photo-hash-cache.js';
+import type { ReserveLocation } from '../photos/photo-processor.js';
 import { safeFolderName, toAddressFolderName } from '../utils/path-names.js';
 
 const STALE_GPKG_NODE_REASON = 'Nie wystepuje w ostatnio przeliczonym GPKG';
@@ -124,6 +125,15 @@ export interface ChecklistPhotoRecord {
   capturedAt: string | null;
   uploadedAt: string;
   reserveLocation: string | null;
+}
+
+export interface ReserveNodeAddressRecord {
+  id: string;
+  city: string;
+  street: string;
+  buildingNo: string | null;
+  distributionPoint: string;
+  hasAerialReserve: boolean;
 }
 
 export interface MovePhotoRecordInput {
@@ -1043,8 +1053,8 @@ export class ProjectsRepository {
     addressId: string;
     street: string;
     buildingNo: string | null;
-    reserveLocation: ReserveLocationKind;
-  }): void {
+    reserveLocation: ReserveLocation;
+  }): string {
     const rootPath =
       input.reserveLocation === 'Napowietrzny' ? 'Zapasy_kabli_napowietrznych' : 'Zapasy_kabli_instalacyjnych';
     const rootSort = input.reserveLocation === 'Napowietrzny' ? 8 : 7;
@@ -1075,7 +1085,7 @@ export class ProjectsRepository {
     });
 
     const addressName = toAddressFolderName(input.street, input.buildingNo);
-    this.upsertManualChecklistNode({
+    return this.upsertManualChecklistNode({
       projectId: input.projectId,
       parentId: distributionId,
       name: addressName,
@@ -1086,6 +1096,108 @@ export class ProjectsRepository {
       minPhotos: 1,
       acceptsPhotos: true,
     });
+  }
+
+  getAddressForReserveNode(projectId: string, nodeId: string): ReserveNodeAddressRecord | null {
+    const row = this.db
+      .prepare(
+        `SELECT
+          address.id,
+          address.city,
+          address.street,
+          address.building_no AS buildingNo,
+          COALESCE(NULLIF(address.distribution_point, ''), parent.name, '') AS distributionPoint,
+          address.has_aerial_reserve AS hasAerialReserve
+        FROM checklist_nodes node
+        JOIN addresses address ON address.id = node.address_id AND address.project_id = node.project_id
+        LEFT JOIN checklist_nodes parent ON parent.id = node.parent_id AND parent.project_id = node.project_id
+        WHERE node.project_id = ?
+          AND node.id = ?
+          AND node.node_type = 'CABLE_RESERVE'`,
+      )
+      .get(projectId, nodeId) as
+      | {
+          id: string;
+          city: string;
+          street: string;
+          buildingNo: string | null;
+          distributionPoint: string;
+          hasAerialReserve: number;
+        }
+      | undefined;
+
+    if (!row) return null;
+    return {
+      ...row,
+      distributionPoint: row.distributionPoint || 'BEZ_PUNKTU',
+      hasAerialReserve: Number(row.hasAerialReserve) === 1,
+    };
+  }
+
+  ensureReserveChecklistNodeForAddress(
+    projectId: string,
+    address: ReserveNodeAddressRecord,
+    reserveLocation: ReserveLocation,
+  ): string {
+    return this.ensureReserveChecklistPath({
+      projectId,
+      distributionPoint: address.distributionPoint,
+      addressId: address.id,
+      street: address.street,
+      buildingNo: address.buildingNo,
+      reserveLocation,
+    });
+  }
+
+  updateAddressReserveLocation(projectId: string, addressId: string, reserveLocation: ReserveLocation): void {
+    const result = this.db
+      .prepare(
+        `UPDATE addresses
+         SET has_aerial_reserve = ?
+         WHERE project_id = ? AND id = ?`,
+      )
+      .run(reserveLocation === 'Napowietrzny' ? 1 : 0, projectId, addressId);
+
+    if (result.changes === 0) throw new Error('Address not found');
+    this.db.prepare(`UPDATE projects SET updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(projectId);
+  }
+
+  deleteEmptyChecklistNode(projectId: string, nodeId: string): boolean {
+    const result = this.db
+      .prepare(
+        `DELETE FROM checklist_nodes
+         WHERE project_id = ?
+           AND id = ?
+           AND node_type = 'CABLE_RESERVE'
+           AND status != 'NOT_APPLICABLE'
+           AND NOT EXISTS (
+             SELECT 1 FROM photos WHERE photos.checklist_node_id = checklist_nodes.id
+           )
+           AND NOT EXISTS (
+             SELECT 1 FROM checklist_nodes child WHERE child.parent_id = checklist_nodes.id
+           )`,
+      )
+      .run(projectId, nodeId);
+    return result.changes > 0;
+  }
+
+  deleteEmptyReserveNodesForAddress(projectId: string, addressId: string, keepNodeId: string): number {
+    const rows = this.db
+      .prepare(
+        `SELECT id
+         FROM checklist_nodes
+         WHERE project_id = ?
+           AND address_id = ?
+           AND node_type = 'CABLE_RESERVE'
+           AND id != ?`,
+      )
+      .all(projectId, addressId, keepNodeId) as Array<{ id: string }>;
+
+    let deleted = 0;
+    for (const row of rows) {
+      if (this.deleteEmptyChecklistNode(projectId, row.id)) deleted += 1;
+    }
+    return deleted;
   }
 
   approveMapAddressCandidate(input: ApproveMapAddressCandidateInput): ProjectMapAddressCandidate {

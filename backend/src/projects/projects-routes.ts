@@ -30,6 +30,7 @@ import { ChatBatchesRepository, type ChatBatchStatus } from '../chat-import/chat
 import { importChatFolders } from '../chat-import/chat-importer.js';
 import { getOllamaDiagnostics } from '../chat-import/ollama-diagnostics.js';
 import { extractGpkg } from '../gpkg/gpkg-extractor.js';
+import { buildAddressConstructionReport } from '../reports/address-construction-report.js';
 import {
   createAdresyAppGeocoder,
   createFallbackAddressGeocoder,
@@ -591,6 +592,18 @@ export async function registerProjectRoutes(
     return repository.getProjectMap(projectId);
   });
 
+  app.get('/api/projects/:projectId/reports/address-construction.xlsx', async (request, reply) => {
+    const { projectId } = request.params as { projectId: string };
+    const project = repository.getProject(projectId);
+    if (!project) return reply.status(404).send({ error: 'Project not found' });
+
+    const report = buildAddressConstructionReport(project, repository.getProjectMap(projectId));
+    const fileName = `${safeFolderName(project.name)}_raport_adresow.xlsx`;
+    reply.header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    reply.header('Content-Disposition', `attachment; filename="${fileName}"`);
+    return reply.send(report);
+  });
+
   app.patch('/api/projects/:projectId/map/cables/:cableId/status', async (request, reply) => {
     const { projectId, cableId } = request.params as { projectId: string; cableId: string };
     const body = request.body as { status?: unknown };
@@ -1138,6 +1151,82 @@ export async function registerProjectRoutes(
       storedFileName: target.fileName,
       storagePath: target.absolutePath,
       thumbnailPath,
+    };
+  });
+
+  app.post('/api/projects/:projectId/checklist/:nodeId/reserve-location', async (request, reply) => {
+    const { projectId, nodeId } = request.params as { projectId: string; nodeId: string };
+    const body = request.body as { reserveLocation?: unknown };
+    const project = repository.getProject(projectId);
+    const sourceNode = repository.getChecklistNode(projectId, nodeId);
+    const reserveLocation = isReserveLocation(body.reserveLocation) ? body.reserveLocation : null;
+
+    if (!project || !sourceNode) return reply.status(404).send({ error: 'Project or checklist node not found' });
+    if (sourceNode.nodeType !== 'CABLE_RESERVE' || !isReserveChecklistPath(sourceNode.path)) {
+      return reply.status(400).send({ error: 'Only cable reserve folders can change reserve location' });
+    }
+    if (!reserveLocation) return reply.status(400).send({ error: 'reserveLocation is required' });
+
+    const address = repository.getAddressForReserveNode(projectId, nodeId);
+    if (!address) return reply.status(400).send({ error: 'Reserve folder is not connected to an address' });
+
+    const targetNodeId = repository.ensureReserveChecklistNodeForAddress(projectId, address, reserveLocation);
+    const targetNode = repository.getChecklistNode(projectId, targetNodeId);
+    if (!targetNode) return reply.status(500).send({ error: 'Target reserve folder was not created' });
+
+    const photos = repository.getNodePhotos(projectId, nodeId);
+    let existingCount = repository.countPhotosForNode(targetNode.id, reserveLocation);
+    let moved = 0;
+
+    for (const photo of photos) {
+      const sameLogicalFolder = targetNode.id === sourceNode.id;
+      const alreadyInTargetLocation = sameLogicalFolder && photo.reserveLocation === reserveLocation;
+      if (alreadyInTargetLocation) continue;
+
+      const target = resolvePhotoTarget({
+        projectFolder: project.baseFolder,
+        nodePath: targetNode.path,
+        nodeName: targetNode.name,
+        existingCount,
+        reserveLocation,
+        sourceFileName: photo.sourceFileName,
+      });
+
+      await mkdir(dirname(target.absolutePath), { recursive: true });
+      await rename(photo.storagePath, target.absolutePath);
+
+      if (sameLogicalFolder) {
+        repository.updatePhotoRecord(photo.id, {
+          storedFileName: target.fileName,
+          storagePath: target.absolutePath,
+          thumbnailPath: photo.thumbnailPath,
+          reserveLocation,
+        });
+      } else {
+        repository.movePhotoRecord({
+          projectId,
+          photoId: photo.id,
+          sourceNodeId: sourceNode.id,
+          targetNodeId: targetNode.id,
+          storedFileName: target.fileName,
+          storagePath: target.absolutePath,
+          thumbnailPath: photo.thumbnailPath,
+          reserveLocation,
+        });
+      }
+
+      existingCount += 1;
+      moved += 1;
+    }
+
+    repository.updateAddressReserveLocation(projectId, address.id, reserveLocation);
+    repository.deleteEmptyReserveNodesForAddress(projectId, address.id, targetNode.id);
+
+    return {
+      moved,
+      reserveLocation,
+      sourceNodeId: sourceNode.id,
+      targetNodeId: targetNode.id,
     };
   });
 

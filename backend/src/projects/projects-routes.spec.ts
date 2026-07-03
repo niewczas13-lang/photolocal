@@ -571,6 +571,286 @@ describe('projects routes', () => {
     expect(existsSync(nodeDetail.json().photos[0].storagePath)).toBe(true);
   });
 
+  it('changes the reserve location for an entire address reserve folder', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'photo-local-change-reserve-folder-'));
+    process.env.PHOTO_LOCAL_DB = join(dir, 'test.sqlite');
+    process.env.PHOTO_BASE_DIR = join(dir, 'photos');
+
+    const { app, db } = await buildApp();
+    const repository = new ProjectsRepository(db);
+    const project = repository.createProject({
+      name: 'PROJEKT',
+      projectDefinition: null,
+      projectType: 'SI',
+      splitterTopology: 'SINGLE',
+      splitterTopologySource: 'AUTO',
+      splitterCount: 1,
+      gpkgFileName: 'projekt.gpkg',
+      baseFolder: join(dir, 'photos', 'PROJEKT'),
+      addresses: [
+        {
+          id: 'address-1',
+          city: 'Bartag',
+          street: 'Ziolowa',
+          buildingNo: '1',
+          propertyId: null,
+          parcelNumber: null,
+          distributionPoint: 'BARTAG/OPP0049',
+          lat: 53.7,
+          lng: 20.5,
+          householdCount: 1,
+          businessUnitCount: 0,
+          hasAerialReserve: false,
+        },
+      ],
+      dacToAddressCableCount: 1,
+      adssToAddressCableCount: 0,
+      checklistNodes: [
+        {
+          id: 'reserve-root',
+          projectId: 'project-temp',
+          parentId: null,
+          name: 'Zapasy_kabli_instalacyjnych',
+          path: 'Zapasy_kabli_instalacyjnych',
+          nodeType: 'STATIC',
+          addressId: null,
+          sortOrder: 7,
+          minPhotos: 0,
+          acceptsPhotos: false,
+        },
+        {
+          id: 'reserve-dp',
+          projectId: 'project-temp',
+          parentId: 'reserve-root',
+          name: 'BARTAG/OPP0049',
+          path: 'Zapasy_kabli_instalacyjnych/BARTAG_OPP0049',
+          nodeType: 'DISTRIBUTION',
+          addressId: null,
+          sortOrder: 0,
+          minPhotos: 0,
+          acceptsPhotos: false,
+        },
+        {
+          id: 'reserve-address',
+          projectId: 'project-temp',
+          parentId: 'reserve-dp',
+          name: 'ZIOLowa_1',
+          path: 'Zapasy_kabli_instalacyjnych/BARTAG_OPP0049/ZIOLowa_1',
+          nodeType: 'CABLE_RESERVE',
+          addressId: 'address-1',
+          sortOrder: 0,
+          minPhotos: 1,
+          acceptsPhotos: true,
+        },
+      ],
+    });
+
+    const boundary = '----photo-local-change-reserve-test';
+    const png = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=',
+      'base64',
+    );
+    const uploadPayload = Buffer.concat([
+      Buffer.from(
+        `--${boundary}\r\nContent-Disposition: form-data; name="reserveLocation"\r\n\r\nDoziemny\r\n`,
+      ),
+      Buffer.from(
+        `--${boundary}\r\nContent-Disposition: form-data; name="photo"; filename="photo.png"\r\nContent-Type: image/png\r\n\r\n`,
+      ),
+      png,
+      Buffer.from(`\r\n--${boundary}--\r\n`),
+    ]);
+
+    const uploadResponse = await app.inject({
+      method: 'POST',
+      url: `/api/projects/${project.id}/checklist/reserve-address/photos`,
+      headers: { 'content-type': `multipart/form-data; boundary=${boundary}` },
+      payload: uploadPayload,
+    });
+    const originalPath = uploadResponse.json().storagePath as string;
+
+    const changeResponse = await app.inject({
+      method: 'POST',
+      url: `/api/projects/${project.id}/checklist/reserve-address/reserve-location`,
+      headers: { 'content-type': 'application/json' },
+      payload: JSON.stringify({ reserveLocation: 'Napowietrzny' }),
+    });
+    const targetNodeId = changeResponse.json().targetNodeId as string;
+    const targetDetail = await app.inject({
+      method: 'GET',
+      url: `/api/projects/${project.id}/checklist/${targetNodeId}`,
+    });
+    const oldDetail = await app.inject({
+      method: 'GET',
+      url: `/api/projects/${project.id}/checklist/reserve-address`,
+    });
+    const mapResponse = await app.inject({
+      method: 'GET',
+      url: `/api/projects/${project.id}/map`,
+    });
+    await app.close();
+
+    expect(uploadResponse.statusCode).toBe(200);
+    expect(changeResponse.statusCode).toBe(200);
+    expect(changeResponse.json()).toMatchObject({ moved: 1, reserveLocation: 'Napowietrzny' });
+    expect(oldDetail.statusCode).toBe(404);
+    expect(existsSync(originalPath)).toBe(false);
+    expect(targetDetail.json().photos).toHaveLength(1);
+    expect(targetDetail.json().photos[0]).toMatchObject({ reserveLocation: 'Napowietrzny' });
+    expect(targetDetail.json().photos[0].storagePath).toContain('Zapasy_napowietrzne');
+    expect(existsSync(targetDetail.json().photos[0].storagePath)).toBe(true);
+    expect(mapResponse.json().addresses[0]).toMatchObject({
+      id: 'address-1',
+      isAerialReserve: true,
+      hasReservePhoto: true,
+    });
+  });
+
+  it('exports an address construction report as an XLSX workbook', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'photo-local-address-report-'));
+    process.env.PHOTO_LOCAL_DB = join(dir, 'test.sqlite');
+    process.env.PHOTO_BASE_DIR = join(dir, 'photos');
+
+    const { app, db } = await buildApp();
+    const repository = new ProjectsRepository(db);
+    const project = repository.createProject({
+      name: 'BARTAG',
+      projectDefinition: null,
+      projectType: 'SI',
+      splitterTopology: 'SINGLE',
+      splitterTopologySource: 'AUTO',
+      splitterCount: 1,
+      gpkgFileName: 'bartag.gpkg',
+      baseFolder: join(dir, 'photos', 'BARTAG'),
+      addresses: [
+        {
+          id: 'address-underground',
+          city: 'Bartag',
+          street: 'Ziolowa',
+          buildingNo: '1',
+          propertyId: null,
+          parcelNumber: null,
+          distributionPoint: 'BARTAG/OPP0049',
+          lat: 53.7,
+          lng: 20.5,
+          householdCount: 1,
+          businessUnitCount: 0,
+          hasAerialReserve: false,
+        },
+        {
+          id: 'address-aerial',
+          city: 'Bartag',
+          street: 'Lesna',
+          buildingNo: '2',
+          propertyId: null,
+          parcelNumber: null,
+          distributionPoint: 'BARTAG/OSD0024',
+          lat: 53.71,
+          lng: 20.51,
+          householdCount: 1,
+          businessUnitCount: 0,
+          hasAerialReserve: true,
+        },
+      ],
+      dacToAddressCableCount: 1,
+      adssToAddressCableCount: 1,
+      checklistNodes: [
+        {
+          id: 'reserve-address',
+          projectId: 'project-temp',
+          parentId: null,
+          name: 'ZIOLowa_1',
+          path: 'Zapasy_kabli_instalacyjnych/BARTAG_OPP0049/ZIOLowa_1',
+          nodeType: 'CABLE_RESERVE',
+          addressId: 'address-underground',
+          sortOrder: 0,
+          minPhotos: 1,
+          acceptsPhotos: true,
+        },
+        {
+          id: 'osd-photo',
+          projectId: 'project-temp',
+          parentId: null,
+          name: 'BARTAG/OSD0024',
+          path: 'OSD/BARTAG_OSD0024',
+          nodeType: 'STATIC',
+          addressId: null,
+          sortOrder: 1,
+          minPhotos: 1,
+          acceptsPhotos: true,
+        },
+      ],
+    });
+    repository.addPhoto({
+      id: 'photo-reserve',
+      projectId: project.id,
+      checklistNodeId: 'reserve-address',
+      sourceFileName: 'reserve.jpeg',
+      storedFileName: 'ZIOLowa_1_foto1.jpeg',
+      storagePath: join(project.baseFolder, 'Zapasy_kabli_instalacyjnych', 'Zapasy_doziemne', 'ZIOLowa_1', 'foto.jpeg'),
+      thumbnailPath: null,
+      mimeType: 'image/jpeg',
+      fileSize: 123,
+      lat: null,
+      lng: null,
+      capturedAt: null,
+      reserveLocation: 'Doziemny',
+    });
+    repository.addPhoto({
+      id: 'photo-osd',
+      projectId: project.id,
+      checklistNodeId: 'osd-photo',
+      sourceFileName: 'osd.jpeg',
+      storedFileName: 'OSD_foto1.jpeg',
+      storagePath: join(project.baseFolder, 'OSD', 'foto.jpeg'),
+      thumbnailPath: null,
+      mimeType: 'image/jpeg',
+      fileSize: 123,
+      lat: null,
+      lng: null,
+      capturedAt: null,
+      reserveLocation: null,
+    });
+    repository.addMapNote({
+      projectId: project.id,
+      targetType: 'address',
+      targetId: 'address-underground',
+      targetLabel: 'Ziolowa 1',
+      body: 'Notatka adresowa',
+      lat: 53.7,
+      lng: 20.5,
+    });
+    repository.addMapNote({
+      projectId: project.id,
+      targetType: 'free',
+      targetId: null,
+      targetLabel: 'Studnia przy drodze',
+      body: 'Niedroznosc do sprawdzenia',
+      lat: 53.72,
+      lng: 20.52,
+    });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/api/projects/${project.id}/reports/address-construction.xlsx`,
+    });
+    await app.close();
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers['content-type']).toContain(
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    );
+    expect(response.headers['content-disposition']).toContain('BARTAG_raport_adresow.xlsx');
+    expect(response.body.startsWith('PK')).toBe(true);
+    expect(response.body).toContain('Adresy');
+    expect(response.body).toContain('Notatki z mapy');
+    expect(response.body).toContain('Ziolowa');
+    expect(response.body).toContain('Lesna');
+    expect(response.body).toContain('wybudowany');
+    expect(response.body).toContain('Notatka adresowa');
+    expect(response.body).toContain('Niedroznosc do sprawdzenia');
+  });
+
   it('deletes selected checklist photos and removes their files', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'photo-local-delete-photo-'));
     process.env.PHOTO_LOCAL_DB = join(dir, 'test.sqlite');

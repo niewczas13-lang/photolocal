@@ -68,6 +68,20 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+async function requestBlob(url: string, init?: RequestInit): Promise<Blob> {
+  const headers = new Headers(init?.headers);
+  const token = getAuthToken();
+  if (token) headers.set('Authorization', `Bearer ${token}`);
+
+  const response = await fetch(url, { ...init, headers });
+  if (!response.ok) {
+    if (response.status === 401) clearAuthToken();
+    const text = await response.text();
+    throw new Error(text || `HTTP ${response.status}`);
+  }
+  return response.blob();
+}
+
 export const api = {
   hasAuthToken: () => Boolean(getAuthToken()),
   login: async (username: string, password: string) => {
@@ -142,6 +156,8 @@ export const api = {
     }),
   getChecklist: (projectId: string) => request<ChecklistNode[]>(`/api/projects/${projectId}/checklist`),
   getProjectMap: (projectId: string) => request<ProjectMapData>(`/api/projects/${projectId}/map`),
+  downloadAddressConstructionReport: (projectId: string) =>
+    requestBlob(`/api/projects/${projectId}/reports/address-construction.xlsx`),
   updateMapCableStatus: (projectId: string, cableId: string, status: ProjectMapCable['status']) =>
     request<ProjectMapData>(`/api/projects/${projectId}/map/cables/${cableId}/status`, {
       method: 'PATCH',
@@ -357,6 +373,17 @@ export const api = {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ photoIds, reserveLocation }),
+    }),
+  changeReserveFolderLocation: (projectId: string, nodeId: string, reserveLocation: ReserveLocation) =>
+    request<{
+      moved: number;
+      reserveLocation: ReserveLocation;
+      sourceNodeId: string;
+      targetNodeId: string;
+    }>(`/api/projects/${projectId}/checklist/${nodeId}/reserve-location`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reserveLocation }),
     }),
   deletePhotos: (projectId: string, nodeId: string, photoIds: string[]) =>
     request<{ deleted: number }>(`/api/projects/${projectId}/checklist/${nodeId}/photos`, {

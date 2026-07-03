@@ -128,6 +128,27 @@ function isReserveNodePath(path: string): boolean {
   return path.startsWith('Zapasy_kabli_instalacyjnych') || path.startsWith('Zapasy_kabli_napowietrznych');
 }
 
+function getFolderReserveLocation(
+  node: ChecklistNode | null,
+  detail: ChecklistNodeDetail | null,
+): ReserveLocation | null {
+  if (!node || !isReserveNodePath(node.path)) return null;
+  if (node.path.startsWith('Zapasy_kabli_napowietrznych')) return 'Napowietrzny';
+
+  const reserveLocations = detail?.photos
+    .map((photo) => photo.reserveLocation)
+    .filter((location): location is ReserveLocation => Boolean(location)) ?? [];
+  if (reserveLocations.includes('W studni') && !reserveLocations.includes('Doziemny')) return 'W studni';
+  return 'Doziemny';
+}
+
+function safeDownloadName(value: string): string {
+  return value
+    .trim()
+    .replace(/[<>:"/\\|?*\x00-\x1f]/g, '_')
+    .replace(/\s+/g, '_') || 'raport';
+}
+
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'Nieznany blad';
 }
@@ -172,6 +193,8 @@ export default function ProjectView({
   const [addFolderParentId, setAddFolderParentId] = useState('');
   const [addFolderKind, setAddFolderKind] = useState<'photo' | 'reserve' | 'container'>('photo');
   const [savingFolder, setSavingFolder] = useState(false);
+  const [changingReserveFolder, setChangingReserveFolder] = useState(false);
+  const [downloadingAddressReport, setDownloadingAddressReport] = useState(false);
 
   const handleRename = async () => {
     if (!draftName.trim() || draftName.trim() === project.name) {
@@ -196,6 +219,10 @@ export default function ProjectView({
   const selectedNode = useMemo(
     () => (selectedNodeId ? findNode(nodes, selectedNodeId) : null),
     [nodes, selectedNodeId],
+  );
+  const currentReserveFolderLocation = useMemo(
+    () => getFolderReserveLocation(selectedNode, nodeDetail),
+    [selectedNode, nodeDetail],
   );
 
   const refreshChecklist = async (nextSelectedNodeId: string | null | undefined = selectedNodeId) => {
@@ -247,6 +274,10 @@ export default function ProjectView({
   useEffect(() => {
     void refreshNodeDetail(selectedNodeId);
   }, [projectId, selectedNodeId]);
+
+  useEffect(() => {
+    if (currentReserveFolderLocation) setReserveLocation(currentReserveFolderLocation);
+  }, [currentReserveFolderLocation]);
 
   const { filtered, autoExpandedIds } = useMemo(() => filterTree(nodes, search), [nodes, search]);
   const renderedExpandedIds = useMemo(
@@ -390,6 +421,54 @@ export default function ProjectView({
       alert('Blad podczas przenoszenia zdjec');
     } finally {
       setMovingPhotos(false);
+    }
+  };
+
+  const handleChangeReserveFolderLocation = async (nextLocation: ReserveLocation) => {
+    if (!selectedNode || !currentReserveFolderLocation) return;
+    if (nextLocation === currentReserveFolderLocation) {
+      setReserveLocation(nextLocation);
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Zmienic typ folderu "${selectedNode.name}" na "${nextLocation}" i przeniesc jego zdjecia?`,
+    );
+    if (!confirmed) return;
+
+    setChangingReserveFolder(true);
+    try {
+      const result = await api.changeReserveFolderLocation(projectId, selectedNode.id, nextLocation);
+      setReserveLocation(nextLocation);
+      setSelectedNodeId(result.targetNodeId);
+      await refreshChecklist(result.targetNodeId);
+      await refreshNodeDetail(result.targetNodeId);
+      onTabChange('photos', result.targetNodeId);
+    } catch (err) {
+      console.error(err);
+      alert(`Blad podczas zmiany typu folderu zapasu:\n${getErrorMessage(err)}`);
+    } finally {
+      setChangingReserveFolder(false);
+    }
+  };
+
+  const handleDownloadAddressReport = async () => {
+    setDownloadingAddressReport(true);
+    try {
+      const blob = await api.downloadAddressConstructionReport(projectId);
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${safeDownloadName(project.name)}_raport_adresow.xlsx`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error(err);
+      alert(`Blad podczas generowania raportu:\n${getErrorMessage(err)}`);
+    } finally {
+      setDownloadingAddressReport(false);
     }
   };
 
@@ -545,6 +624,10 @@ export default function ProjectView({
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-2">
+          <Button variant="outline" size="sm" disabled={downloadingAddressReport} onClick={handleDownloadAddressReport}>
+            <Download size={15} />
+            {downloadingAddressReport ? 'Generuje...' : 'Raport adresow'}
+          </Button>
           <Button variant="outline" size="sm" onClick={onOpenMap}>
             <Map size={15} />
             Mapa + zadania
@@ -721,6 +804,28 @@ export default function ProjectView({
                           <h3 className="text-lg font-bold">{selectedNode.name}</h3>
                           <p className="text-sm text-muted-foreground">{selectedNode.path}</p>
                         </div>
+
+                        {currentReserveFolderLocation && (
+                          <div className="flex flex-col gap-2 p-4 bg-background border border-border rounded-lg">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <span className="text-sm font-semibold">Typ folderu zapasu</span>
+                              <Badge variant="outline">{currentReserveFolderLocation}</Badge>
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                              {(['Doziemny', 'W studni', 'Napowietrzny'] as ReserveLocation[]).map((location) => (
+                                <Button
+                                  key={location}
+                                  variant={currentReserveFolderLocation === location ? 'default' : 'outline'}
+                                  size="sm"
+                                  disabled={changingReserveFolder}
+                                  onClick={() => handleChangeReserveFolderLocation(location)}
+                                >
+                                  {location}
+                                </Button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                         
                         {(selectedNode.path.startsWith('Zapasy_kabli_instalacyjnych') ||
                           selectedNode.path.startsWith('Zapasy_kabli_napowietrznych')) && (
@@ -855,7 +960,7 @@ export default function ProjectView({
 
                         {selectedNode && isReserveNodePath(selectedNode.path) && selectedPhotoIds.size > 0 && (
                           <div className="flex flex-wrap items-center gap-2">
-                            <span className="text-xs text-muted-foreground">Zmien typ zapasu:</span>
+                            <span className="text-xs text-muted-foreground">Zmien typ zaznaczonych zdjec:</span>
                             {(['Doziemny', 'W studni', 'Napowietrzny'] as ReserveLocation[]).map((location) => (
                               <Button
                                 key={location}
