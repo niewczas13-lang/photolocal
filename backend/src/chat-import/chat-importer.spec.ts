@@ -650,6 +650,25 @@ describe('importChatFolders', () => {
     );
   });
 
+  it('falls back to legacy folder import when one manifest file is corrupt', async () => {
+    const { db, repository, projectId, dir } = createContext();
+    writeManifest(dir, 'Maleniecka 5', 'Maleniecka 5');
+    const corruptFolder = join(dir, 'Maleniecka 7');
+    mkdirSync(corruptFolder, { recursive: true });
+    writeFileSync(join(corruptFolder, 'photo.jpeg'), 'legacy-image');
+    writeFileSync(join(corruptFolder, 'manifest.json'), '{');
+
+    const result = await importChatFolders({ projectId, rootPath: dir, repository });
+    const batches = repository.listBatches(projectId);
+    db.close();
+
+    expect(result).toEqual({ imported: 2, waitingForClassification: 2, pendingReview: 0, cleared: 0 });
+    expect(batches).toEqual([
+      expect.objectContaining({ folderName: 'Maleniecka 5', status: 'WAITING_FOR_CLASSIFICATION' }),
+      expect.objectContaining({ folderName: 'Maleniecka 7', status: 'WAITING_FOR_CLASSIFICATION' }),
+    ]);
+  });
+
   it('clears old working chat queue before importing another folder', async () => {
     const { db, repository, projectId, dir } = createContext();
     const wrongRoot = join(dir, 'wrong-room');

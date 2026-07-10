@@ -169,7 +169,14 @@ export async function findChatManifests(rootPath: string): Promise<ChatManifest[
   const manifestPaths = await collectManifestPaths(rootPath);
   manifestPaths.sort((left, right) => left.localeCompare(right));
 
-  const manifests = await Promise.all(manifestPaths.map((manifestPath) => readChatManifest(manifestPath)));
+  const manifests: ChatManifest[] = [];
+  for (const manifestPath of manifestPaths) {
+    try {
+      manifests.push(await readChatManifest(manifestPath));
+    } catch {
+      // A partially written manifest should not block importing photos from the rest of the room.
+    }
+  }
   const manifestFolders = new Set(manifests.map((manifest) => manifest.folderPath));
   const legacyManifests = await collectLegacyManifests(rootPath, manifestFolders);
 
