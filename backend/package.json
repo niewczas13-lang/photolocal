@@ -14,6 +14,8 @@
     "auth:list-users": "tsx src/auth/list-users-cli.ts",
     "auth:list-users:dist": "node dist/auth/list-users-cli.js",
     "classify:chat": "tsx src/chat-import/classify-chat-folders.ts",
+    "audit:photo-files": "tsx src/photos/audit-photo-files-cli.ts",
+    "audit:photo-files:dist": "node dist/photos/audit-photo-files-cli.js",
     "hash:photos": "tsx src/photos/hash-project-photos-cli.ts",
     "hash:photos:dist": "node dist/photos/hash-project-photos-cli.js"
   },
