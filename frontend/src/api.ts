@@ -1,3 +1,5 @@
+import { parseApiErrorMessage } from './api-error';
+import { buildMapNotesReportUrl } from './map-notes-export';
 import type {
   AuthSession,
   AuthUser,
@@ -52,18 +54,7 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
   if (!response.ok) {
     if (response.status === 401) clearAuthToken();
     const text = await response.text();
-    let message = text || `HTTP ${response.status}`;
-    try {
-      const parsed = JSON.parse(text) as { error?: unknown; message?: unknown };
-      if (typeof parsed.error === 'string') {
-        message = parsed.error;
-      } else if (typeof parsed.message === 'string') {
-        message = parsed.message;
-      }
-    } catch {
-      // Leave the raw response text when the backend did not return JSON.
-    }
-    throw new Error(message);
+    throw new Error(parseApiErrorMessage(text, response.status));
   }
   return response.json() as Promise<T>;
 }
@@ -77,7 +68,7 @@ async function requestBlob(url: string, init?: RequestInit): Promise<Blob> {
   if (!response.ok) {
     if (response.status === 401) clearAuthToken();
     const text = await response.text();
-    throw new Error(text || `HTTP ${response.status}`);
+    throw new Error(parseApiErrorMessage(text, response.status));
   }
   return response.blob();
 }
@@ -158,6 +149,8 @@ export const api = {
   getProjectMap: (projectId: string) => request<ProjectMapData>(`/api/projects/${projectId}/map`),
   downloadAddressConstructionReport: (projectId: string) =>
     requestBlob(`/api/projects/${projectId}/reports/address-construction.xlsx`),
+  downloadMapNotesReport: (projectId: string, includeQwenSummary: boolean) =>
+    requestBlob(buildMapNotesReportUrl(projectId, includeQwenSummary)),
   updateMapCableStatus: (projectId: string, cableId: string, status: ProjectMapCable['status']) =>
     request<ProjectMapData>(`/api/projects/${projectId}/map/cables/${cableId}/status`, {
       method: 'PATCH',

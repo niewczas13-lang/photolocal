@@ -1,5 +1,15 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ImagePlus, LocateFixed, MapPin, Save, StickyNote, Trash2 } from 'lucide-react';
+import {
+  Download,
+  ImagePlus,
+  LoaderCircle,
+  LocateFixed,
+  MapPin,
+  Save,
+  Sparkles,
+  StickyNote,
+  Trash2,
+} from 'lucide-react';
 
 import type { ProjectMapNote } from '../types';
 import { getMapNoteFocusPosition } from '../map-note-focus';
@@ -9,6 +19,8 @@ import { Button } from './ui/button';
 interface ProjectMapNotesProps {
   notes: ProjectMapNote[];
   busyId: string | null;
+  reportBusy: 'plain' | 'qwen' | null;
+  onDownloadReport: (includeQwenSummary: boolean) => void;
   onUpdateNote: (noteId: string, body: string, lat: number | null, lng: number | null) => void;
   onDeleteNote: (noteId: string) => void;
   onUploadNotePhoto: (noteId: string, file: File) => void;
@@ -154,6 +166,8 @@ function ProjectMapNoteCard({
 export default function ProjectMapNotes({
   notes,
   busyId,
+  reportBusy,
+  onDownloadReport,
   onUpdateNote,
   onDeleteNote,
   onUploadNotePhoto,
@@ -176,7 +190,39 @@ export default function ProjectMapNotes({
           <h2>Notatki z mapy</h2>
           <p>Uwagi przypiete do elementow albo do konkretnego miejsca na mapie.</p>
         </div>
-        <Badge variant="outline">{notes.length} notatek</Badge>
+        <div className="project-map-notes__header-actions">
+          <Badge variant="outline">{notes.length} notatek</Badge>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="project-map-notes__report-action"
+            onClick={() => onDownloadReport(false)}
+            disabled={reportBusy !== null}
+          >
+            {reportBusy === 'plain' ? (
+              <LoaderCircle className="animate-spin" aria-hidden="true" />
+            ) : (
+              <Download aria-hidden="true" />
+            )}
+            {reportBusy === 'plain' ? 'Generowanie...' : 'Eksport XLSX'}
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            className="project-map-notes__report-action"
+            onClick={() => onDownloadReport(true)}
+            disabled={reportBusy !== null}
+          >
+            {reportBusy === 'qwen' ? (
+              <LoaderCircle className="animate-spin" aria-hidden="true" />
+            ) : (
+              <Sparkles aria-hidden="true" />
+            )}
+            {reportBusy === 'qwen' ? 'Qwen pracuje...' : 'Eksport + Qwen'}
+          </Button>
+        </div>
       </div>
 
       <div className="project-map-notes__list">

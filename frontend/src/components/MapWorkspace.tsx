@@ -153,7 +153,12 @@ export default function MapWorkspace({
                 </Button>
               </div>
             </div>
-            <ProjectMap projectId={selectedProject.id} view={mapView} onViewChange={onMapViewChange} />
+            <ProjectMap
+              projectId={selectedProject.id}
+              projectName={selectedProject.name}
+              view={mapView}
+              onViewChange={onMapViewChange}
+            />
           </>
         ) : (
           <div className="flex flex-1 items-center justify-center p-8 text-center text-muted-foreground">

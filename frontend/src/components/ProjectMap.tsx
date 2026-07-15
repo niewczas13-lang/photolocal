@@ -25,6 +25,7 @@ import { photoProjectRoute, type MapView } from '../app-routing';
 import { cn } from '../lib/utils';
 import { getMapBoundsPositions } from '../map-bounds';
 import { formatCableLength } from '../map-format';
+import { buildMapNotesReportFileName } from '../map-notes-export';
 import { getMapNoteFocusPosition, type MapNoteFocusPosition } from '../map-note-focus';
 import {
   getMapClickCaptureClassName,
@@ -77,6 +78,7 @@ import { Button } from './ui/button';
 
 interface ProjectMapProps {
   projectId: string;
+  projectName: string;
   view: MapView;
   onViewChange: (view: MapView) => void;
 }
@@ -896,11 +898,12 @@ function AddressCandidatePopup({
   );
 }
 
-export default function ProjectMap({ projectId, view, onViewChange }: ProjectMapProps) {
+export default function ProjectMap({ projectId, projectName, view, onViewChange }: ProjectMapProps) {
   const [data, setData] = useState<ProjectMapData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [notesReportBusy, setNotesReportBusy] = useState<'plain' | 'qwen' | null>(null);
   const [addingFreeNote, setAddingFreeNote] = useState(false);
   const [addingAddress, setAddingAddress] = useState(false);
   const [showInfrastructure, setShowInfrastructure] = useState(false);
@@ -1070,6 +1073,30 @@ export default function ProjectMap({ projectId, view, onViewChange }: ProjectMap
       setError(getErrorMessage(err));
     } finally {
       setBusyId(null);
+    }
+  };
+
+  const downloadMapNotesReport = async (includeQwenSummary: boolean) => {
+    setNotesReportBusy(includeQwenSummary ? 'qwen' : 'plain');
+    setError(null);
+    let objectUrl: string | null = null;
+    let link: HTMLAnchorElement | null = null;
+
+    try {
+      const blob = await api.downloadMapNotesReport(projectId, includeQwenSummary);
+      objectUrl = window.URL.createObjectURL(blob);
+      link = document.createElement('a');
+      link.href = objectUrl;
+      link.download = buildMapNotesReportFileName(projectName, includeQwenSummary);
+      link.hidden = true;
+      document.body.appendChild(link);
+      link.click();
+    } catch (err) {
+      setError(getErrorMessage(err));
+    } finally {
+      link?.remove();
+      if (objectUrl) window.URL.revokeObjectURL(objectUrl);
+      setNotesReportBusy(null);
     }
   };
 
@@ -1250,6 +1277,8 @@ export default function ProjectMap({ projectId, view, onViewChange }: ProjectMap
         <ProjectMapNotes
           notes={data.notes}
           busyId={busyId}
+          reportBusy={notesReportBusy}
+          onDownloadReport={(includeQwenSummary) => void downloadMapNotesReport(includeQwenSummary)}
           onUpdateNote={(noteId, body, lat, lng) => void updateMapNote(noteId, body, lat, lng)}
           onDeleteNote={(noteId) => void deleteMapNote(noteId)}
           onUploadNotePhoto={(noteId, file) => void uploadMapNotePhoto(noteId, file)}
