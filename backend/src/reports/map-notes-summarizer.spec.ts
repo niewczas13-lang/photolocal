@@ -264,6 +264,42 @@ describe('summarizeMapNotes', () => {
     expect(new Date(result.generatedAt).toISOString()).toBe(result.generatedAt);
   });
 
+  it('uses the trimmed OLLAMA_URL when no input URL is provided', async () => {
+    process.env.OLLAMA_URL = '  http://environment-ollama:11434///  ';
+    let requestedUrl: Parameters<typeof fetch>[0] | undefined;
+    const fetchImpl: typeof fetch = async (url) => {
+      requestedUrl = url;
+      return jsonResponse({ message: { content: '{"overview":"Gotowe"}' } });
+    };
+
+    await summarizeMapNotes({
+      projectName: 'Projekt testowy',
+      notes: [],
+      fetchImpl,
+    });
+
+    expect(String(requestedUrl)).toBe('http://environment-ollama:11434/api/chat');
+  });
+
+  it('uses the localhost Ollama URL when OLLAMA_URL is unset or blank', async () => {
+    const requestedUrls: Array<Parameters<typeof fetch>[0]> = [];
+    const fetchImpl: typeof fetch = async (url) => {
+      requestedUrls.push(url);
+      return jsonResponse({ message: { content: '{"overview":"Gotowe"}' } });
+    };
+
+    delete process.env.OLLAMA_URL;
+    await summarizeMapNotes({ projectName: 'Projekt bez env', notes: [], fetchImpl });
+
+    process.env.OLLAMA_URL = '   ';
+    await summarizeMapNotes({ projectName: 'Projekt z pustym env', notes: [], fetchImpl });
+
+    expect(requestedUrls.map(String)).toEqual([
+      'http://localhost:11434/api/chat',
+      'http://localhost:11434/api/chat',
+    ]);
+  });
+
   it('includes the Ollama status and response body in HTTP errors', async () => {
     const fetchImpl: typeof fetch = async () =>
       new Response('model is not available', { status: 503 });
