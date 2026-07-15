@@ -341,6 +341,30 @@ describe('summarizeMapNotes', () => {
     });
   });
 
+  it('reports response-body timeout errors with the configured duration and cause', async () => {
+    const timeoutError = new DOMException('timed out', 'TimeoutError');
+    const response = {
+      ok: true,
+      status: 200,
+      text: async () => {
+        throw timeoutError;
+      },
+    } as unknown as Response;
+    const fetchImpl: typeof fetch = async () => response;
+
+    await expect(
+      summarizeMapNotes({
+        projectName: 'Projekt testowy',
+        notes: [],
+        requestTimeoutMs: 7654,
+        fetchImpl,
+      }),
+    ).rejects.toMatchObject({
+      message: 'Ollama request timed out after 7654 ms',
+      cause: timeoutError,
+    });
+  });
+
   it('reports response-body read failures separately from malformed JSON', async () => {
     const readError = new Error('response stream failed');
     const response = {

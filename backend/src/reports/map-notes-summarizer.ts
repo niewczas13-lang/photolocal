@@ -102,6 +102,10 @@ export async function summarizeMapNotes(
   try {
     responseBody = await response.text();
   } catch (error) {
+    if (isTimeoutOrAbortError(error)) {
+      throw new Error(`Ollama request timed out after ${requestTimeoutMs} ms`, { cause: error });
+    }
+
     throw new Error(`Unable to read Ollama response: ${getErrorMessage(error)}`, {
       cause: error,
     });
