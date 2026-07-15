@@ -2,22 +2,128 @@ import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Fastify from 'fastify';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { buildApp } from '../app.js';
 import { ChatBatchesRepository } from '../chat-import/chat-batches-repository.js';
 import { openDatabase } from '../db/connection.js';
 import { runMigrations } from '../db/migrations.js';
 import type { AddressGeocoder } from '../geocoding/address-geocoder.js';
+import type { MapNotesSummarizer } from '../reports/map-notes-summarizer.js';
 import { ProjectsRepository } from './projects-repository.js';
-import { registerProjectRoutes } from './projects-routes.js';
+import {
+  registerProjectRoutes,
+  type RegisterProjectRoutesOptions,
+} from './projects-routes.js';
 
-async function buildProjectRoutesTestApp(geocoder: AddressGeocoder) {
+async function buildProjectRoutesTestApp(options: RegisterProjectRoutesOptions = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'photo-local-route-candidates-'));
   const db = openDatabase(join(dir, 'test.sqlite'));
   runMigrations(db);
   const app = Fastify({ logger: false });
-  await registerProjectRoutes(app, db, { addressGeocoder: geocoder });
+  await registerProjectRoutes(app, db, options);
   return { app, db, dir, repository: new ProjectsRepository(db) };
+}
+
+function readStoreOnlyZipEntries(archive: Buffer): Map<string, Buffer> {
+  const entries = new Map<string, Buffer>();
+  const localHeaderSignature = 0x04034b50;
+  const localHeaderSize = 30;
+  let offset = 0;
+
+  while (
+    offset + localHeaderSize <= archive.length &&
+    archive.readUInt32LE(offset) === localHeaderSignature
+  ) {
+    const compressionMethod = archive.readUInt16LE(offset + 8);
+    const compressedSize = archive.readUInt32LE(offset + 18);
+    const uncompressedSize = archive.readUInt32LE(offset + 22);
+    const fileNameLength = archive.readUInt16LE(offset + 26);
+    const extraFieldLength = archive.readUInt16LE(offset + 28);
+    const fileNameStart = offset + localHeaderSize;
+    const fileNameEnd = fileNameStart + fileNameLength;
+    const dataStart = fileNameEnd + extraFieldLength;
+    const dataEnd = dataStart + compressedSize;
+
+    if (compressionMethod !== 0 || compressedSize !== uncompressedSize) {
+      throw new Error('Expected a store-only ZIP entry');
+    }
+    if (dataEnd > archive.length) throw new Error('Invalid ZIP entry length');
+
+    const name = archive.subarray(fileNameStart, fileNameEnd).toString('utf8');
+    if (entries.has(name)) throw new Error(`Duplicate ZIP entry: ${name}`);
+    entries.set(name, archive.subarray(dataStart, dataEnd));
+    offset = dataEnd;
+  }
+
+  if (entries.size === 0) throw new Error('No local ZIP entries found');
+  return entries;
+}
+
+function readZipTextEntry(entries: Map<string, Buffer>, name: string): string {
+  const entry = entries.get(name);
+  if (!entry) throw new Error(`Missing ZIP entry: ${name}`);
+  return entry.toString('utf8');
+}
+
+function createMapNotesReportProject(repository: ProjectsRepository) {
+  return repository.createProject({
+    name: 'Projekt raportowy / 1',
+    projectDefinition: null,
+    projectType: 'SI',
+    splitterTopology: 'SINGLE',
+    splitterTopologySource: 'AUTO',
+    splitterCount: 1,
+    gpkgFileName: 'projekt-raportowy.gpkg',
+    baseFolder: 'C:/photos/PROJEKT_RAPORTOWY_1',
+    addresses: [],
+    dacToAddressCableCount: 0,
+    adssToAddressCableCount: 0,
+    checklistNodes: [],
+  });
+}
+
+function addMapNotesReportFixtures(repository: ProjectsRepository, projectId: string): void {
+  const notes = [
+    {
+      targetType: 'cable' as const,
+      targetId: 'cable-1',
+      targetLabel: 'Kabel K-1',
+      body: 'Niedroznosc kabla',
+    },
+    {
+      targetType: 'node' as const,
+      targetId: 'node-1',
+      targetLabel: 'Studnia S-1',
+      body: 'Uszkodzona pokrywa studni',
+    },
+    {
+      targetType: 'polygon' as const,
+      targetId: 'polygon-1',
+      targetLabel: 'Obszar O-1',
+      body: 'Kolizja w obszarze',
+    },
+    {
+      targetType: 'free' as const,
+      targetId: null,
+      targetLabel: 'Droga dojazdowa',
+      body: 'Utrudniony dojazd',
+    },
+    {
+      targetType: 'address' as const,
+      targetId: 'address-1',
+      targetLabel: 'Lesna 1',
+      body: 'Notatka adresowa tylko do widoku adresu',
+    },
+  ];
+
+  for (const note of notes) {
+    repository.addMapNote({
+      projectId,
+      ...note,
+      lat: 53.72,
+      lng: 20.52,
+    });
+  }
 }
 
 describe('projects routes', () => {
@@ -180,7 +286,9 @@ describe('projects routes', () => {
         };
       },
     };
-    const { app, db, repository } = await buildProjectRoutesTestApp(geocoder);
+    const { app, db, repository } = await buildProjectRoutesTestApp({
+      addressGeocoder: geocoder,
+    });
     const project = repository.createProject({
       name: 'MAPA',
       projectDefinition: null,
@@ -967,6 +1075,204 @@ describe('projects routes', () => {
     expect(response.body).toContain('wybudowany');
     expect(response.body).toContain('Notatka adresowa');
     expect(response.body).toContain('Niedroznosc do sprawdzenia');
+  });
+
+  describe('map notes report route', () => {
+    it('exports a plain workbook without address notes or a Qwen summary', async () => {
+      const mapNotesSummarizer = vi.fn<MapNotesSummarizer>();
+      const { app, db, repository } = await buildProjectRoutesTestApp({
+        mapNotesSummarizer,
+      });
+      const project = createMapNotesReportProject(repository);
+      addMapNotesReportFixtures(repository, project.id);
+
+      const response = await app.inject({
+        method: 'GET',
+        url: `/api/projects/${project.id}/reports/map-notes.xlsx`,
+      });
+      await app.close();
+      db.close();
+
+      const entries = readStoreOnlyZipEntries(response.rawPayload);
+      const workbookXml = readZipTextEntry(entries, 'xl/workbook.xml');
+      const notesXml = readZipTextEntry(entries, 'xl/worksheets/sheet1.xml');
+
+      expect(response.statusCode).toBe(200);
+      expect(response.headers['content-type']).toContain(
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      );
+      expect(response.headers['content-disposition']).toContain(
+        'PROJEKT_RAPORTOWY_1_raport_notatek.xlsx',
+      );
+      expect(response.rawPayload.subarray(0, 2).toString('ascii')).toBe('PK');
+      expect(notesXml).toContain('Niedroznosc kabla');
+      expect(notesXml).not.toContain('Notatka adresowa tylko do widoku adresu');
+      expect(workbookXml).not.toContain('Podsumowanie Qwen');
+      expect(mapNotesSummarizer).not.toHaveBeenCalled();
+    });
+
+    it('exports a Qwen workbook using only eligible map notes', async () => {
+      const summary = {
+        overview: 'Wymagana jest interwencja terenowa.',
+        blockers: ['Niedroznosc kabla'],
+        recommendedActions: ['Sprawdzic kabel K-1'],
+        attentionPoints: ['Studnia S-1'],
+        model: 'qwen2.5vl:3b',
+        generatedAt: '2026-07-15T12:34:56.000Z',
+      };
+      const mapNotesSummarizer = vi.fn<MapNotesSummarizer>().mockResolvedValue(summary);
+      const { app, db, repository } = await buildProjectRoutesTestApp({
+        mapNotesSummarizer,
+      });
+      const project = createMapNotesReportProject(repository);
+      addMapNotesReportFixtures(repository, project.id);
+      const expectedEligibleNotes = repository
+        .getProjectMap(project.id)
+        .notes.filter((note) => note.targetType !== 'address');
+
+      const response = await app.inject({
+        method: 'GET',
+        url: `/api/projects/${project.id}/reports/map-notes.xlsx?summary=qwen`,
+      });
+      await app.close();
+      db.close();
+
+      const entries = readStoreOnlyZipEntries(response.rawPayload);
+      const workbookXml = readZipTextEntry(entries, 'xl/workbook.xml');
+      const notesXml = readZipTextEntry(entries, 'xl/worksheets/sheet1.xml');
+      const summaryXml = readZipTextEntry(entries, 'xl/worksheets/sheet2.xml');
+      const summarizedNotes = mapNotesSummarizer.mock.calls[0][0].notes;
+
+      expect(response.statusCode).toBe(200);
+      expect(response.headers['content-disposition']).toContain(
+        'PROJEKT_RAPORTOWY_1_raport_notatek_qwen.xlsx',
+      );
+      expect(mapNotesSummarizer).toHaveBeenCalledTimes(1);
+      expect(mapNotesSummarizer).toHaveBeenCalledWith({
+        projectName: project.name,
+        notes: expectedEligibleNotes,
+      });
+      expect(summarizedNotes.map((note) => note.targetType).sort()).toEqual([
+        'cable',
+        'free',
+        'node',
+        'polygon',
+      ]);
+      expect(summarizedNotes.some((note) => note.targetType === 'address')).toBe(false);
+      expect(workbookXml).toContain('Podsumowanie Qwen');
+      expect(summaryXml).toContain(summary.overview);
+      expect(summaryXml).toContain(summary.recommendedActions[0]);
+      expect(notesXml).not.toContain(summary.overview);
+    });
+
+    it('exports an explicit empty workbook in Qwen mode without calling the summarizer', async () => {
+      const mapNotesSummarizer = vi.fn<MapNotesSummarizer>();
+      const { app, db, repository } = await buildProjectRoutesTestApp({
+        mapNotesSummarizer,
+      });
+      const project = createMapNotesReportProject(repository);
+      repository.addMapNote({
+        projectId: project.id,
+        targetType: 'address',
+        targetId: 'address-1',
+        targetLabel: 'Lesna 1',
+        body: 'Tylko notatka adresowa',
+        lat: 53.72,
+        lng: 20.52,
+      });
+
+      const response = await app.inject({
+        method: 'GET',
+        url: `/api/projects/${project.id}/reports/map-notes.xlsx?summary=qwen`,
+      });
+      await app.close();
+      db.close();
+
+      const entries = readStoreOnlyZipEntries(response.rawPayload);
+      const workbookXml = readZipTextEntry(entries, 'xl/workbook.xml');
+      const notesXml = readZipTextEntry(entries, 'xl/worksheets/sheet1.xml');
+
+      expect(response.statusCode).toBe(200);
+      expect(response.headers['content-disposition']).toContain(
+        'PROJEKT_RAPORTOWY_1_raport_notatek_qwen.xlsx',
+      );
+      expect(response.rawPayload.subarray(0, 2).toString('ascii')).toBe('PK');
+      expect(notesXml).toContain('Liczba notatek: 0');
+      expect(notesXml).toContain('Brak notatek nieprzypisanych do adresow');
+      expect(notesXml).not.toContain('Tylko notatka adresowa');
+      expect(workbookXml).not.toContain('Podsumowanie Qwen');
+      expect(mapNotesSummarizer).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['unsupported value', 'other'],
+      ['blank value', ''],
+    ])('rejects an invalid %s for the map notes report', async (_label, summaryMode) => {
+      const mapNotesSummarizer = vi.fn<MapNotesSummarizer>();
+      const { app, db, repository } = await buildProjectRoutesTestApp({
+        mapNotesSummarizer,
+      });
+      const project = createMapNotesReportProject(repository);
+
+      const response = await app.inject({
+        method: 'GET',
+        url: `/api/projects/${project.id}/reports/map-notes.xlsx?summary=${summaryMode}`,
+      });
+      await app.close();
+      db.close();
+
+      expect(response.statusCode).toBe(400);
+      expect(response.json()).toEqual({ error: 'Invalid map notes summary mode' });
+      expect(mapNotesSummarizer).not.toHaveBeenCalled();
+    });
+
+    it('returns 502 when the Qwen summarizer rejects', async () => {
+      const mapNotesSummarizer = vi
+        .fn<MapNotesSummarizer>()
+        .mockRejectedValue(new Error('Ollama nie odpowiada'));
+      const { app, db, repository } = await buildProjectRoutesTestApp({
+        mapNotesSummarizer,
+      });
+      const project = createMapNotesReportProject(repository);
+      repository.addMapNote({
+        projectId: project.id,
+        targetType: 'free',
+        targetId: null,
+        targetLabel: 'Droga dojazdowa',
+        body: 'Utrudniony dojazd',
+        lat: 53.72,
+        lng: 20.52,
+      });
+
+      const response = await app.inject({
+        method: 'GET',
+        url: `/api/projects/${project.id}/reports/map-notes.xlsx?summary=qwen`,
+      });
+      await app.close();
+      db.close();
+
+      expect(response.statusCode).toBe(502);
+      expect(response.json()).toEqual({
+        error: 'Nie udalo sie wygenerowac podsumowania Qwen: Ollama nie odpowiada',
+      });
+      expect(mapNotesSummarizer).toHaveBeenCalledTimes(1);
+    });
+
+    it('returns 404 for an unknown project', async () => {
+      const mapNotesSummarizer = vi.fn<MapNotesSummarizer>();
+      const { app, db } = await buildProjectRoutesTestApp({ mapNotesSummarizer });
+
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/projects/missing-project/reports/map-notes.xlsx',
+      });
+      await app.close();
+      db.close();
+
+      expect(response.statusCode).toBe(404);
+      expect(response.json()).toEqual({ error: 'Project not found' });
+      expect(mapNotesSummarizer).not.toHaveBeenCalled();
+    });
   });
 
   it('deletes selected checklist photos and removes their files', async () => {

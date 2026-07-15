@@ -31,6 +31,11 @@ import { importChatFolders } from '../chat-import/chat-importer.js';
 import { getOllamaDiagnostics } from '../chat-import/ollama-diagnostics.js';
 import { extractGpkg } from '../gpkg/gpkg-extractor.js';
 import { buildAddressConstructionReport } from '../reports/address-construction-report.js';
+import { buildMapNotesReport, getExportableMapNotes } from '../reports/map-notes-report.js';
+import {
+  summarizeMapNotes,
+  type MapNotesSummarizer,
+} from '../reports/map-notes-summarizer.js';
 import {
   createAdresyAppGeocoder,
   createFallbackAddressGeocoder,
@@ -254,6 +259,7 @@ async function moveFileIfExists(sourcePath: string, targetPath: string): Promise
 
 export interface RegisterProjectRoutesOptions {
   addressGeocoder?: AddressGeocoder;
+  mapNotesSummarizer?: MapNotesSummarizer;
 }
 
 export async function registerProjectRoutes(
@@ -277,6 +283,7 @@ export async function registerProjectRoutes(
         userAgent: initialConfig.nominatimUserAgent,
       }),
     ]);
+  const mapNotesSummarizer = options.mapNotesSummarizer ?? summarizeMapNotes;
   let isClosing = false;
   const classificationDiagnosticsTimers = new Map<string, NodeJS.Timeout>();
   const stopClassificationDiagnostics = (projectId: string) => {
@@ -610,6 +617,41 @@ export async function registerProjectRoutes(
 
     const report = buildAddressConstructionReport(project, repository.getProjectMap(projectId));
     const fileName = `${safeFolderName(project.name)}_raport_adresow.xlsx`;
+    reply.header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    reply.header('Content-Disposition', `attachment; filename="${fileName}"`);
+    return reply.send(report);
+  });
+
+  app.get('/api/projects/:projectId/reports/map-notes.xlsx', async (request, reply) => {
+    const { projectId } = request.params as { projectId: string };
+    const { summary } = request.query as { summary?: unknown };
+    const project = repository.getProject(projectId);
+    if (!project) return reply.status(404).send({ error: 'Project not found' });
+    if (summary !== undefined && summary !== 'qwen') {
+      return reply.status(400).send({ error: 'Invalid map notes summary mode' });
+    }
+
+    const map = repository.getProjectMap(projectId);
+    const eligibleNotes = getExportableMapNotes(map.notes);
+    let generatedSummary: Awaited<ReturnType<MapNotesSummarizer>> | undefined;
+
+    if (summary === 'qwen' && eligibleNotes.length > 0) {
+      try {
+        generatedSummary = await mapNotesSummarizer({
+          projectName: project.name,
+          notes: eligibleNotes,
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return reply.status(502).send({
+          error: `Nie udalo sie wygenerowac podsumowania Qwen: ${message}`,
+        });
+      }
+    }
+
+    const report = buildMapNotesReport(project, eligibleNotes, generatedSummary);
+    const summarySuffix = summary === 'qwen' ? '_qwen' : '';
+    const fileName = `${safeFolderName(project.name)}_raport_notatek${summarySuffix}.xlsx`;
     reply.header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     reply.header('Content-Disposition', `attachment; filename="${fileName}"`);
     return reply.send(report);
