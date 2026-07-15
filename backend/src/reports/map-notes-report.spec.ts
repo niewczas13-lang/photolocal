@@ -29,6 +29,19 @@ const project: ProjectRecord = {
   updatedAt: '2026-07-15T09:00:00.000Z',
 };
 
+const NOTES_ONLY_SHEETS_XML = [
+  '<sheets>',
+  '<sheet name="Notatki" sheetId="1" r:id="rId1"/>',
+  '</sheets>',
+].join('');
+
+const NOTES_AND_SUMMARY_SHEETS_XML = [
+  '<sheets>',
+  '<sheet name="Notatki" sheetId="1" r:id="rId1"/>',
+  '<sheet name="Podsumowanie Qwen" sheetId="2" r:id="rId2"/>',
+  '</sheets>',
+].join('');
+
 type CreateNoteInput = Pick<ProjectMapNote, 'id' | 'targetType' | 'body'> &
   Partial<Omit<ProjectMapNote, 'id' | 'targetType' | 'body'>>;
 
@@ -49,8 +62,73 @@ function createNote({ id, targetType, body, ...overrides }: CreateNoteInput): Pr
   };
 }
 
-function workbookContent(workbook: Buffer): string {
-  return workbook.toString('utf8');
+function readStoreOnlyZipEntries(archive: Buffer): Map<string, Buffer> {
+  const entries = new Map<string, Buffer>();
+  const localHeaderSignature = 0x04034b50;
+  const localHeaderSize = 30;
+  let offset = 0;
+
+  while (
+    offset + localHeaderSize <= archive.length &&
+    archive.readUInt32LE(offset) === localHeaderSignature
+  ) {
+    const compressionMethod = archive.readUInt16LE(offset + 8);
+    const compressedSize = archive.readUInt32LE(offset + 18);
+    const uncompressedSize = archive.readUInt32LE(offset + 22);
+    const fileNameLength = archive.readUInt16LE(offset + 26);
+    const extraFieldLength = archive.readUInt16LE(offset + 28);
+    const fileNameStart = offset + localHeaderSize;
+    const fileNameEnd = fileNameStart + fileNameLength;
+    const dataStart = fileNameEnd + extraFieldLength;
+    const dataEnd = dataStart + compressedSize;
+
+    if (compressionMethod !== 0 || compressedSize !== uncompressedSize) {
+      throw new Error('Expected a store-only ZIP entry');
+    }
+    if (dataEnd > archive.length) throw new Error('Invalid ZIP entry length');
+
+    const name = archive.subarray(fileNameStart, fileNameEnd).toString('utf8');
+    if (entries.has(name)) throw new Error(`Duplicate ZIP entry: ${name}`);
+    entries.set(name, archive.subarray(dataStart, dataEnd));
+    offset = dataEnd;
+  }
+
+  if (entries.size === 0) throw new Error('No local ZIP entries found');
+  return entries;
+}
+
+function readZipTextEntry(entries: Map<string, Buffer>, name: string): string {
+  const entry = entries.get(name);
+  if (!entry) throw new Error(`Missing ZIP entry: ${name}`);
+  return entry.toString('utf8');
+}
+
+function zipEntryNamesContainingText(entries: Map<string, Buffer>, text: string): string[] {
+  return [...entries.entries()]
+    .filter(([, entry]) => entry.toString('utf8').includes(text))
+    .map(([name]) => name);
+}
+
+function workbookSheetsXml(workbookXml: string): string {
+  const match = workbookXml.match(/<sheets>[\s\S]*?<\/sheets>/);
+  if (!match) throw new Error('Workbook sheets list not found');
+  return match[0];
+}
+
+function worksheetEntryNames(entries: Map<string, Buffer>): string[] {
+  return [...entries.keys()].filter((name) => name.startsWith('xl/worksheets/'));
+}
+
+function worksheetSectionXml(worksheetXml: string, title: string, nextTitle?: string): string {
+  const titleXml = `<t>${title}</t>`;
+  const start = worksheetXml.indexOf(titleXml);
+  if (start < 0) throw new Error(`Worksheet section not found: ${title}`);
+
+  const end = nextTitle
+    ? worksheetXml.indexOf(`<t>${nextTitle}</t>`, start + titleXml.length)
+    : worksheetXml.length;
+  if (end < 0) throw new Error(`Worksheet section not found: ${nextTitle}`);
+  return worksheetXml.slice(start, end);
 }
 
 describe('map notes report', () => {
@@ -99,16 +177,20 @@ describe('map notes report', () => {
     ];
 
     const workbook = buildMapNotesReport(project, notes);
-    const content = workbookContent(workbook);
-    const generatedAt = content.match(/Wygenerowano: ([^<]+)/)?.[1] ?? '';
+    const entries = readStoreOnlyZipEntries(workbook);
+    const workbookXml = readZipTextEntry(entries, 'xl/workbook.xml');
+    const notesXml = readZipTextEntry(entries, 'xl/worksheets/sheet1.xml');
+    const generatedAt = notesXml.match(/Wygenerowano: ([^<]+)/)?.[1] ?? '';
 
     expect(workbook.subarray(0, 2).toString('ascii')).toBe('PK');
-    expect(content).toContain('<sheets><sheet name="Notatki" sheetId="1" r:id="rId1"/>');
-    expect(content).toContain('Raport notatek z mapy: Projekt testowy');
+    expect(workbookSheetsXml(workbookXml)).toBe(NOTES_ONLY_SHEETS_XML);
+    expect(worksheetEntryNames(entries)).toEqual(['xl/worksheets/sheet1.xml']);
+    expect(entries.has('xl/worksheets/sheet2.xml')).toBe(false);
+    expect(workbookXml).not.toContain('Podsumowanie Qwen');
+    expect(notesXml).toContain('Raport notatek z mapy: Projekt testowy');
     expect(generatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
     expect(new Date(generatedAt).toISOString()).toBe(generatedAt);
-    expect(content).toContain('Liczba notatek: 4');
-    expect(content).not.toContain('Podsumowanie Qwen');
+    expect(notesXml).toContain('Liczba notatek: 4');
     for (const column of [
       'Lp',
       'Typ',
@@ -120,10 +202,10 @@ describe('map notes report', () => {
       'Utworzono',
       'Aktualizacja',
     ]) {
-      expect(content).toContain(column);
+      expect(notesXml).toContain(column);
     }
     for (const label of ['Kabel', 'Punkt', 'Obszar', 'Miejsce na mapie']) {
-      expect(content).toContain(label);
+      expect(notesXml).toContain(label);
     }
     for (const body of [
       'Niedroznosc kabla',
@@ -131,28 +213,37 @@ describe('map notes report', () => {
       'Kolizja w obszarze',
       'Uszkodzona nawierzchnia',
     ]) {
-      expect(content).toContain(body);
+      expect(zipEntryNamesContainingText(entries, body)).toEqual([
+        'xl/worksheets/sheet1.xml',
+      ]);
     }
-    expect(content).toContain('Kabel K-1');
-    expect(content).toContain('node-1');
-    expect(content).toContain('53.72');
-    expect(content).toContain('20.52');
-    expect(content).not.toContain('Komentarz adresowy - nie eksportowac');
+    expect(notesXml).toContain('Kabel K-1');
+    expect(notesXml).toContain('node-1');
+    expect(notesXml).toContain('53.72');
+    expect(notesXml).toContain('20.52');
+    expect(zipEntryNamesContainingText(entries, 'Komentarz adresowy - nie eksportowac')).toEqual(
+      [],
+    );
   });
 
   it('builds a valid empty workbook with headers and an explicit empty row', () => {
     const workbook = buildMapNotesReport(project, [
       createNote({ id: 'address-note', targetType: 'address', body: 'Tylko adres' }),
     ]);
-    const content = workbookContent(workbook);
+    const entries = readStoreOnlyZipEntries(workbook);
+    const workbookXml = readZipTextEntry(entries, 'xl/workbook.xml');
+    const notesXml = readZipTextEntry(entries, 'xl/worksheets/sheet1.xml');
 
     expect(workbook.subarray(0, 2).toString('ascii')).toBe('PK');
-    expect(content).toContain('Notatki');
-    expect(content).toContain('Liczba notatek: 0');
-    expect(content).toContain('Lp');
-    expect(content).toContain('Aktualizacja');
-    expect(content).toContain('Brak notatek nieprzypisanych do adresow');
-    expect(content).not.toContain('Tylko adres');
+    expect(workbookSheetsXml(workbookXml)).toBe(NOTES_ONLY_SHEETS_XML);
+    expect(worksheetEntryNames(entries)).toEqual(['xl/worksheets/sheet1.xml']);
+    expect(entries.has('xl/worksheets/sheet2.xml')).toBe(false);
+    expect(workbookXml).not.toContain('Podsumowanie Qwen');
+    expect(notesXml).toContain('Liczba notatek: 0');
+    expect(notesXml).toContain('Lp');
+    expect(notesXml).toContain('Aktualizacja');
+    expect(notesXml).toContain('Brak notatek nieprzypisanych do adresow');
+    expect(notesXml).not.toContain('Tylko adres');
   });
 
   it('adds a Qwen summary sheet with all supplied summary metadata', () => {
@@ -165,24 +256,57 @@ describe('map notes report', () => {
       generatedAt: '2026-07-15T12:34:56.000Z',
     };
 
-    const content = workbookContent(
-      buildMapNotesReport(
-        project,
-        [createNote({ id: 'free-note', targetType: 'free', body: 'Notatka terenowa' })],
-        summary,
-      ),
+    const workbook = buildMapNotesReport(
+      project,
+      [createNote({ id: 'free-note', targetType: 'free', body: 'Notatka terenowa' })],
+      summary,
     );
+    const entries = readStoreOnlyZipEntries(workbook);
+    const workbookXml = readZipTextEntry(entries, 'xl/workbook.xml');
+    const summaryXml = readZipTextEntry(entries, 'xl/worksheets/sheet2.xml');
 
-    expect(content).toContain('Podsumowanie Qwen');
-    expect(content).toContain(summary.overview);
+    expect(workbookSheetsXml(workbookXml)).toBe(NOTES_AND_SUMMARY_SHEETS_XML);
+    expect(worksheetEntryNames(entries)).toEqual([
+      'xl/worksheets/sheet1.xml',
+      'xl/worksheets/sheet2.xml',
+    ]);
+    expect(zipEntryNamesContainingText(entries, 'Notatka terenowa')).toEqual([
+      'xl/worksheets/sheet1.xml',
+    ]);
     for (const value of [
+      summary.overview,
       ...summary.blockers,
       ...summary.recommendedActions,
       ...summary.attentionPoints,
       summary.model,
       summary.generatedAt,
     ]) {
-      expect(content).toContain(value);
+      expect(summaryXml).toContain(value);
+      expect(zipEntryNamesContainingText(entries, value)).toEqual([
+        'xl/worksheets/sheet2.xml',
+      ]);
     }
+  });
+
+  it('renders Brak in every empty Qwen list section', () => {
+    const summary: MapNotesSummary = {
+      overview: 'Brak pilnych problemow.',
+      blockers: [],
+      recommendedActions: [],
+      attentionPoints: [],
+      model: 'qwen2.5vl:3b',
+      generatedAt: '2026-07-15T12:34:56.000Z',
+    };
+    const workbook = buildMapNotesReport(project, [], summary);
+    const entries = readStoreOnlyZipEntries(workbook);
+    const summaryXml = readZipTextEntry(entries, 'xl/worksheets/sheet2.xml');
+
+    expect(worksheetSectionXml(summaryXml, 'Blokery', 'Rekomendowane dzialania')).toContain(
+      '<t>Brak</t>',
+    );
+    expect(
+      worksheetSectionXml(summaryXml, 'Rekomendowane dzialania', 'Punkty wymagajace uwagi'),
+    ).toContain('<t>Brak</t>');
+    expect(worksheetSectionXml(summaryXml, 'Punkty wymagajace uwagi')).toContain('<t>Brak</t>');
   });
 });
