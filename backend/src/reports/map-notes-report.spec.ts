@@ -100,12 +100,15 @@ describe('map notes report', () => {
 
     const workbook = buildMapNotesReport(project, notes);
     const content = workbookContent(workbook);
+    const generatedAt = content.match(/Wygenerowano: ([^<]+)/)?.[1] ?? '';
 
     expect(workbook.subarray(0, 2).toString('ascii')).toBe('PK');
-    expect(content).toContain('Notatki');
+    expect(content).toContain('<sheets><sheet name="Notatki" sheetId="1" r:id="rId1"/>');
     expect(content).toContain('Raport notatek z mapy: Projekt testowy');
-    expect(content).toContain('Wygenerowano:');
+    expect(generatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+    expect(new Date(generatedAt).toISOString()).toBe(generatedAt);
     expect(content).toContain('Liczba notatek: 4');
+    expect(content).not.toContain('Podsumowanie Qwen');
     for (const column of [
       'Lp',
       'Typ',
