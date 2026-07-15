@@ -67,37 +67,58 @@ export async function summarizeMapNotes(
     input.ollamaUrl?.trim() || process.env.OLLAMA_URL?.trim() || DEFAULT_OLLAMA_URL;
   const requestTimeoutMs = input.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
   const fetchImpl = input.fetchImpl ?? globalThis.fetch;
-  const response = await fetchImpl(`${ollamaUrl.replace(/\/+$/, '')}/api/chat`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    signal: AbortSignal.timeout(requestTimeoutMs),
-    body: JSON.stringify({
-      model,
-      stream: false,
-      format: 'json',
-      options: {
-        temperature: 0,
-        num_ctx: 8192,
-      },
-      messages: [
-        {
-          role: 'user',
-          content: buildMapNotesPrompt(input.projectName, input.notes),
+  let response: Response;
+
+  try {
+    response = await fetchImpl(`${ollamaUrl.replace(/\/+$/, '')}/api/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: AbortSignal.timeout(requestTimeoutMs),
+      body: JSON.stringify({
+        model,
+        stream: false,
+        format: 'json',
+        options: {
+          temperature: 0,
+          num_ctx: 8192,
         },
-      ],
-    }),
-  });
+        messages: [
+          {
+            role: 'user',
+            content: buildMapNotesPrompt(input.projectName, input.notes),
+          },
+        ],
+      }),
+    });
+  } catch (error) {
+    if (isTimeoutOrAbortError(error)) {
+      throw new Error(`Ollama request timed out after ${requestTimeoutMs} ms`, { cause: error });
+    }
+
+    throw new Error(`Ollama request failed: ${getErrorMessage(error)}`, { cause: error });
+  }
+
+  let responseBody: string;
+  try {
+    responseBody = await response.text();
+  } catch (error) {
+    throw new Error(`Unable to read Ollama response: ${getErrorMessage(error)}`, {
+      cause: error,
+    });
+  }
 
   if (!response.ok) {
-    const responseBody = (await response.text()).trim() || '<empty response body>';
-    throw new Error(`Ollama HTTP ${response.status}: ${responseBody}`);
+    const errorBody = responseBody.trim() || '<empty response body>';
+    throw new Error(`Ollama HTTP ${response.status}: ${errorBody}`);
   }
 
   let payload: unknown;
   try {
-    payload = await response.json();
+    payload = JSON.parse(responseBody);
   } catch (error) {
-    throw new Error(`Ollama response was not valid JSON: ${getErrorMessage(error)}`);
+    throw new Error(`Ollama response was not valid JSON: ${getErrorMessage(error)}`, {
+      cause: error,
+    });
   }
 
   const message = isRecord(payload) && isRecord(payload.message) ? payload.message : null;
@@ -122,18 +143,18 @@ function buildMapNotesPrompt(projectName: string, notes: ProjectMapNote[]): stri
   }));
 
   return [
-    'Jesteś asystentem kierownika budowy sieci FTTH.',
-    'Przeanalizuj notatki z mapy pod kątem blokad terenowych, kolejnych działań i punktów wymagających uwagi.',
-    'Nie wymyślaj faktów, których nie ma w notatkach.',
+    'Jestes asystentem kierownika budowy sieci FTTH.',
+    'Przeanalizuj notatki z mapy pod katem blokad terenowych, kolejnych dzialan i punktow wymagajacych uwagi.',
+    'Nie wymyslaj faktow, ktorych nie ma w notatkach.',
     '',
     `Projekt: ${projectName}`,
     '',
-    'Notatki z mapy (bez zdjęć):',
+    'Notatki z mapy (bez zdjec):',
     JSON.stringify(noteData, null, 2),
     '',
-    'Odpowiedz wyłącznie poprawnym obiektem JSON bez markdown.',
-    'Użyj dokładnie kluczy: overview, blockers, recommendedActions, attentionPoints.',
-    'overview ma być niepustym stringiem, a pozostałe pola tablicami krótkich stringów.',
+    'Odpowiedz wylacznie poprawnym obiektem JSON bez markdown.',
+    'Uzyj dokladnie kluczy: overview, blockers, recommendedActions, attentionPoints.',
+    'overview ma byc niepustym stringiem, a pozostale pola tablicami krotkich stringow.',
     '{"overview":"...","blockers":["..."],"recommendedActions":["..."],"attentionPoints":["..."]}',
   ].join('\n');
 }
@@ -195,6 +216,10 @@ function normalizeGeneratedAt(value: string | undefined): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isTimeoutOrAbortError(error: unknown): boolean {
+  return error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError');
 }
 
 function getErrorMessage(error: unknown): string {

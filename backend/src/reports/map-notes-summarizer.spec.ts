@@ -225,6 +225,10 @@ describe('summarizeMapNotes', () => {
     });
 
     const prompt = body.messages[0].content;
+    expect(prompt).toContain('Jestes asystentem kierownika budowy sieci FTTH.');
+    expect(prompt).toContain('Przeanalizuj notatki z mapy pod katem blokad terenowych');
+    expect(prompt).not.toMatch(/[\u0139\u00c4\u00c5\u0102]/);
+    expect(prompt).toMatch(/^[\x00-\x7f]*$/);
     for (const value of [
       'Projekt Olsztyn FTTH',
       'cable',
@@ -298,6 +302,69 @@ describe('summarizeMapNotes', () => {
       'http://localhost:11434/api/chat',
       'http://localhost:11434/api/chat',
     ]);
+  });
+
+  it('wraps Ollama connection failures and preserves the original cause', async () => {
+    const connectionError = new Error('connect ECONNREFUSED');
+    const fetchImpl: typeof fetch = async () => {
+      throw connectionError;
+    };
+
+    await expect(
+      summarizeMapNotes({
+        projectName: 'Projekt testowy',
+        notes: [],
+        fetchImpl,
+      }),
+    ).rejects.toMatchObject({
+      message: 'Ollama request failed: connect ECONNREFUSED',
+      cause: connectionError,
+    });
+  });
+
+  it('reports Ollama timeouts with the configured duration and preserves the cause', async () => {
+    const timeoutError = new DOMException('The operation timed out', 'TimeoutError');
+    const fetchImpl: typeof fetch = async () => {
+      throw timeoutError;
+    };
+
+    await expect(
+      summarizeMapNotes({
+        projectName: 'Projekt testowy',
+        notes: [],
+        requestTimeoutMs: 4321,
+        fetchImpl,
+      }),
+    ).rejects.toMatchObject({
+      message: 'Ollama request timed out after 4321 ms',
+      cause: timeoutError,
+    });
+  });
+
+  it('reports response-body read failures separately from malformed JSON', async () => {
+    const readError = new Error('response stream failed');
+    const response = {
+      ok: true,
+      status: 200,
+      text: async () => {
+        throw readError;
+      },
+      json: async () => {
+        throw readError;
+      },
+    } as unknown as Response;
+    const fetchImpl: typeof fetch = async () => response;
+
+    await expect(
+      summarizeMapNotes({
+        projectName: 'Projekt testowy',
+        notes: [],
+        fetchImpl,
+      }),
+    ).rejects.toMatchObject({
+      message: 'Unable to read Ollama response: response stream failed',
+      cause: readError,
+    });
   });
 
   it('includes the Ollama status and response body in HTTP errors', async () => {
