@@ -177,8 +177,9 @@ export function getSuggestedCandidates(input: {
     .filter(
       ({ candidate, score }) =>
         input.selected.has(candidate.id) ||
-        score > 0 ||
-        (query && (normalize(candidate.name).includes(query) || normalize(candidate.path).includes(query))),
+        (query
+          ? normalize(candidate.name).includes(query) || normalize(candidate.path).includes(query)
+          : score > 0),
     )
     .sort((left, right) => {
       const leftSelected = input.selected.has(left.candidate.id);

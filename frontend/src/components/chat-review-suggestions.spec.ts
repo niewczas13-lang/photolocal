@@ -125,7 +125,7 @@ describe('chat review suggestions', () => {
       query: 'Malenicka 7',
     });
 
-    expect(suggested.some(({ candidate }) => candidate.id === 'address-7')).toBe(true);
+    expect(suggested.map(({ candidate }) => candidate.id)).toEqual(['address-7']);
   });
 
   it('uses the checklist category as the primary display label for generic folders', () => {
