@@ -5,6 +5,7 @@ import type { ProjectsRepository } from '../projects/projects-repository.js';
 import {
   processPhoto as defaultProcessPhoto,
   resolvePhotoTarget,
+  type ProcessPhotoOptions,
   type ProcessedPhoto,
   type ReserveLocation,
 } from '../photos/photo-processor.js';
@@ -18,7 +19,7 @@ export interface AcceptChatBatchInput {
   reserveLocation: ReserveLocation | null;
   projectsRepository: ProjectsRepository;
   batchesRepository: ChatBatchesRepository;
-  processPhoto?: (sourceBuffer: Buffer) => Promise<ProcessedPhoto>;
+  processPhoto?: (sourceBuffer: Buffer, options?: ProcessPhotoOptions) => Promise<ProcessedPhoto>;
 }
 
 export interface AcceptChatBatchResult {
@@ -80,7 +81,9 @@ export async function acceptChatBatch(input: AcceptChatBatchInput): Promise<Acce
       if (knownPhotoHashes.has(contentHash)) {
         continue;
       }
-      const processed = await processor(sourceBuffer);
+      const processed = await processor(sourceBuffer, {
+        fallbackCapturedAt: batch.sourceCreateTime,
+      });
       const target = resolvePhotoTarget({
         projectFolder: project.baseFolder,
         nodePath: node.path,

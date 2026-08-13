@@ -1,5 +1,10 @@
 import type { ProjectsRepository } from '../projects/projects-repository.js';
-import { isReserveLocation, type ProcessedPhoto, type ReserveLocation } from '../photos/photo-processor.js';
+import {
+  isReserveLocation,
+  type ProcessPhotoOptions,
+  type ProcessedPhoto,
+  type ReserveLocation,
+} from '../photos/photo-processor.js';
 import { acceptChatBatch } from './chat-batch-acceptance.js';
 import type { ChatBatchesRepository } from './chat-batches-repository.js';
 
@@ -7,7 +12,7 @@ export interface AcceptReadyChatBatchesInput {
   projectId: string;
   projectsRepository: ProjectsRepository;
   batchesRepository: ChatBatchesRepository;
-  processPhoto?: (sourceBuffer: Buffer) => Promise<ProcessedPhoto>;
+  processPhoto?: (sourceBuffer: Buffer, options?: ProcessPhotoOptions) => Promise<ProcessedPhoto>;
 }
 
 export interface AcceptReadyChatBatchesResult {

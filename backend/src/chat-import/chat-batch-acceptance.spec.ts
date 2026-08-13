@@ -101,6 +101,46 @@ function createManifest(folderPath: string): ChatManifest {
 }
 
 describe('acceptChatBatch', () => {
+  it('passes the Google Chat message date as photo metadata fallback', async () => {
+    const { db, projects, batches, projectId, dir } = createContext();
+    const batch = batches.importManifest({
+      projectId,
+      manifest: {
+        ...createManifest(join(dir, 'Maleniecka 5 fallback date')),
+        files: [{ fileName: 'photo.jpeg', contentName: 'photo.jpeg', contentType: 'image/jpeg' }],
+      },
+      status: 'PENDING_REVIEW',
+    });
+    let receivedFallback: string | Date | null | undefined;
+
+    await acceptChatBatch({
+      projectId,
+      batchId: batch.id,
+      checklistNodeIds: ['node-maleniecka-5'],
+      reserveLocation: 'W studni',
+      projectsRepository: projects,
+      batchesRepository: batches,
+      processPhoto: async (_sourceBuffer, options) => {
+        receivedFallback = options?.fallbackCapturedAt;
+        return {
+          buffer: Buffer.from('processed-photo'),
+          thumbnail: Buffer.from('thumb'),
+          mimeType: 'image/jpeg',
+          fileSize: 15,
+          lat: null,
+          lng: null,
+          capturedAt: typeof receivedFallback === 'string' ? receivedFallback : null,
+        };
+      },
+    });
+
+    const photos = projects.getNodePhotos(projectId, 'node-maleniecka-5');
+    db.close();
+
+    expect(receivedFallback).toBe('2026-04-27T10:00:00Z');
+    expect(photos[0].capturedAt).toBe('2026-04-27T10:00:00Z');
+  });
+
   it('copies the same reviewed chat photos into multiple checklist nodes', async () => {
     const { db, projects, batches, projectId, dir } = createContext();
     const batch = batches.importManifest({
