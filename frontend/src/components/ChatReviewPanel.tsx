@@ -304,10 +304,12 @@ export default function ChatReviewPanel({
                   <div className="grid md:grid-cols-2 gap-2">
                     {suggested.map(({ candidate }) => {
                       const display = getCandidateDisplay(candidate);
+                      const fullLabel = [display.primary, display.buildingNumber].filter(Boolean).join(' ');
                       return (
                         <label
                           key={candidate.id}
                           className="flex items-start gap-2 rounded-md border p-2 text-sm cursor-pointer hover:bg-muted/50"
+                          title={`${fullLabel}\n${display.secondary}`}
                         >
                           <input
                             type="checkbox"
@@ -321,18 +323,26 @@ export default function ChatReviewPanel({
                             }
                             className="mt-1"
                           />
-                          <span className="min-w-0">
+                          <span className="min-w-0 flex-1">
                             <span className="flex items-center gap-2 min-w-0">
-                              <span className="block font-semibold truncate text-foreground">
+                              <span className="block min-w-0 flex-1 font-semibold truncate text-foreground">
                                 {display.primary}
                               </span>
+                              {display.buildingNumber && (
+                                <span
+                                  className="shrink-0 rounded border bg-background px-1.5 py-0.5 font-mono text-xs font-semibold text-foreground"
+                                  aria-label={`Numer domu ${display.buildingNumber}`}
+                                >
+                                  {display.buildingNumber}
+                                </span>
+                              )}
                               {candidate.nodeType === 'CABLE_RESERVE' && (
                                 <Badge variant="secondary" className="shrink-0 text-[10px]">
                                   zapas
                                 </Badge>
                               )}
                             </span>
-                            <span className="block text-xs text-muted-foreground truncate">
+                            <span className="block text-xs text-muted-foreground truncate" title={display.secondary}>
                               {display.secondary}
                             </span>
                           </span>

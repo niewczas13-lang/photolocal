@@ -128,6 +128,21 @@ describe('chat review suggestions', () => {
     expect(suggested.map(({ candidate }) => candidate.id)).toEqual(['address-7']);
   });
 
+  it('separates the building number from a long reserve folder label', () => {
+    const candidate: CandidateNode = {
+      id: 'long-address',
+      name: 'UL_KROLA_STANISLAWA_LESZCZYNSKIEGO_30A',
+      path: 'Zapasy_kabli_instalacyjnych/OSTROLEKA_OSD0238/UL_KROLA_STANISLAWA_LESZCZYNSKIEGO_30A',
+      nodeType: 'CABLE_RESERVE',
+    };
+
+    expect(getCandidateDisplay(candidate)).toEqual({
+      primary: 'UL KROLA STANISLAWA LESZCZYNSKIEGO',
+      buildingNumber: '30A',
+      secondary: candidate.path,
+    });
+  });
+
   it('uses the checklist category as the primary display label for generic folders', () => {
     expect(getCandidateDisplay(candidates.find((candidate) => candidate.id === 'notes')!)).toEqual({
       primary: 'Notatki z budowy',

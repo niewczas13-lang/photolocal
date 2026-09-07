@@ -20,6 +20,7 @@ export interface SuggestedCandidate {
 export interface CandidateDisplay {
   primary: string;
   secondary: string;
+  buildingNumber?: string;
 }
 
 const FRIENDLY_SEGMENT_LABELS: Record<string, string> = {
@@ -58,9 +59,11 @@ export function getCandidateDisplay(candidate: CandidateNode): CandidateDisplay 
   const leafLabel = prettifySegment(leaf);
 
   if (candidate.nodeType === 'CABLE_RESERVE') {
+    const addressMatch = /^(.*)\s+([a-z]?\d+[a-z]?)$/i.exec(prettifySegment(candidate.name));
     return {
-      primary: prettifySegment(candidate.name),
+      primary: addressMatch?.[1] ?? prettifySegment(candidate.name),
       secondary: candidate.path,
+      ...(addressMatch?.[2] ? { buildingNumber: addressMatch[2] } : {}),
     };
   }
 
