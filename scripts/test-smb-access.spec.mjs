@@ -221,13 +221,28 @@ test('failed mount returns a fixed status and never echoes secret-bearing Docker
     stdout: `sensitive stdout ${INPUT.password}`,
     stderr: `error mounting volume: permission denied; password=${INPUT.password}`,
   });
-  assert.deepEqual(report, { status: 'ACCESS_DENIED', cleanup: 'CLEAN', probeId: PROBE_ID });
+  assert.deepEqual(report, { status: 'MOUNT_ACCESS_DENIED', cleanup: 'CLEAN', probeId: PROBE_ID });
   assert.equal(JSON.stringify(report).includes(INPUT.password), false);
   assert.equal(calls.filter((call) => isCleanup(call.args)).length, 2);
   for (const call of calls) {
     assertScopedProject(call);
     assert.equal(call.args.some((arg) => String(arg).includes(INPUT.password)), false);
   }
+});
+
+test('directory denial after the probe starts is distinct from a rejected mount', async () => {
+  const { report } = await exerciseProbe({
+    code: 5, stdout: 'PROBE_STARTED\nDIRECTORY_ACCESS_DENIED\n', stderr: '',
+  });
+  assert.equal(report.status, 'DIRECTORY_ACCESS_DENIED');
+  assert.equal(report.cleanup, 'CLEAN');
+});
+
+test('a directory-denial marker without a started probe does not diagnose filesystem permissions', async () => {
+  const { report } = await exerciseProbe({
+    code: 1, stdout: 'DIRECTORY_ACCESS_DENIED\n', stderr: 'mount failed: permission denied',
+  });
+  assert.equal(report.status, 'MOUNT_ACCESS_DENIED');
 });
 
 test('success marker cannot override a failed process exit', async () => {

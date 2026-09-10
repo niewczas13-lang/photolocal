@@ -252,7 +252,10 @@ jest wyłączone. Test tylko odczytuje katalog; nie potwierdza jeszcze dostępu 
 wszystkich zdjęć, możliwości zapisu ani autostartu. Nie wymaga zatrzymania aplikacji.
 
 Raport `Status: DIRECTORY_READ_OK` i `Cleanup: CLEAN` potwierdza odczyt i zakończenie
-sprzątania. `Cleanup: REQUIRED` wymaga sprawdzenia zasobów nazwanych w `ProbeId`
+sprzątania. `MOUNT_ACCESS_DENIED` oznacza odmowę przed odczytem katalogu (np.
+uwierzytelnienie, uprawnienia udziału lub zasady SMB), a `DIRECTORY_ACCESS_DENIED`
+odmowę odczytu w uruchomionym kontenerze. Żaden z tych kodów samodzielnie nie
+potwierdza błędnego hasła. `Cleanup: REQUIRED` wymaga sprawdzenia zasobów nazwanych w `ProbeId`
 (wolumen ma dodatkowo końcówkę `-remote`); po timeoutach silnik może jeszcze kończyć
 montowanie. Skrypt usuwa wyłącznie zasoby tej próby. Nigdy nie wykonuje `prune`.
 `CREDENTIAL_FORMAT_UNSUPPORTED` oznacza, że nie wykonano logowania: przecinek,

@@ -6,6 +6,7 @@ import { pathToFileURL } from 'node:url';
 const PROBE_ID = /^photolocal-smb-probe-[a-f0-9]+$/;
 const OUTPUT_LIMIT = 64 * 1024;
 const PYTHON_PROBE = `import os, sys
+print('PROBE_STARTED', flush=True)
 try:
     with os.scandir(sys.argv[1]) as entries:
         for index, entry in enumerate(entries):
@@ -16,7 +17,7 @@ except FileNotFoundError:
     print('DIRECTORY_MISSING', flush=True)
     sys.exit(4)
 except PermissionError:
-    print('ACCESS_DENIED', flush=True)
+    print('DIRECTORY_ACCESS_DENIED', flush=True)
     sys.exit(5)
 except OSError:
     print('OTHER_ERROR', flush=True)
@@ -131,12 +132,13 @@ function classify(result) {
   if (result.timedOut) return 'TIMEOUT';
   const lines = result.stdout.trim().split(/\r?\n/);
   if (result.code === 0 && lines.includes('DIRECTORY_READ_OK')) return 'DIRECTORY_READ_OK';
-  for (const status of ['DIRECTORY_MISSING', 'ACCESS_DENIED']) {
-    if (lines.includes(status)) return status;
+  if (lines.includes('PROBE_STARTED') && lines.includes('DIRECTORY_ACCESS_DENIED')) {
+    return 'DIRECTORY_ACCESS_DENIED';
   }
+  if (lines.includes('DIRECTORY_MISSING')) return 'DIRECTORY_MISSING';
   // Classify privately; the actual Docker message can contain a password.
   const error = result.stderr.toLowerCase();
-  if (/permission denied|access denied|logon failure/.test(error)) return 'ACCESS_DENIED';
+  if (/permission denied|access denied|logon failure/.test(error)) return 'MOUNT_ACCESS_DENIED';
   if (/no such image|image .*not found/.test(error)) return 'IMAGE_MISSING';
   if (/no route to host|host is down|network is unreachable|connection refused/.test(error)) return 'UNREACHABLE';
   if (/not supported|no such device|unknown filesystem/.test(error)) return 'UNSUPPORTED';

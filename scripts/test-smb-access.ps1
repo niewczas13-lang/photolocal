@@ -59,7 +59,7 @@ try {
 
   # Never print raw child output: Docker mount errors may contain credentials.
   $probeReport = $probeOutput.Result | ConvertFrom-Json
-  $allowedStatuses = @('DIRECTORY_READ_OK', 'ACCESS_DENIED', 'UNREACHABLE', 'UNSUPPORTED', 'TIMEOUT', 'IMAGE_MISSING', 'DIRECTORY_MISSING', 'OTHER_ERROR', 'CREDENTIAL_FORMAT_UNSUPPORTED', 'INVALID_INPUT')
+  $allowedStatuses = @('DIRECTORY_READ_OK', 'MOUNT_ACCESS_DENIED', 'DIRECTORY_ACCESS_DENIED', 'UNREACHABLE', 'UNSUPPORTED', 'TIMEOUT', 'IMAGE_MISSING', 'DIRECTORY_MISSING', 'OTHER_ERROR', 'CREDENTIAL_FORMAT_UNSUPPORTED', 'INVALID_INPUT')
   if ($probeReport.status -notin $allowedStatuses -or $probeReport.cleanup -notin @('CLEAN', 'REQUIRED', 'NOT_NEEDED')) { throw 'INVALID_REPORT' }
   if ($probeReport.probeId -ne '' -and $probeReport.probeId -notmatch '^photolocal-smb-probe-[a-f0-9]+$') { throw 'INVALID_REPORT' }
   [pscustomobject]@{
