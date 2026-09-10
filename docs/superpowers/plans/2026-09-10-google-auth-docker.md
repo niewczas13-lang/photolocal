@@ -48,7 +48,7 @@
 
 - [x] Test configured Linux roots and traversal/symlink rejection; test all stored path columns are remapped on a destination backup while the source remains unchanged.
 - [x] Implement cross-platform build, image, health check and explicit mounts; persist token/job/download data, connect Ollama through configured URL.
-- [ ] Build and smoke-test on Linux CI with isolated synthetic data (local engine did not start).
+- [x] Linux CI built the final image and verified isolated health, authentication, captions and data persistence across restart/recreation; [successful run](https://github.com/niewczas13-lang/photolocal/actions/runs/34457234245). Local Docker Desktop did not start.
 - [x] Document OAuth web-client setup including `https://romek.pawelzykubek.pl/api/google-chat/auth/callback`, Google Testing status, data backup, mount mappings, cutover and rollback.
 
 ## 6. Review and production readiness
@@ -56,3 +56,15 @@
 - [x] Independent spec and code quality/security reviews passed after resolving and re-reviewing two P2 recovery issues.
 - [x] Run complete relevant suites and builds once integrated.
 - [ ] Production directory and RDP-only management are confirmed. Still verify the actual server commit, data paths, Docker startup and Google setup before any live switch.
+
+## Verification record
+
+On 2026-09-10, implementation commit `5bb63b1` passed 274 backend, 114 frontend,
+47 Python and 20 migration tests on Windows and Linux. Each backend run skips one
+test specific to the other platform. Both production builds pass. The Docker smoke
+test runs without external network or published ports, uses synthetic volumes, and
+checks native libraries, rendered caption glyphs, cookie sessions, saved Google/job
+state, graceful shutdown, restart/recreation persistence and resource cleanup.
+EXIF offset handling was corrected after the first Linux run exposed a host-timezone
+dependency. Independent re-review passed. Real Google consent, production migration
+and host reboot remain deployment checks; no production data or configuration was changed.
