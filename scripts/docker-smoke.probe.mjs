@@ -8,6 +8,7 @@ import Database from 'better-sqlite3';
 import sharp from 'sharp';
 import { upsertAppUser } from './backend/dist/auth/app-auth.js';
 import { runMigrations } from './backend/dist/db/migrations.js';
+import { processPhoto } from './backend/dist/photos/photo-processor.js';
 import { writeJsonAtomic } from './backend/dist/google-chat/google-chat-files.js';
 
 assert.equal(process.env.PHOTO_LOCAL_SMOKE_TEST, '1', 'Run only through the Docker smoke harness');
@@ -55,6 +56,16 @@ if (mode === 'seed') {
   await mkdir('/downloads/ci-space', { recursive: true });
   await sharp({ create: { width: 1, height: 1, channels: 3, background: 'white' } })
     .jpeg().toFile('/photos/ci-project/synthetic.jpg');
+  const captionSource = await sharp({ create: { width: 800, height: 600, channels: 3, background: 'white' } }).jpeg().toBuffer();
+  const captioned = await processPhoto(captionSource, { fallbackCapturedAt: '2026-08-13T10:30:45.000Z' });
+  const pixels = await sharp(captioned.buffer).raw().toBuffer({ resolveWithObject: true });
+  let brightGlyphPixels = 0;
+  for (let y = pixels.info.height - 40; y < pixels.info.height - 10; y += 1) {
+    for (let x = 12; x < pixels.info.width - 12; x += 1) {
+      if (pixels.data[(y * pixels.info.width + x) * pixels.info.channels] > 200) brightGlyphPixels += 1;
+    }
+  }
+  assert.ok(brightGlyphPixels > 50, 'Final image must render caption glyphs inside the dark caption bar');
   await writeFile('/photos/ci-project/sentinel.txt', fixture.sentinel);
   await writeFile('/downloads/ci-space/sentinel.txt', fixture.sentinel);
   writeJsonAtomic('/downloads/.spaces.json', { 'spaces/ci': 'ci-space' });

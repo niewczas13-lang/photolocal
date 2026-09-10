@@ -2,7 +2,8 @@
 FROM node:24-bookworm-slim AS base
 WORKDIR /app
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates python3 python3-venv \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+       ca-certificates fonts-dejavu-core python3 python3-venv tzdata \
     && rm -rf /var/lib/apt/lists/*
 
 FROM base AS node-dependencies
@@ -31,7 +32,9 @@ RUN python3 -m venv /opt/venv \
     && /opt/venv/bin/pip install --no-cache-dir -r /tmp/requirements.txt
 
 FROM base AS runtime
+# Offsetless EXIF uses server local time. Override TZ at runtime for other deployments.
 ENV NODE_ENV=production \
+    TZ=Europe/Warsaw \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PHOTO_LOCAL_HOST=0.0.0.0 \

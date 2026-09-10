@@ -17,6 +17,12 @@ logs/
 data/
 *.pid
 .env
+.env.*
+!.env.example
+!.env.docker.example
+**/credentials*.json
+**/token*.json
+**/*client_secret*.json
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal

@@ -136,6 +136,11 @@ zapisywalnego katalogu. W `.env.docker` używaj ścieżek Windows z `/`, np.
 Skonfiguruj również `OLLAMA_URL`; domyślnie kontener łączy się z hostem przez
 `http://host.docker.internal:11434`. Sprawdź dostęp i wybrany model przed klasyfikacją.
 
+Obraz domyślnie używa `TZ=Europe/Warsaw`, aby zachować interpretację zdjęć, których
+EXIF nie podaje strefy czasowej, tak jak na dotychczasowym serwerze. Jawny offset
+zapisany w EXIF ma pierwszeństwo. Dla instalacji w innej strefie ustaw `TZ` w sekcji
+`environment` usługi. Obraz zawiera też czcionki potrzebne do napisów na zdjęciach.
+
 ## 5. Kopia danych i mapowanie ścieżek
 
 Zaczekaj na koniec pobierania, importowania, klasyfikacji i zapisu zdjęć. Wstrzymaj

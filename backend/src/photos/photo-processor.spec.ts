@@ -32,6 +32,11 @@ function averageRowBrightness(data: Buffer, width: number, channels: number, row
   return total / (width * 3);
 }
 
+async function createExifPhoto(exif: Record<string, Record<string, string>>): Promise<Buffer> {
+  return sharp({ create: { width: 160, height: 120, channels: 3, background: '#ffffff' } })
+    .jpeg().withExif(exif).toBuffer();
+}
+
 describe('photo processor naming', () => {
   it('names underground reserve photos by address and index', () => {
     expect(buildReservePhotoName('WRONCKIEJ_13', 3)).toBe('WRONCKIEJ_13_foto3.jpeg');
@@ -146,5 +151,47 @@ describe('photo processor naming', () => {
     expect(buildPhotoCaption(processed)).toBe(
       'Data: 13.08.2026 12:30:45 | GPS: 53.767780, 20.537700',
     );
+  });
+
+  it.each([
+    ['2026:08:13 12:30:45', '+05:30', '2026-08-13T07:00:45.000Z'],
+    ['2026:03:29 01:30:00', '+01:00', '2026-03-29T00:30:00.000Z'],
+    ['2026:03:29 03:30:00', '+02:00', '2026-03-29T01:30:00.000Z'],
+    ['2026:10:25 02:30:00', '+02:00', '2026-10-25T00:30:00.000Z'],
+    ['2026:10:25 02:30:00', '+01:00', '2026-10-25T01:30:00.000Z'],
+  ])('honors EXIF offset %s %s independently of host timezone', async (date, offset, expected) => {
+    const processed = await processPhoto(await createExifPhoto({
+      IFD2: { DateTimeOriginal: date, OffsetTimeOriginal: offset },
+    }));
+    expect(processed.capturedAt).toBe(expected);
+  });
+
+  it('uses the digitized date with its own negative offset', async () => {
+    const processed = await processPhoto(await createExifPhoto({
+      IFD2: { DateTimeDigitized: '2026:08:13 12:30:45', OffsetTimeDigitized: '-04:00' },
+    }));
+    expect(processed.capturedAt).toBe('2026-08-13T16:30:45.000Z');
+  });
+
+  it.each([
+    ['2026:08:13 12:30:45', '+XX:YY'],
+    ['2026:08:13 12:30:45', '+25:00'],
+    ['not-a-date', '+02:00'],
+  ])('uses fallback instead of invalid EXIF date/offset %s %s', async (date, offset) => {
+    const fallbackCapturedAt = '2026-08-10T08:00:00.000Z';
+    const processed = await processPhoto(await createExifPhoto({
+      IFD2: { DateTimeOriginal: date, OffsetTimeOriginal: offset },
+    }), { fallbackCapturedAt });
+    expect(processed.capturedAt).toBe(fallbackCapturedAt);
+  });
+
+  it.each([
+    ['2026:08:13 12:30:45', 7],
+    ['2026:01:13 12:30:45', 0],
+  ] as const)('retains local-time interpretation for offsetless EXIF %s', async (date, month) => {
+    const processed = await processPhoto(await createExifPhoto({ IFD2: { DateTimeOriginal: date } }));
+    // Legacy Windows behavior: missing EXIF offset means the configured server timezone.
+    // Docker defaults to Europe/Warsaw, including its summer/winter offset changes.
+    expect(processed.capturedAt).toBe(new Date(2026, month, 13, 12, 30, 45).toISOString());
   });
 });

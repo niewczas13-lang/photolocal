@@ -153,7 +153,7 @@ try {
   await startContainer();
   await checkApplication('restored');
   await checkApplication('logout');
-  process.stdout.write('Session and persisted files survived container recreation. Docker smoke passed.\n');
+  process.stdout.write('Session and persisted files survived container recreation.\n');
 } catch (error) {
   const logs = await docker(['logs', '--tail', '100', containerName], { allowFailure: true });
   if (logs.ok) process.stderr.write(`${logs.stdout}\n${logs.stderr}\n`);
@@ -165,3 +165,4 @@ try {
     process.exitCode = 1;
   }
 }
+if (!process.exitCode) process.stdout.write('Docker smoke passed; synthetic resources removed.\n');

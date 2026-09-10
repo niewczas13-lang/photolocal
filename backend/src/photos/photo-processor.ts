@@ -97,7 +97,7 @@ interface EncodedPhotoAttempt {
   smallest: Buffer;
 }
 
-function normalizeCapturedAt(value: unknown): string | null {
+function normalizeCapturedAt(value: unknown, offsetTime?: unknown): string | null {
   if (value === null || value === undefined || value === '') return null;
 
   let date: Date;
@@ -107,8 +107,20 @@ function normalizeCapturedAt(value: unknown): string | null {
     const exifMatch = value.match(
       /^(\d{4}):(\d{2}):(\d{2})[ T](\d{2}):(\d{2}):(\d{2})/,
     );
-    date = exifMatch
-      ? new Date(
+    const offset = typeof offsetTime === 'string' ? offsetTime.trim() : offsetTime;
+    if (exifMatch && offset !== undefined && offset !== null && offset !== '') {
+      if (typeof offset !== 'string' || !/^[+-](?:[01]\d|2[0-3]):[0-5]\d$/.test(offset)) {
+        return null;
+      }
+      date = new Date(
+        `${exifMatch[1]}-${exifMatch[2]}-${exifMatch[3]}T` +
+        `${exifMatch[4]}:${exifMatch[5]}:${exifMatch[6]}${offset}`,
+      );
+    } else {
+      // Without an EXIF offset retain the server's local-time interpretation.
+      // Docker defaults to Europe/Warsaw to match the existing Windows deployment.
+      date = exifMatch
+        ? new Date(
           Number(exifMatch[1]),
           Number(exifMatch[2]) - 1,
           Number(exifMatch[3]),
@@ -116,7 +128,8 @@ function normalizeCapturedAt(value: unknown): string | null {
           Number(exifMatch[5]),
           Number(exifMatch[6]),
         )
-      : new Date(value);
+        : new Date(value);
+    }
   } else if (typeof value === 'number') {
     date = new Date(value);
   } else {
@@ -278,12 +291,18 @@ export async function processPhoto(
   let capturedAt: string | null = null;
 
   try {
-    const exif = await exifr.parse(sourceBuffer, { gps: true, tiff: true, exif: true });
+    // exifr's date revival uses host-local time without applying the separate offset tag.
+    const exif = await exifr.parse(sourceBuffer, {
+      gps: true, tiff: true, exif: true, reviveValues: false,
+    });
     lat = toFiniteNumber(exif?.latitude);
     lng = toFiniteNumber(exif?.longitude);
-    capturedAt = normalizeCapturedAt(
-      exif?.DateTimeOriginal ?? exif?.CreateDate ?? exif?.DateTimeDigitized ?? exif?.ModifyDate,
-    );
+    const captureDate = [
+      { value: exif?.DateTimeOriginal, offset: exif?.OffsetTimeOriginal },
+      { value: exif?.CreateDate ?? exif?.DateTimeDigitized, offset: exif?.OffsetTimeDigitized },
+      { value: exif?.ModifyDate, offset: exif?.OffsetTime },
+    ].find((entry) => entry.value !== undefined && entry.value !== null);
+    capturedAt = normalizeCapturedAt(captureDate?.value, captureDate?.offset);
   } catch {
     lat = null;
     lng = null;
