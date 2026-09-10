@@ -17,7 +17,7 @@ jobs:
   windows-autologon:
     name: Windows PowerShell autologon helper tests
     runs-on: windows-2022
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -26,11 +26,15 @@ jobs:
         with:
           node-version: '24'
           package-manager-cache: false
+      - name: Install backend dependencies for real Windows SQLite snapshot tests
+        run: npm ci --workspace backend
       - name: Test with Windows PowerShell 5.1 and mocked system changes
         # No passwords, real task registration, GUI launch, lock or autologon changes.
         run: node --test scripts/prepare-windows-autologon.spec.mjs scripts/lock-autologon-session.spec.mjs scripts/inspect-production-before-cutover.spec.mjs scripts/connect-production-storage.spec.mjs
       - name: Test private production preparation without live server changes
         run: node --test scripts/production-deployment-config.spec.mjs scripts/prepare-production-deployment.spec.mjs scripts/prepare-production-deployment.windows.spec.mjs
+      - name: Test final cutover with synthetic files, SQLite and mocked system changes
+        run: node --test scripts/production-file-copy.spec.mjs scripts/finalize-production-data.spec.mjs scripts/windows-native-cutover.spec.mjs scripts/switch-production-to-docker.spec.mjs
 
   javascript:
     name: Node tests, migration, and production build
@@ -55,7 +59,7 @@ jobs:
       - name: Test online snapshots and read-only staging preparation
         run: node --test scripts/snapshot-staging-database.spec.mjs scripts/connect-staging-storage.spec.mjs scripts/audit-staging-copy.spec.mjs scripts/prepare-staging-copy.spec.mjs scripts/diagnose-staging-copy.spec.mjs scripts/start-staging-preview.spec.mjs
       - name: Test production configuration and local file inventory
-        run: node --test scripts/production-deployment-config.spec.mjs scripts/prepare-production-deployment.spec.mjs
+        run: node --test scripts/production-deployment-config.spec.mjs scripts/prepare-production-deployment.spec.mjs scripts/production-file-copy.spec.mjs
       - name: Build frontend and backend
         run: npm run build
 

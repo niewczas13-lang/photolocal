@@ -584,3 +584,74 @@ nie jest uruchomiony.** `FINAL_SNAPSHOT_REQUIRED` oznacza konieczność końcowe
 po zakończeniu operacji starej aplikacji. Nie uruchamiaj samego Compose na pustych
 katalogach danych. Zachowaj raport z `runDirectory` do następnego kroku; nie wklejaj
 prywatnej konfiguracji ani plików `wrapper.*.log`.
+
+### Końcowe przełączenie na porcie 4873
+
+Po przygotowaniu konfiguracji zakończ pobieranie, import i klasyfikację oraz poproś
+użytkowników o przerwę w Romku i podglądzie stagingowym. `-WorkStopped` oznacza, że
+operator potwierdza ten stan. Stara wersja nie udostępnia globalnego mechanizmu
+opróżnienia kolejki; brak połączeń HTTP sam w sobie nie potwierdza końca operacji.
+Skrypt dodatkowo odmawia zatrzymania przy aktywnych procesach potomnych pobierania.
+
+Uruchom w Windows PowerShell na koncie właściciela Docker Desktop. Podstaw dokładny
+`runDirectory` z wyniku `PRODUCTION_CONFIG_PREPARED`, bez tworzenia nowego folderu:
+
+```powershell
+git -C C:\PhotoLocal-staging pull --ff-only
+if ($LASTEXITCODE -eq 0) {
+    powershell -NoProfile -ExecutionPolicy Bypass -File C:\PhotoLocal-staging\scripts\switch-production-to-docker.ps1 -RunDirectory 'C:\PhotoLocal-staging\docker-data\production-TWOJ_IDENTYFIKATOR' -WorkStopped
+}
+```
+
+Kontrola przed przerwą ponownie sprawdza konfigurację, obraz, wolumen i wolne miejsce.
+Tworzy aktualny snapshot SQLite, migruje jego ścieżki w izolowanym kontenerze i audytuje
+go z oryginalnymi lokalnymi plikami oraz NAS zamontowanymi tylko do odczytu. Dopuszcza
+wyłącznie konkretne braki `ENOENT` na NAS zapisane wcześniej w sprawdzonym
+`staging-preview.json` i jego raporcie diagnozy. Inne błędy dostępu lub nowe braki
+zatrzymują przełączenie. Historyczny raport opisuje dostęp z Dockera; nie dowodzi,
+że te same pliki były niedostępne dla natywnej aplikacji Windows.
+
+Następnie skrypt zatrzymuje dokładnie zweryfikowany kontener stagingowy i wyłącza
+zadanie `PhotoLocal Autostart`. Tożsamość starego Node potwierdza na podstawie
+nasłuchu, właściciela, czasu utworzenia, pliku PID, logu i definicji autostartu.
+Zatrzymuje tylko tę instancję. Stara wersja nie ma obsługi łagodnego zamykania;
+dlatego wcześniejsze zakończenie operacji przez użytkownika jest wymagane.
+
+Po zatrzymaniu powstaje **nowy** snapshot aktualnej bazy oraz osobne kopie pełnych
+katalogów pobrań i lokalnych zdjęć. Kopiowanie uwzględnia ukryte manifesty i puste
+katalogi, sprawdza zawartość SHA256 i brak zmian źródła. Nie nadpisuje istniejących
+plików ani nie korzysta z bazy zmienionej podczas testów stagingu. Kolejny audyt
+sprawdza pięć liczników i odrzuca nowe braki. Okno pokazuje postęp; pozostaw je otwarte
+do końca. Kopia około 9 GB i jej weryfikacja mogą potrwać kilka lub kilkanaście minut,
+zależnie od dysku. Limit całego procesu końcowej kopii wynosi 75 minut.
+
+Po pozytywnej weryfikacji uruchamiany jest wyłącznie projekt
+`photolocal-production`, z przypiętym istniejącym obrazem i portem `0.0.0.0:4873`.
+Kontrola końcowa wymaga zdrowego kontenera, zgodnych liczników świeżego snapshotu,
+lokalnego i publicznego `/health` oraz identycznego HTML aplikacji pod oboma adresami.
+`PRODUCTION_RUNNING` oznacza przejście tych kontroli. Następnie sprawdź w przeglądarce
+publiczny adres: logowanie do Romka, listę zleceń, kilka zdjęć i dostęp do czatów Google.
+Znane niedostępne referencje NAS pozostają odnotowane w `nasGaps`.
+
+Obsługa błędu zależy od etapu:
+
+- `CUTOVER_NOT_STARTED`: stara produkcja nie została zatrzymana. Odczytaj `failureCode`;
+  podgląd stagingowy mógł już zostać zatrzymany, jeśli błąd nastąpił przy kontroli Node.
+- `CUTOVER_FAILED_NATIVE_RESTORED`: próba zakończyła się przed uruchomieniem nowej
+  aplikacji; oryginalny autostart i proces zostały przywrócone. Częściowe kopie pozostają.
+- `NATIVE_RECOVERY_NEEDS_ATTENTION`: automatyczne przywrócenie nie zostało potwierdzone;
+  potrzebna jest diagnostyka wskazanego stanu, bez zbiorczego zabijania procesów.
+- `PRODUCTION_NEEDS_ATTENTION`: nowa aplikacja mogła przyjąć zapisy. **Nie uruchamiaj
+  starej bazy i nie usuwaj danych kontenera.** Najpierw sprawdź nowy kontener i raport.
+
+Prywatny `production-start-attempted.json` jest zapisywany przed wywołaniem Compose.
+Od tego momentu skrypt nie przywraca automatycznie starej bazy, nawet jeśli odpowiedź
+Dockera była niepewna. Próba z tym samym katalogiem nie jest powtarzana. Zachowaj
+`failureCode` oraz `runDirectory`; po ustaleniu przyczyny przygotuj nowy katalog
+zamiast usuwać znaczniki. Przy zamknięciu PowerShell lub restarcie hosta odzyskanie
+może wymagać osobnego uruchomienia funkcji recovery po sprawdzeniu etapu.
+
+Pełne wyniki procesów, kopia definicji starego zadania i szczegóły audytu pozostają
+w prywatnym katalogu. Nie publikuj plików `*-child.json`, `docker-call-*.json`, tokenów
+ani Compose. Przełączenie nie zmienia autologowania Windows, blokady konsoli,
+routera, proxy ani innych aplikacji Docker i nie wymaga restartu komputera.
