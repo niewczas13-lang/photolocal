@@ -422,9 +422,11 @@ sprawdza poprawności wpisanego hasła.
 Przed otwarciem tego okna helper tworzy zadanie `PhotoLocal Docker Console Lock`,
 ograniczone do tego konta i zwykłych uprawnień. Przy logowaniu żąda blokady wyłącznie
 w sesji fizycznej konsoli; sesje RDP pomija. Próby są ograniczone do 15 sprawdzeń
-z dwusekundowymi przerwami. Istniejące zadanie o zgodnej konfiguracji jest zachowane
-przy ponowieniu; inna konfiguracja pod tą nazwą daje `LOCK_TASK_CONFLICT` i nie jest
-nadpisywana. Zachowaj katalog stagingu i znajdujący się w nim skrypt blokady.
+z dwusekundowymi przerwami. Całe zadanie ma limit pięciu minut, obejmujący również
+uruchomienie PowerShell i ładowanie funkcji Windows; nie oznacza to opóźnienia startu.
+Istniejące zadanie o zgodnej konfiguracji jest zachowane przy ponowieniu. Znany starszy
+limit jednej minuty jest aktualizowany po sprawdzeniu pozostałej definicji; inne
+różnice dają `LOCK_TASK_CONFLICT`. Zachowaj katalog stagingu i skrypt blokady.
 
 `AUTOLOGON_CONFIGURED_REBOOT_NOT_TESTED` potwierdza zapis flagi automatycznego
 logowania właściwego konta i konfigurację zadania. Nie potwierdza hasła, startu
@@ -450,9 +452,40 @@ $romekSid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
 $romekSpec = New-PhotoLocalConsoleLockSpec -Root 'C:\PhotoLocal-staging' -Sid $romekSid
 $romekTask = Get-ScheduledTask -TaskPath '\' -TaskName $romekSpec.Name -ErrorAction SilentlyContinue
 if ($romekTask) {
-    if (-not (Test-PhotoLocalConsoleLockTask -Task $romekTask -Spec $romekSpec)) {
+    if (-not (Test-PhotoLocalConsoleLockTask -Task $romekTask -Spec $romekSpec -AllowLegacyTimeLimit)) {
         throw 'LOCK_TASK_CONFLICT'
     }
     Unregister-ScheduledTask -InputObject $romekTask -Confirm:$false
 }
 ```
+
+### Aktualizacja blokady po przekroczeniu limitu przy starcie Windows
+
+Zdarzenie Harmonogramu 329 potwierdza przekroczenie limitu czasu. Starsze zadanie
+mogło zostać zakończone po minucie podczas startu systemu, mimo poprawnej próby
+ręcznej przez RDP. Ten wynik nie wskazuje jeszcze, która część startu była opóźniona.
+Limit pięciu minut daje czas na uruchomienie procesu; próby blokowania nadal zaczynają
+się od razu. [ExecutionTimeLimit](https://learn.microsoft.com/en-us/windows/win32/taskschd/tasksettings-executiontimelimit).
+
+Na tym samym koncie właściciela Dockera, w PowerShell jako administrator:
+
+```powershell
+git -C C:\PhotoLocal-staging pull --ff-only
+if ($LASTEXITCODE -eq 0) {
+    powershell -NoProfile -ExecutionPolicy Bypass -File C:\PhotoLocal-staging\scripts\prepare-windows-autologon.ps1 -RepairConsoleLock
+}
+```
+
+Ten tryb aktualizuje tylko zweryfikowane, istniejące zadanie. Zachowuje pozostałe
+ustawienia i odmawia zmiany starszego zadania, gdy jest uruchomione lub oczekuje
+w kolejce. Nie otwiera Autologon, nie pyta o hasło, nie zmienia logowania i nie
+restartuje żadnych usług. `CONSOLE_LOCK_UPDATED_REBOOT_NOT_TESTED` oznacza zapisaną
+konfigurację; blokada po starcie Windows nadal wymaga sprawdzenia.
+
+Bezpośrednie uruchomienia skryptu blokady zapisują osobne pliki JSONL w
+`%LOCALAPPDATA%\PhotoLocal\console-lock`. Etapy obejmują start, sprawdzenie sesji,
+ładowanie funkcji Windows, żądanie blokady i wynik. Zapisy zawierają czas, numery
+sesji i stałe statusy, bez haseł czy nazw kont. Kolejne wejście przez RDP nie
+nadpisuje zapisu z bootowania. Pozostaje maksymalnie 20 własnych plików; problem
+z zapisem diagnostyki nie zatrzymuje blokowania. `LOCK_REQUEST_ACCEPTED` nadal
+oznacza przyjęcie żądania, a nie niezależny pomiar stanu ekranu.

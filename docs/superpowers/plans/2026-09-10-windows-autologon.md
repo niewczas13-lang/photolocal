@@ -17,4 +17,14 @@
 
 The user has approved autologon with screen locking. No additional approval gate is needed for preparation or installing those settings. Restarting the shared Windows host and the later production cutover remain separate coordinated actions. The original server files, SQLite database, Google token and network share remain untouched by this installer. It must not restart Docker or install a second engine.
 
-Local verification downloaded the official archive and validated the extracted Microsoft signature under Windows PowerShell 5.1 without launching the GUI. The real CIM-definition test initially exposed PowerShell module auto-loading replacing mocks; the resulting local test task was identified by its exact definition, removed, and the test now imports modules before mocking and disables further auto-loading. No GUI, password configuration or screen lock ran during this check. Server installation and a coordinated full-host reboot remain untested.
+Local verification downloaded the official archive and validated the extracted Microsoft signature under Windows PowerShell 5.1 without launching the GUI. The real CIM-definition test initially exposed PowerShell module auto-loading replacing mocks; the resulting local test task was identified by its exact definition, removed, and the test now imports modules before mocking and disables further auto-loading. No GUI, password configuration or screen lock ran during this local check.
+
+## Confirmed boot timeout follow-up
+
+The user installed Autologon and performed two coordinated host reboots. Application ports and public health returned before the requested RDP entry, and the user confirmed healthy containers. The console-lock task was terminated after one minute; the second boot's Operational event 329 explicitly confirmed the execution limit. A manual RDP task run completed with exit 0, and a read-only native API loading probe took 0.9 seconds. These warm results do not establish cold-boot console locking or explain the internal startup delay.
+
+The existing approved lock design is retained. Increase only the verified legacy task limit from PT1M to PT5M, without delaying its trigger or changing the bounded retry policy. Add -RepairConsoleLock to update that setting without reopening Autologon or touching credentials. Record per-run, best-effort progress before native compilation and around session/lock checks; preserve separate boot/RDP traces with bounded retention. No new reboot is performed by the repair command.
+
+Verification uses Windows PowerShell 5.1 tests with task mutations and lock APIs mocked, importing modules before the mocks. Cover exact legacy upgrade, conflict/busy refusal, idempotency, early progress, privacy, and logging failure isolation. The repaired cold-boot lock remains unverified until the user installs the repair and a coordinated boot test completes.
+
+All 34 combined Windows PowerShell 5.1 tests passed. Review also checked real in-memory CIM settings and the trigger's empty execution limit, without registering a task. The repair refuses a task that disappears during its preflight, and no local scheduled task remains from verification.

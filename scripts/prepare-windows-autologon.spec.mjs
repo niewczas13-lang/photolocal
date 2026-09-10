@@ -62,6 +62,7 @@ test('console task is scoped to one account, limited privilege, logon only, and 
   assert.equal(result.UserId, sid);
   assert.equal(result.LogonType, 'Interactive');
   assert.equal(result.RunLevel, 'Limited');
+  assert.equal(result.ExecutionTimeLimit, 'PT5M');
   assert.match(result.Arguments, /-NonInteractive -WindowStyle Hidden/);
   assert.match(result.Arguments, /-File "C:\\Staging With Spaces\\scripts\\lock-autologon-session\.ps1"/);
   assert.match(result.Arguments, new RegExp(`-ExpectedSid "${sid}"`));
@@ -117,4 +118,67 @@ test('real Windows task objects pass verification, reuse an exact task, and refu
     @{valid=$valid;registerCalls=$script:registerCalls;conflict=$conflict} | ConvertTo-Json -Compress
   `);
   assert.deepEqual(result, { valid: true, registerCalls: 1, conflict: 'LOCK_TASK_CONFLICT' });
+});
+
+test('repair upgrades only the known one-minute limit and is idempotent', windows, () => {
+  const result = ps(`
+    Import-Module ScheduledTasks,Microsoft.PowerShell.Management,Microsoft.PowerShell.Utility -ErrorAction Stop
+    $PSModuleAutoLoadingPreference='None'
+    $currentSid=[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    $spec=New-PhotoLocalConsoleLockSpec -Root 'C:\\Staging' -Sid $currentSid
+    $action=New-ScheduledTaskAction -Execute $spec.Execute -Argument $spec.Arguments -WorkingDirectory $spec.WorkingDirectory
+    $trigger=New-ScheduledTaskTrigger -AtLogOn -User $currentSid
+    $principal=New-ScheduledTaskPrincipal -UserId $currentSid -LogonType Interactive -RunLevel Limited
+    $settings=New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 1)
+    $script:task=[pscustomobject]@{Description=$spec.Description;Actions=@($action);Triggers=@($trigger);Principal=$principal;Settings=$settings;State='Ready'}
+    $script:updates=0
+    function Get-ScheduledTask { return $script:task }
+    function Set-ScheduledTask { [CmdletBinding()]param($TaskPath,$TaskName,$Settings) $script:updates++; $script:task.Settings=$Settings }
+    function Register-ScheduledTask { throw 'MUST_NOT_REGISTER' }
+    function Get-PhotoLocalAutologonIdentity { return @{IsAdmin=$true;Sid=$currentSid;Account='EXAMPLE\\operator';Owners=@($currentSid);RunCommand='Docker Desktop.exe'} }
+    function Get-PhotoLocalAutologonTool { throw 'MUST_NOT_DOWNLOAD' }
+    function Show-PhotoLocalAutologon { throw 'MUST_NOT_OPEN_GUI' }
+    function Get-ItemPropertyValue { throw 'MUST_NOT_READ_AUTOLOGON' }
+    $beforeArguments=$script:task.Actions[0].Arguments
+    $first=Invoke-PhotoLocalConsoleLockRepair -Root 'C:\\Staging'
+    $second=Invoke-PhotoLocalConsoleLockRepair -Root 'C:\\Staging'
+    @{status=$first.Status;before=$first.PreviousExecutionTimeLimit;after=$first.ExecutionTimeLimit;updates=$script:updates;argumentsPreserved=($script:task.Actions[0].Arguments -eq $beforeArguments);valid=(Test-PhotoLocalConsoleLockTask -Task $script:task -Spec $spec)} | ConvertTo-Json -Compress
+  `);
+  assert.deepEqual(result, { status: 'CONSOLE_LOCK_UPDATED_REBOOT_NOT_TESTED', before: 'PT1M', after: 'PT5M', updates: 1, argumentsPreserved: true, valid: true });
+});
+
+test('repair refuses missing, changed, or running old tasks before changing settings', windows, () => {
+  const result = ps(`
+    Import-Module ScheduledTasks,Microsoft.PowerShell.Management,Microsoft.PowerShell.Utility -ErrorAction Stop
+    $PSModuleAutoLoadingPreference='None'
+    function Get-PhotoLocalAutologonIdentity { return ${identity} }
+    $spec=New-PhotoLocalConsoleLockSpec -Root 'C:\\Staging' -Sid '${sid}'
+    $script:updates=0
+    function Get-ScheduledTask {
+      $script:reads++
+      if ($case -eq 'vanished' -and $script:reads -gt 1) { return $null }
+      return $script:task
+    }
+    function Set-ScheduledTask { $script:updates++; throw 'UNEXPECTED_UPDATE' }
+    function Register-ScheduledTask { throw 'UNEXPECTED_REGISTER' }
+    $results=@()
+    foreach ($case in @('missing','changed','changed-limit','running','queued','vanished')) {
+      $script:reads=0
+      $script:task=$null
+      if ($case -ne 'missing') {
+        $action=New-ScheduledTaskAction -Execute $spec.Execute -Argument $spec.Arguments -WorkingDirectory $spec.WorkingDirectory
+        $trigger=New-ScheduledTaskTrigger -AtLogOn -User '${sid}'
+        $principal=New-ScheduledTaskPrincipal -UserId '${sid}' -LogonType Interactive -RunLevel Limited
+        $settings=New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 1)
+        $script:task=[pscustomobject]@{Description=$spec.Description;Actions=@($action);Triggers=@($trigger);Principal=$principal;Settings=$settings;State='Ready'}
+        if ($case -eq 'changed') { $script:task.Actions[0].Arguments='unexpected' }
+        if ($case -eq 'changed-limit') { $script:task.Settings.ExecutionTimeLimit='PT2M' }
+        if ($case -eq 'running') { $script:task.State='Running' }
+        if ($case -eq 'queued') { $script:task.State='Queued' }
+      }
+      try { Invoke-PhotoLocalConsoleLockRepair -Root 'C:\\Staging' | Out-Null; $results+='MISSED' } catch { $results+=$_.Exception.Message }
+    }
+    @{results=$results;updates=$script:updates} | ConvertTo-Json -Compress
+  `);
+  assert.deepEqual(result, { results: ['LOCK_TASK_MISSING', 'LOCK_TASK_CONFLICT', 'LOCK_TASK_CONFLICT', 'LOCK_TASK_BUSY', 'LOCK_TASK_BUSY', 'LOCK_TASK_MISSING'], updates: 0 });
 });

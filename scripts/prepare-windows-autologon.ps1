@@ -1,4 +1,4 @@
-param()
+param([switch]$RepairConsoleLock)
 
 # Password entry belongs exclusively to Microsoft's interactive Autologon GUI.
 $ErrorActionPreference = 'Stop'
@@ -42,6 +42,7 @@ function New-PhotoLocalConsoleLockSpec {
         Name = 'PhotoLocal Docker Console Lock'
         Description = 'PhotoLocal console lock v1: current Docker owner, interactive console logon only.'
         UserId = $Sid; LogonType = 'Interactive'; RunLevel = 'Limited'
+        ExecutionTimeLimit = 'PT5M'
         Execute = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
         Arguments = '-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "' + $runner + '" -ExpectedSid "' + $Sid + '"'
         WorkingDirectory = $Root
@@ -49,7 +50,7 @@ function New-PhotoLocalConsoleLockSpec {
 }
 
 function Test-PhotoLocalConsoleLockTask {
-    param($Task, $Spec)
+    param($Task, $Spec, [switch]$AllowLegacyTimeLimit)
     try {
         $actions = @($Task.Actions); $triggers = @($Task.Triggers)
         return ($Task.Description -eq $Spec.Description -and $Task.Settings.Enabled -and
@@ -64,29 +65,57 @@ function Test-PhotoLocalConsoleLockTask {
             $Task.Settings.StartWhenAvailable -and -not $Task.Settings.DisallowStartIfOnBatteries -and
             -not $Task.Settings.StopIfGoingOnBatteries -and -not $Task.Settings.RunOnlyIfIdle -and
             -not $Task.Settings.RunOnlyIfNetworkAvailable -and
-            [string]$Task.Settings.MultipleInstances -eq 'IgnoreNew' -and $Task.Settings.ExecutionTimeLimit -eq 'PT1M')
+            [string]$Task.Settings.MultipleInstances -eq 'IgnoreNew' -and
+            ($Task.Settings.ExecutionTimeLimit -eq $Spec.ExecutionTimeLimit -or
+                ($AllowLegacyTimeLimit -and $Task.Settings.ExecutionTimeLimit -eq 'PT1M')))
     } catch { return $false }
 }
 
 function Assert-PhotoLocalLockTaskAvailable {
     param($Spec)
     $existing = Get-ScheduledTask -TaskPath '\' -TaskName $Spec.Name -ErrorAction SilentlyContinue
-    if ($existing -and -not (Test-PhotoLocalConsoleLockTask -Task $existing -Spec $Spec)) { throw 'LOCK_TASK_CONFLICT' }
+    if ($existing -and -not (Test-PhotoLocalConsoleLockTask -Task $existing -Spec $Spec -AllowLegacyTimeLimit)) { throw 'LOCK_TASK_CONFLICT' }
 }
 
 function Ensure-PhotoLocalConsoleLockTask {
-    param($Spec)
+    param($Spec, [switch]$RequireExisting)
     Assert-PhotoLocalLockTaskAvailable -Spec $Spec
-    if (-not (Get-ScheduledTask -TaskPath '\' -TaskName $Spec.Name -ErrorAction SilentlyContinue)) {
+    $existing = Get-ScheduledTask -TaskPath '\' -TaskName $Spec.Name -ErrorAction SilentlyContinue
+    if ($RequireExisting -and -not $existing) { throw 'LOCK_TASK_MISSING' }
+    if ($existing -and -not (Test-PhotoLocalConsoleLockTask -Task $existing -Spec $Spec)) {
+        if (-not (Test-PhotoLocalConsoleLockTask -Task $existing -Spec $Spec -AllowLegacyTimeLimit)) { throw 'LOCK_TASK_CONFLICT' }
+        if ([string]$existing.State -ne 'Ready') { throw 'LOCK_TASK_BUSY' }
+        # Upgrade only the verified legacy timeout; preserve the existing task's other settings.
+        $settings = $existing.Settings
+        $settings.ExecutionTimeLimit = $Spec.ExecutionTimeLimit
+        Set-ScheduledTask -TaskPath '\' -TaskName $Spec.Name -Settings $settings | Out-Null
+    } elseif (-not $existing) {
         $action = New-ScheduledTaskAction -Execute $Spec.Execute -Argument $Spec.Arguments -WorkingDirectory $Spec.WorkingDirectory
         $trigger = New-ScheduledTaskTrigger -AtLogOn -User $Spec.UserId
         $principal = New-ScheduledTaskPrincipal -UserId $Spec.UserId -LogonType Interactive -RunLevel Limited
-        $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 1)
+        $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -MultipleInstances IgnoreNew -ExecutionTimeLimit ([System.Xml.XmlConvert]::ToTimeSpan($Spec.ExecutionTimeLimit))
         # No Force: a concurrent or unrelated task with this name must never be overwritten.
         Register-ScheduledTask -TaskPath '\' -TaskName $Spec.Name -Description $Spec.Description -Action $action -Trigger $trigger -Principal $principal -Settings $settings | Out-Null
     }
     $installed = Get-ScheduledTask -TaskPath '\' -TaskName $Spec.Name
     if (-not (Test-PhotoLocalConsoleLockTask -Task $installed -Spec $Spec)) { throw 'LOCK_TASK_VERIFICATION_FAILED' }
+}
+
+function Invoke-PhotoLocalConsoleLockRepair {
+    param([string]$Root)
+    $identity = Get-PhotoLocalAutologonIdentity
+    Assert-PhotoLocalAutologonIdentity -Identity $identity
+    $spec = New-PhotoLocalConsoleLockSpec -Root $Root -Sid $identity.Sid
+    $existing = Get-ScheduledTask -TaskPath '\' -TaskName $spec.Name -ErrorAction SilentlyContinue
+    if (-not $existing) { throw 'LOCK_TASK_MISSING' }
+    $previousLimit = [string]$existing.Settings.ExecutionTimeLimit
+    Ensure-PhotoLocalConsoleLockTask -Spec $spec -RequireExisting
+    return [pscustomobject]@{
+        Status = 'CONSOLE_LOCK_UPDATED_REBOOT_NOT_TESTED'
+        PreviousExecutionTimeLimit = $previousLimit; ExecutionTimeLimit = $spec.ExecutionTimeLimit
+        ProgressDirectory = Join-Path $env:LOCALAPPDATA 'PhotoLocal\console-lock'
+        Autologon = 'UNCHANGED'; RebootTest = 'NOT_PERFORMED'
+    }
 }
 
 function Assert-PhotoLocalMicrosoftSignature {
@@ -179,7 +208,11 @@ function Invoke-PhotoLocalAutologonSetup {
 if ($MyInvocation.InvocationName -ne '.') {
     try {
         $root = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
-        Invoke-PhotoLocalAutologonSetup -Root $root | Format-List
+        if ($RepairConsoleLock) {
+            Invoke-PhotoLocalConsoleLockRepair -Root $root | Format-List
+        } else {
+            Invoke-PhotoLocalAutologonSetup -Root $root | Format-List
+        }
     } catch {
         $status = $_.Exception.Message
         if ($status -notmatch '^[A-Z_]+$') { $status = 'AUTOLOGON_SETUP_FAILED' }
