@@ -278,6 +278,74 @@ Można podłączyć go tylko do odczytu w `/nas` i odwzorować np. `P:\Projekty`
 `/nas/Projekty`, jeżeli korzeń `P:` odpowiada korzeniowi montowanego udziału.
 Próby importu i edycji wykonuj w osobnym projekcie i katalogu testowym.
 
+### Trwały udział i kopia bazy działającego Windowsa
+
+Po udanym `STORAGE_READ_WRITE_OK` helper `scripts/connect-staging-storage.ps1`
+tworzy osobny wolumen CIFS tylko do odczytu. Przyjmuje te same parametry serwera,
+udziału, podkatalogu i konta oraz `-OutputDirectory <staging>\docker-data`.
+Hasło wpisujesz lokalnie; pozostaje w metadanych wolumenu Dockera potrzebnych do
+ponownego montowania. Plik `docker-data/storage.json` zawiera tylko nazwę wolumenu,
+punkt montowania i podkatalog. Sukces: `STAGING_STORAGE_READY`, `Cleanup: CLEAN`.
+Istniejący manifest zatrzymuje kolejną próbę przed pytaniem o hasło.
+
+Następnie na serwerze Windows uruchom (dostosuj trzy ścieżki):
+
+```powershell
+node C:\PhotoLocal-staging\scripts\prepare-staging-copy.mjs --production-root C:\PhotoLocal --staging-root C:\PhotoLocal-staging --network-prefix 'P:\Projekty' --start
+```
+
+`--network-prefix` wskazuje prefiks w starej bazie odpowiadający podkatalogowi
+z manifestu SMB. Cały udział jest zamontowany w `/nas`, np. `P:\Projekty`
+odpowiada `/nas/Projekty`. Helper zakłada standardowe katalogi lokalnych zdjęć
+`backend/zdjęcia` i pobrań `pobierzchat/pobrane_zdjecia` pod katalogiem produkcji.
+
+Proces najpierw sprawdza Compose i katalogi. Potem natywne `better-sqlite3` ze starego
+backendu wykonuje kopię online do nowego `docker-data/migration-*`. Zatwierdzone
+rekordy z WAL są uwzględniane przez API SQLite; nie kopiujemy ręcznie aktywnego pliku.
+Źródłowa aplikacja może nadal zapisywać. Limit 60 sekund działa między krokami
+backupu i nie przerywa blokującego wywołania systemowego. Brak natywnej zależności,
+brak wolnego miejsca lub przekroczenie limitu kończy przygotowanie przed startem.
+
+Kontener migracji otrzymuje wyłącznie ukończoną kopię bazy. Zdjęcia z NAS oraz stare
+lokalne zdjęcia i pobrania są potem montowane tylko do odczytu. Audyt sprawdza liczby
+rekordów, każdy folder projektu i do trzech oryginalnych zdjęć na projekt. Nowe
+pobrania, testowe projekty i pliki Google pozostają w dotychczasowych katalogach
+stagingu. `--start` odtwarza wyłącznie usługę `photolocal-staging` na
+`127.0.0.1:4874`, bez budowania obrazu, i czeka na zdrowy kontener.
+
+Sukces przygotowania: `STAGING_COPY_READY`; z `--start`: `STAGING_COPY_RUNNING`.
+`docker-data/staging-copy.json` zapisuje ścieżkę dodatkowego pliku Compose i wyniki.
+Dotychczasowa testowa baza nie jest nadpisywana. Użytkownicy i hasła aplikacji
+pochodzą z kopii produkcyjnej bazy. Na tym etapie edycję i pobieranie do istniejących
+projektów ogranicza montowanie NAS tylko do odczytu; próby zapisu wykonuj w osobnym
+projekcie z plikiem GPKG i folderem `/photos`.
+
+Przy błędzie raport podaje katalog konkretnej próby. `audit.json` rozróżnia brak
+plików od nieprawidłowej bazy, a `container-migrate.json` i `container-audit.json`
+zawierają nazwy własnych kontenerów potrzebne do celowanego sprzątania. Nie usuwaj
+produkcji ani nie nadpisuj manifestów w celu ponowienia — sprawdź przyczynę.
+Kopie bazy zawierają prywatne dane, hasła aplikacji w postaci skrótów i sesje;
+pozostają w ignorowanym przez Git `docker-data`.
+
+Przy późniejszym uruchamianiu zachowaj oba pliki Compose:
+
+```powershell
+$stagingCopy = Get-Content -Raw -LiteralPath C:\PhotoLocal-staging\docker-data\staging-copy.json | ConvertFrom-Json
+docker compose -p photolocal-staging --project-directory C:\PhotoLocal-staging --env-file C:\PhotoLocal-staging\.env.docker -f C:\PhotoLocal-staging\compose.yaml -f $stagingCopy.composeFile up -d --no-build --pull never --wait photolocal
+```
+
+Powrót do wcześniejszej pustej bazy stagingu polega na uruchomieniu tej samej komendy
+bez drugiego `-f $stagingCopy.composeFile`. Publiczna produkcja pozostaje osobną
+aplikacją. Baza stanowi spójną migawkę z czasu backupu; zdalne zdjęcia mogą w tym czasie
+zmieniać się w produkcji. Końcowe przełączenie wymaga świeżej kopii i uzgodnionego
+momentu zatrzymania zapisów oraz osobnego sprawdzenia autostartu po restarcie Windowsa.
+
+Podstawa kopii online: [SQLite Online Backup API](https://www.sqlite.org/backup.html)
+i [better-sqlite3 backup](https://github.com/WiseLibs/better-sqlite3/blob/master/docs/api.md#backupdestination-options---promise).
+Przy scalaniu plików Compose [montowania są łączone według punktu docelowego](https://docs.docker.com/reference/compose-file/merge/#unique-resources),
+a [wolumen external](https://docs.docker.com/reference/compose-file/volumes/#external)
+pozostaje zarządzany osobno.
+
 Źródła: [wolumen CIFS](https://docs.docker.com/engine/storage/volumes/#create-cifssamba-volumes),
 [Compose ze stdin](https://docs.docker.com/reference/cli/docker/compose/),
 [interpolacja Compose](https://docs.docker.com/reference/compose-file/interpolation/).
