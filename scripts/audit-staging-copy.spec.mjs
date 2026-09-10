@@ -49,9 +49,9 @@ describe('read-only staging copy audit', () => {
     db.prepare('INSERT INTO photos VALUES (?, ?, ?)').run(id, projectId, path);
   }
 
-  function audit() {
+  function audit(options = {}) {
     if (db.open) db.close();
-    return auditStagingCopy(databasePath, { allowedRoots: [storage] });
+    return auditStagingCopy(databasePath, { allowedRoots: [storage], ...options });
   }
 
   it('reports all five counts, every project folder and nonempty original samples without private data', () => {
@@ -194,6 +194,117 @@ describe('read-only staging copy audit', () => {
     assert.equal(child.stderr, '');
     assert.equal(JSON.parse(child.stdout).status, 'STAGING_COPY_INVALID_DATABASE');
     assert.equal(child.stdout.includes('private-secret'), false);
+    assert.equal(fs.existsSync(absent), false);
+  });
+
+  it('details distinguish missing, empty and permission-denied originals without raw error messages', () => {
+    const folder = project('p1');
+    const missing = join(folder, 'missing.jpg');
+    const empty = join(folder, 'empty.jpg');
+    const denied = join(folder, 'denied.jpg');
+    photo('a', 'p1', missing, null);
+    photo('b', 'p1', empty, '');
+    photo('c', 'p1', denied);
+    const originalOpen = fs.openSync;
+    mock.method(fs, 'openSync', (...args) => {
+      if (args[0] === denied) throw Object.assign(new Error('PRIVATE_ERROR_SECRET'), { code: 'EACCES' });
+      return originalOpen(...args);
+    });
+    const report = audit({ includeFailures: true });
+    assert.deepEqual(report.failures, [
+      { kind: 'photo', projectId: 'p1', photoId: 'a', path: missing, reason: 'ENOENT' },
+      { kind: 'photo', projectId: 'p1', photoId: 'b', path: empty, reason: 'EMPTY_FILE' },
+      { kind: 'photo', projectId: 'p1', photoId: 'c', path: denied, reason: 'EACCES' },
+    ]);
+    assert.equal(report.failuresTruncated, 0);
+    assert.equal(JSON.stringify(report).includes('PRIVATE_ERROR_SECRET'), false);
+  });
+
+  it('details classify a project file and a photo directory by their actual type', () => {
+    const folder = project('p1');
+    const file = join(folder, 'ordinary.jpg');
+    fs.writeFileSync(file, 'data');
+    db.prepare('UPDATE projects SET base_folder = ?').run(file);
+    photo('a', 'p1', folder, null);
+    assert.deepEqual(audit({ includeFailures: true }).failures, [
+      { kind: 'project_folder', projectId: 'p1', photoId: null, path: file, reason: 'NOT_DIRECTORY' },
+      { kind: 'photo', projectId: 'p1', photoId: 'a', path: folder, reason: 'NOT_REGULAR_FILE' },
+    ]);
+  });
+
+  it('details distinguish an unavailable mount, paths outside roots and rejected relative paths', () => {
+    const folder = project('p1');
+    const offlineRoot = join(directory, 'not-mounted');
+    const offlinePhoto = join(offlineRoot, 'original.jpg');
+    const outside = join(directory, 'outside.jpg');
+    db.prepare('UPDATE projects SET base_folder = ?').run(offlineRoot);
+    photo('a', 'p1', offlinePhoto, null);
+    photo('b', 'p1', outside, null);
+    photo('c', 'p1', 'relative.jpg', null);
+    const report = audit({ includeFailures: true, allowedRoots: [storage, offlineRoot] });
+    assert.deepEqual(report.failures, [
+      { kind: 'project_folder', projectId: 'p1', photoId: null, path: offlineRoot, reason: 'MOUNT_UNAVAILABLE' },
+      { kind: 'photo', projectId: 'p1', photoId: 'a', path: offlinePhoto, reason: 'MOUNT_UNAVAILABLE' },
+      { kind: 'photo', projectId: 'p1', photoId: 'b', path: outside, reason: 'OUTSIDE_ROOT' },
+      { kind: 'photo', projectId: 'p1', photoId: 'c', path: 'relative.jpg', reason: 'PATH_REJECTED' },
+    ]);
+    assert.ok(fs.statSync(folder).isDirectory());
+  });
+
+  it('details allowlist operating-system error codes and hide all other errors', () => {
+    const folder = project('p1');
+    for (const id of ['a', 'b', 'c']) photo(id, 'p1', join(folder, `${id}.jpg`));
+    const realpath = fs.realpathSync;
+    const errors = new Map([
+      [join(folder, 'a.jpg'), 'EPERM'],
+      [join(folder, 'b.jpg'), 'ENOTDIR'],
+      [join(folder, 'c.jpg'), 'PRIVATE_ERROR_CODE'],
+    ]);
+    mock.method(fs, 'realpathSync', (...args) => {
+      if (errors.has(args[0])) throw Object.assign(new Error('PRIVATE_ERROR_MESSAGE'), { code: errors.get(args[0]) });
+      return realpath(...args);
+    });
+    const report = audit({ includeFailures: true });
+    assert.deepEqual(report.failures.map((failure) => failure.reason), ['EPERM', 'ENOTDIR', 'IO_ERROR']);
+    assert.equal(JSON.stringify(report).includes('PRIVATE_ERROR'), false);
+  });
+
+  it('details cap stored failures at 50 while retaining full audit counts and truncation count', () => {
+    const insert = db.prepare('INSERT INTO projects VALUES (?, ?, ?)');
+    for (let index = 0; index < 55; index += 1) {
+      insert.run(String(index).padStart(2, '0'), 'Private project title', join(storage, `missing-${index}`));
+    }
+    const report = audit({ includeFailures: true });
+    assert.equal(report.projectFolders.checked, 55);
+    assert.equal(report.projectFolders.missing, 55);
+    assert.equal(report.failures.length, 50);
+    assert.equal(report.failuresTruncated, 5);
+    assert.equal(report.failures[0].projectId, '00');
+    assert.equal(report.failures.at(-1).projectId, '49');
+  });
+
+  it('failure paths remain absent unless details are explicitly enabled', () => {
+    project('p1');
+    photo('a', 'p1', join(storage, 'secret-private.jpg'), null);
+    const report = audit();
+    assert.equal(report.status, 'STAGING_COPY_FILES_MISSING');
+    assert.equal(Object.hasOwn(report, 'failures'), false);
+    assert.equal(Object.hasOwn(report, 'failuresTruncated'), false);
+    assert.equal(JSON.stringify(report).includes(directory), false);
+    const truthy = audit({ includeFailures: 'true' });
+    assert.equal(Object.hasOwn(truthy, 'failures'), false);
+  });
+
+  it('CLI accepts --details explicitly and retains its safe error report', () => {
+    const script = fileURLToPath(new URL('./audit-staging-copy.mjs', import.meta.url));
+    const absent = join(directory, 'not-present.sqlite');
+    const child = spawnSync(process.execPath, [script, '--database', absent, '--details'], { encoding: 'utf8' });
+    assert.equal(child.status, 1);
+    assert.equal(child.stderr, '');
+    const report = JSON.parse(child.stdout);
+    assert.equal(report.status, 'STAGING_COPY_INVALID_DATABASE');
+    assert.deepEqual(report.failures, []);
+    assert.equal(report.failuresTruncated, 0);
     assert.equal(fs.existsSync(absent), false);
   });
 });

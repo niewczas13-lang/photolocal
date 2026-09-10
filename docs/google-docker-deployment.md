@@ -340,6 +340,20 @@ aplikacją. Baza stanowi spójną migawkę z czasu backupu; zdalne zdjęcia mog�
 zmieniać się w produkcji. Końcowe przełączenie wymaga świeżej kopii i uzgodnionego
 momentu zatrzymania zapisów oraz osobnego sprawdzenia autostartu po restarcie Windowsa.
 
+Gdy raport wskazuje `STAGING_COPY_FILES_MISSING`, sprawdź istniejącą próbę poleceniem
+`node scripts/diagnose-staging-copy.mjs --run-directory <katalog-próby> --windows-share <UNC-udziału>`.
+Nie powstaje nowa kopia bazy ani konfiguracja udziału. Helper ponawia audyt tylko do
+odczytu z `--details` i porównuje nieudane ścieżki z ich odpowiednikami Windows.
+Prefiks dysku sieciowego zastępuje podanym UNC; używa bieżących poświadczeń sesji
+Windows, które mogą różnić się od konta zapisanego w wolumenie Dockera.
+
+Stałe przyczyny rozróżniają m.in. `ENOENT`, `EACCES`, `EMPTY_FILE`, `OUTSIDE_ROOT`
+i `MOUNT_UNAVAILABLE`. Maksymalnie 50 szczegółów oraz wyniki porównania trafiają do
+nowego `diagnosis-*.json` w katalogu próby. Konsola grupuje je według projektu
+i przyczyn, pokazując przykładowe ścieżki; raporty zawierają prywatne nazwy folderów
+i zdjęć, ale nie dane logowania. Natywny odczyt Windows ma osobny limit 60 sekund;
+przekroczenie daje `WINDOWS_CHECK_TIMEOUT`, a nie informację o braku plików.
+
 Podstawa kopii online: [SQLite Online Backup API](https://www.sqlite.org/backup.html)
 i [better-sqlite3 backup](https://github.com/WiseLibs/better-sqlite3/blob/master/docs/api.md#backupdestination-options---promise).
 Przy scalaniu plików Compose [montowania są łączone według punktu docelowego](https://docs.docker.com/reference/compose-file/merge/#unique-resources),

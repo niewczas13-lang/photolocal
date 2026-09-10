@@ -35,7 +35,7 @@ jobs:
       - name: Test isolated SMB diagnostics without real shares or credentials
         run: node --test scripts/test-smb-access.spec.mjs scripts/test-smb-access.windows.spec.mjs
       - name: Test online snapshots and read-only staging preparation
-        run: node --test scripts/snapshot-staging-database.spec.mjs scripts/connect-staging-storage.spec.mjs scripts/audit-staging-copy.spec.mjs scripts/prepare-staging-copy.spec.mjs
+        run: node --test scripts/snapshot-staging-database.spec.mjs scripts/connect-staging-storage.spec.mjs scripts/audit-staging-copy.spec.mjs scripts/prepare-staging-copy.spec.mjs scripts/diagnose-staging-copy.spec.mjs
       - name: Build frontend and backend
         run: npm run build
 
