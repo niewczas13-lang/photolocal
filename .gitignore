@@ -1,4 +1,12 @@
 node_modules/
+.worktrees/
+docker-data/
+.env.docker
+*.migration.json
+baseline-tests.log
+*.log
+**/__pycache__/
+*.pyc
 backend/dist/
 frontend/dist/
 frontend/*.tsbuildinfo

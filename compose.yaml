@@ -1,0 +1,63 @@
+name: photolocal-staging
+
+services:
+  photolocal:
+    image: photolocal:${PHOTO_LOCAL_IMAGE_TAG:-staging}
+    build:
+      context: .
+      target: runtime
+    restart: unless-stopped
+    init: true
+    ports:
+      - "${PHOTO_LOCAL_BIND_IP:-127.0.0.1}:${PHOTO_LOCAL_HOST_PORT:-4874}:4873"
+    environment:
+      PHOTO_LOCAL_HOST: 0.0.0.0
+      PHOTO_LOCAL_PORT: "4873"
+      PHOTO_LOCAL_AUTH: enabled
+      PHOTO_LOCAL_DB: /data/photo-local.sqlite
+      PHOTO_LOCAL_LOG: /data/logs/app.log
+      PHOTO_LOCAL_SHARED_ROOTS: '${PHOTO_LOCAL_SHARED_ROOTS:-[{"path":"/photos","label":"Zdjęcia"}]}'
+      GOOGLE_CHAT_PYTHON: /opt/venv/bin/python
+      GOOGLE_CHAT_CREDENTIALS_FILE: /google/credentials.json
+      GOOGLE_CHAT_TOKEN_FILE: /google/token.json
+      GOOGLE_CHAT_DOWNLOAD_ROOT: /downloads
+      GOOGLE_CHAT_JOB_STATE_FILE: /data/google-chat-download.json
+      GOOGLE_CHAT_OAUTH_REDIRECT_URI: ${GOOGLE_CHAT_OAUTH_REDIRECT_URI:-}
+      OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      # Explicit directories retain SQLite WAL/SHM and atomic token replacement together.
+      # Pre-create these staging directories. Never point them at writable production data.
+      - type: bind
+        source: ${PHOTO_LOCAL_DATA_DIR:-./docker-data/data}
+        target: /data
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${PHOTO_LOCAL_GOOGLE_DIR:-./docker-data/google}
+        target: /google
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${PHOTO_LOCAL_DOWNLOADS_DIR:-./docker-data/downloads}
+        target: /downloads
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${PHOTO_LOCAL_PHOTOS_DIR:-./docker-data/photos}
+        target: /photos
+        bind:
+          create_host_path: false
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4873/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+    stop_grace_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

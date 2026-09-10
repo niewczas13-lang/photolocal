@@ -15,6 +15,10 @@ export interface AppConfig {
   googleChatPythonCommand: string;
   googleChatScriptPath: string;
   googleChatDownloadRoot: string;
+  googleChatCredentialsFile: string;
+  googleChatTokenFile: string;
+  googleChatOAuthRedirectUri: string;
+  googleChatJobStateFile: string;
   googleChatInviteProfileDir: string;
   googleChatInviteHeadless: boolean;
   googleChatInviteDebugPort: number;
@@ -36,7 +40,19 @@ export function loadConfig(): AppConfig {
   const frontendDistPath = resolve(__dirname, '../../frontend/dist');
   const googleChatPythonCommand = process.env.GOOGLE_CHAT_PYTHON ?? 'python';
   const googleChatScriptPath = resolve(__dirname, '../../pobierzchat/chat.py');
-  const googleChatDownloadRoot = resolve(__dirname, '../../pobierzchat/pobrane_zdjecia');
+  const googleChatDownloadRoot = process.env.GOOGLE_CHAT_DOWNLOAD_ROOT
+    ? resolve(process.env.GOOGLE_CHAT_DOWNLOAD_ROOT)
+    : resolve(__dirname, '../../pobierzchat/pobrane_zdjecia');
+  const googleChatCredentialsFile = process.env.GOOGLE_CHAT_CREDENTIALS_FILE
+    ? resolve(process.env.GOOGLE_CHAT_CREDENTIALS_FILE)
+    : resolve(__dirname, '../../pobierzchat/credentials.json');
+  const googleChatTokenFile = process.env.GOOGLE_CHAT_TOKEN_FILE
+    ? resolve(process.env.GOOGLE_CHAT_TOKEN_FILE)
+    : resolve(__dirname, '../../pobierzchat/token.json');
+  const googleChatOAuthRedirectUri = process.env.GOOGLE_CHAT_OAUTH_REDIRECT_URI?.trim() ?? '';
+  const googleChatJobStateFile = process.env.GOOGLE_CHAT_JOB_STATE_FILE
+    ? resolve(process.env.GOOGLE_CHAT_JOB_STATE_FILE)
+    : resolve(dirname(dbPath), 'google-chat-download.json');
   const googleChatInviteProfileDir = process.env.GOOGLE_CHAT_INVITE_PROFILE_DIR
     ? resolve(process.env.GOOGLE_CHAT_INVITE_PROFILE_DIR)
     : resolve(dirname(dbPath), 'google-chat-browser-profile');
@@ -66,6 +82,10 @@ export function loadConfig(): AppConfig {
     googleChatPythonCommand,
     googleChatScriptPath,
     googleChatDownloadRoot,
+    googleChatCredentialsFile,
+    googleChatTokenFile,
+    googleChatOAuthRedirectUri,
+    googleChatJobStateFile,
     googleChatInviteProfileDir,
     googleChatInviteHeadless,
     googleChatInviteDebugPort,

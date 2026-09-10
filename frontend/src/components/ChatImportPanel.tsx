@@ -1,12 +1,13 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, Bot, CheckCircle2, Circle, Loader2, MessageSquare, RefreshCw, Trash2, UserPlus } from 'lucide-react';
-import { api } from '../api';
+import { api, ApiError } from '../api';
 import type {
   ChatBatch,
   ChatClassificationStatus,
   ChatImportResult,
   ChatImportStatus,
   GoogleChatDownloadStatus,
+  GoogleChatAuthStatus,
   GoogleChatInvite,
   GoogleChatInviteSessionStatus,
   GoogleChatSpace,
@@ -17,6 +18,14 @@ import { Button } from './ui/button';
 import { Card, CardContent } from './ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog';
 import { getSuggestedGoogleChatSpaces } from './chat-space-suggestions';
+import { GoogleChatConnection, GoogleChatInvitesLink } from './google-chat-connection';
+import {
+  canResumeGoogleChatDownload,
+  canReplaceGoogleChatDownload,
+  getGoogleChatDownloadLabel,
+  getGoogleChatImportRoot,
+  waitForCompletedGoogleChatDownload,
+} from './google-chat-download-workflow';
 import {
   getChatUpdateWorkflowSnapshot,
   type ChatUpdateWorkflowPhase,
@@ -36,16 +45,6 @@ type LastResult =
   | { type: 'classify-started'; result: ChatClassificationStatus }
   | { type: 'clear'; result: { cleared: number } }
   | null;
-
-function safeFolderName(value: string): string {
-  return value
-    .replace(/[\r\n\t]+/g, ' ')
-    .replace(/[<>:"/\\|?*]/g, '_')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .replace(/[. ]+$/g, '')
-    .slice(0, 200) || 'brak_nazwy';
-}
 
 function formatElapsed(ms: number | null | undefined): string {
   if (!ms || ms < 0) return '0s';
@@ -84,7 +83,16 @@ function WorkflowStepIcon({ step }: { step: ChatUpdateWorkflowStep }) {
   return <Circle size={18} className="text-muted-foreground/60" />;
 }
 
-export default function ChatImportPanel({ projectId, project, batches, onChanged, onOpenQueue }: ChatImportPanelProps) {
+export default function ChatImportPanel(props: ChatImportPanelProps) {
+  return <ChatImportPanelContent key={props.projectId} {...props} />;
+}
+
+function ChatImportPanelContent({ projectId, project, batches, onChanged, onOpenQueue }: ChatImportPanelProps) {
+  const isMounted = useRef(true);
+  const workflowRun = useRef(0);
+  const [googleAuthStatus, setGoogleAuthStatus] = useState<GoogleChatAuthStatus | null>(null);
+  const [googleAuthRefreshKey, setGoogleAuthRefreshKey] = useState(0);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
   const [defaultChatRoot, setDefaultChatRoot] = useState('');
   const [assignedSpace, setAssignedSpace] = useState<GoogleChatSpace | null>(() =>
     project.googleChatSpaceName
@@ -134,7 +142,11 @@ export default function ChatImportPanel({ projectId, project, batches, onChanged
   const isImportRunning = importStatus?.state === 'RUNNING';
   const isClassificationRunning = classificationStatus?.state === 'RUNNING';
   const workflowRunning = isWorkflowRunning(workflowPhase);
-  const operationRunning = workflowRunning || isImportRunning || isClassificationRunning;
+  const operationRunning = workflowRunning || isImportRunning || isClassificationRunning || downloadStatus?.state === 'RUNNING';
+  const isGoogleConnected = googleAuthStatus?.state === 'CONNECTED';
+  const canResumeDownload = canResumeGoogleChatDownload(downloadStatus);
+  const canReplaceDownload = canReplaceGoogleChatDownload(downloadStatus);
+  const canProcessDownload = downloadStatus?.state === 'COMPLETED';
   const workflowSnapshot = useMemo(
     () =>
       getChatUpdateWorkflowSnapshot({
@@ -148,18 +160,31 @@ export default function ChatImportPanel({ projectId, project, batches, onChanged
     [classificationStatus, counts, downloadStatus, importStatus, workflowError, workflowPhase],
   );
 
+  const handleGoogleChatError = (error: unknown) => {
+    if (error instanceof ApiError && error.code === 'GOOGLE_AUTH_REQUIRED') {
+      setGoogleAuthStatus((current) => current
+        ? { ...current, state: 'AUTH_REQUIRED', message: error.message }
+        : null);
+      setGoogleAuthRefreshKey((current) => current + 1);
+    }
+  };
+
   const loadSpaces = async () => {
+    if (!isGoogleConnected) return;
     setBusyAction('spaces');
+    setDownloadError(null);
     try {
       const result = await api.listGoogleChatSpaces();
+      if (!isMounted.current) return;
       setSpaces(result);
       const [firstSuggested] = getSuggestedGoogleChatSpaces(project, result);
       if (firstSuggested?.space) setSelectedSpaceName(firstSuggested.space.name);
     } catch (error) {
-      console.error(error);
-      alert('Blad podczas pobierania listy pokojow Google Chat');
+      if (!isMounted.current) return;
+      setDownloadError(getErrorMessage(error));
+      handleGoogleChatError(error);
     } finally {
-      setBusyAction(null);
+      if (isMounted.current) setBusyAction(null);
     }
   };
 
@@ -214,32 +239,52 @@ export default function ChatImportPanel({ projectId, project, batches, onChanged
     }
   };
 
-  const startDownload = async () => {
-    if (!activeDownloadSpace || !defaultChatRoot) return;
+  const startDownload = async (mode: 'start' | 'resume' | 'continue' = 'start') => {
+    if (operationRunning || busyAction !== null) return;
+    if (mode === 'start' && (!canReplaceDownload || !activeDownloadSpace || !defaultChatRoot || !isGoogleConnected)) return;
+    if (mode === 'resume' && (!canResumeDownload || !isGoogleConnected)) return;
+    if (mode === 'continue' && !canProcessDownload) return;
+    const run = ++workflowRun.current;
+    const isCurrent = () => isMounted.current && workflowRun.current === run;
+    const assertCurrent = () => {
+      if (!isCurrent()) throw new Error('Zmieniono projekt lub zamknięto panel.');
+    };
     setBusyAction('download');
     setWorkflowPhase('download');
     setWorkflowError(null);
+    setDownloadError(null);
+    setImportStatus(null);
+    setClassificationStatus(null);
     setWorkflowModalOpen(true);
     try {
-      const result = await api.startGoogleChatDownload(projectId, activeDownloadSpace.name, activeDownloadSpace.displayName);
-      setDownloadStatus(result);
-      setAssignedSpace(activeDownloadSpace);
-      setLastDownloadAt(result.startedAt ?? new Date().toISOString());
-      setIsChangingSpace(false);
-
-      let completedDownload = result;
-      while (completedDownload.state === 'RUNNING') {
-        await sleep(1000);
-        completedDownload = await api.getGoogleChatDownloadStatus(projectId);
-        setDownloadStatus(completedDownload);
+      const result = mode === 'resume'
+        ? await api.resumeGoogleChatDownload(projectId)
+        : mode === 'continue'
+          ? await api.getGoogleChatDownloadStatus(projectId)
+          : await api.startGoogleChatDownload(projectId, activeDownloadSpace!.name, activeDownloadSpace!.displayName);
+      assertCurrent();
+      if (result.spaceName) {
+        setAssignedSpace({
+          name: result.spaceName,
+          displayName: result.spaceDisplayName ?? result.spaceName,
+          spaceType: '',
+        });
+        setIsChangingSpace(false);
       }
-
-      if (completedDownload.state === 'FAILED') {
-        throw new Error(completedDownload.error ?? 'Pobieranie z Google Chat nie powiodlo sie');
-      }
+      const completedDownload = await waitForCompletedGoogleChatDownload(result, {
+        getStatus: () => api.getGoogleChatDownloadStatus(projectId),
+        onStatus: setDownloadStatus,
+        wait: () => sleep(1000),
+        isCurrent,
+      });
+      assertCurrent();
+      setLastDownloadAt(completedDownload.finishedAt ?? completedDownload.updatedAt ?? null);
 
       setWorkflowPhase('dedupe');
-      const downloadRoot = `${defaultChatRoot}\\${safeFolderName(completedDownload.spaceDisplayName ?? activeDownloadSpace.displayName)}`;
+      const downloadRoot = getGoogleChatImportRoot(defaultChatRoot, completedDownload);
+      if (!defaultChatRoot && !completedDownload.rootPath) {
+        throw new Error('Brak katalogu pobranych zdjęć. Odśwież stronę i spróbuj ponownie.');
+      }
       const now = new Date().toISOString();
       setImportStatus({
         state: 'RUNNING',
@@ -261,19 +306,26 @@ export default function ChatImportPanel({ projectId, project, batches, onChanged
         updatedAt: now,
       });
       const importResult = await api.importChatFolders(projectId, downloadRoot);
+      assertCurrent();
       setLastResult({ type: 'import', result: importResult });
-      setImportStatus(await api.getChatImportStatus(projectId));
+      const completedImport = await api.getChatImportStatus(projectId);
+      assertCurrent();
+      setImportStatus(completedImport);
       await onChanged();
+      assertCurrent();
 
       setWorkflowPhase('qwen');
       const classificationStart = await api.classifyChatBatches(projectId);
+      assertCurrent();
       setLastResult({ type: 'classify-started', result: classificationStart });
       setClassificationStatus(classificationStart);
 
       let completedClassification = classificationStart;
       while (completedClassification.state === 'RUNNING') {
         await sleep(1500);
+        assertCurrent();
         completedClassification = await api.getChatClassificationStatus(projectId);
+        assertCurrent();
         setClassificationStatus(completedClassification);
       }
 
@@ -282,33 +334,56 @@ export default function ChatImportPanel({ projectId, project, batches, onChanged
       }
 
       await onChanged();
+      assertCurrent();
       setWorkflowPhase('done');
     } catch (error) {
-      console.error(error);
+      if (!isCurrent()) return;
+      handleGoogleChatError(error);
+      setDownloadError(getErrorMessage(error));
       setWorkflowError(getErrorMessage(error));
       setWorkflowPhase('failed');
     } finally {
-      setBusyAction(null);
+      if (isCurrent()) setBusyAction(null);
     }
   };
 
   const runAction = async (action: 'classify') => {
+    if (operationRunning || busyAction !== null) return;
+    const run = ++workflowRun.current;
+    const isCurrent = () => isMounted.current && workflowRun.current === run;
     setBusyAction(action);
+    setDownloadError(null);
     try {
       if (action === 'classify') {
         setClassificationStatus({ state: 'RUNNING', processed: 0, total: counts.waiting });
         const result = await api.classifyChatBatches(projectId);
+        if (!isCurrent()) return;
         setLastResult({ type: 'classify-started', result });
         setClassificationStatus(result);
       }
       await onChanged();
     } catch (error) {
-      console.error(error);
-      alert('Blad podczas operacji importu z Google Chat');
+      if (!isCurrent()) return;
+      setDownloadError(getErrorMessage(error));
+      handleGoogleChatError(error);
     } finally {
-      setBusyAction(null);
+      if (isCurrent()) setBusyAction(null);
     }
   };
+
+  useEffect(() => {
+    isMounted.current = true;
+    return () => {
+      isMounted.current = false;
+      workflowRun.current += 1;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (downloadStatus?.state === 'AUTH_REQUIRED') {
+      setGoogleAuthRefreshKey((current) => current + 1);
+    }
+  }, [downloadStatus?.state]);
 
   const clearQueues = async () => {
     const toClear = counts.waiting + counts.ready + counts.review;
@@ -403,14 +478,23 @@ export default function ChatImportPanel({ projectId, project, batches, onChanged
   }, [classificationStatus, onChanged, refreshedClassificationKey]);
 
   useEffect(() => {
+    if (busyAction === 'download' || busyAction === 'classify') return;
     let cancelled = false;
+    let inFlight = false;
 
     const refreshDownloadStatus = async () => {
+      if (inFlight) return;
+      inFlight = true;
       try {
         const status = await api.getGoogleChatDownloadStatus(projectId);
         if (!cancelled) setDownloadStatus(status);
       } catch (error) {
-        console.error(error);
+        if (!cancelled) {
+          setDownloadError(getErrorMessage(error));
+          handleGoogleChatError(error);
+        }
+      } finally {
+        inFlight = false;
       }
     };
 
@@ -423,7 +507,7 @@ export default function ChatImportPanel({ projectId, project, batches, onChanged
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, [projectId]);
+  }, [busyAction, projectId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -581,18 +665,27 @@ export default function ChatImportPanel({ projectId, project, batches, onChanged
             </p>
           </div>
 
+          <GoogleChatConnection
+            status={googleAuthStatus}
+            onStatusChange={setGoogleAuthStatus}
+            refreshKey={googleAuthRefreshKey}
+            isBusy={operationRunning || busyAction !== null}
+          />
+          {googleAuthStatus?.inviteMode === 'GOOGLE_CHAT_LINK' && <GoogleChatInvitesLink />}
+
+          {googleAuthStatus?.inviteMode === 'WINDOWS_BROWSER' && (
           <div className="rounded-md border p-3 flex flex-col gap-3">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <h4 className="font-semibold text-sm">Zaproszenia do pokojow</h4>
+                <h4 className="font-semibold text-sm">Zaproszenia do pokojów — przeglądarka serwera Windows</h4>
                 <p className="text-sm text-muted-foreground">
-                  Laduje widok Google Chat z filtrem pokojow, do ktorych konto bota jeszcze nie dolaczylo.
+                  Osobna sesja Chrome na serwerze do przyjmowania zaproszeń. Połączenie Google powyżej służy do pobierania zdjęć.
                 </p>
               </div>
               <div className="flex flex-wrap gap-2">
                 <Button variant="outline" disabled={busyAction !== null || operationRunning} onClick={() => void openInviteSetup()}>
                   {busyAction === 'invite-setup' ? <Loader2 size={16} className="mr-2 animate-spin" /> : <UserPlus size={16} className="mr-2" />}
-                  Otworz logowanie
+                  Otwórz Chrome na serwerze
                 </Button>
                 <Button variant="outline" disabled={busyAction !== null || operationRunning} onClick={() => void loadInvites()}>
                   {busyAction === 'invites' ? <Loader2 size={16} className="mr-2 animate-spin" /> : <RefreshCw size={16} className="mr-2" />}
@@ -627,7 +720,7 @@ export default function ChatImportPanel({ projectId, project, batches, onChanged
               </p>
               <p className="mt-2 text-muted-foreground">
                 {inviteSession?.message ??
-                  'Najpierw kliknij Otworz logowanie. Chrome zostanie otwarty i nie zamknie sie automatycznie, wiec spokojnie zaloguj konto bota. Potem kliknij Zaladuj zaproszenia.'}
+                  'Najpierw kliknij Otwórz Chrome na serwerze i zaloguj konto bota w tym oknie. Potem kliknij Załaduj zaproszenia.'}
               </p>
               {inviteSession?.url && <p className="mt-1 break-all text-xs text-muted-foreground">{inviteSession.url}</p>}
               {inviteSetupError && <p className="mt-2 text-xs text-destructive">{inviteSetupError}</p>}
@@ -670,6 +763,7 @@ export default function ChatImportPanel({ projectId, project, batches, onChanged
             )}
 
           </div>
+          )}
 
           <div className="rounded-md border p-3 flex flex-col gap-3">
             <div className="flex items-center justify-between gap-3">
@@ -682,7 +776,7 @@ export default function ChatImportPanel({ projectId, project, batches, onChanged
                 </p>
               </div>
               {showSpacePicker && (
-                <Button variant="outline" disabled={busyAction !== null || operationRunning} onClick={() => void loadSpaces()}>
+                <Button variant="outline" disabled={!isGoogleConnected || busyAction !== null || operationRunning} onClick={() => void loadSpaces()}>
                   {busyAction === 'spaces' ? <Loader2 size={16} className="mr-2 animate-spin" /> : <RefreshCw size={16} className="mr-2" />}
                   Zaladuj pokoje
                 </Button>
@@ -698,13 +792,13 @@ export default function ChatImportPanel({ projectId, project, batches, onChanged
                   <p className="text-xs text-muted-foreground">Ostatnie pobranie: {formatDateTime(lastDownloadAt)}</p>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  <Button disabled={!defaultChatRoot || busyAction !== null || operationRunning} onClick={() => void startDownload()}>
+                  <Button disabled={!isGoogleConnected || canResumeDownload || !defaultChatRoot || busyAction !== null || operationRunning} onClick={() => void startDownload()}>
                     {busyAction === 'download' ? <Loader2 size={16} className="mr-2 animate-spin" /> : <MessageSquare size={16} className="mr-2" />}
                     Zaktualizuj zdjecia
                   </Button>
                   <Button
                     variant="outline"
-                    disabled={busyAction !== null || operationRunning}
+                    disabled={!canReplaceDownload || busyAction !== null || operationRunning}
                     onClick={() => {
                       setIsChangingSpace(true);
                       void loadSpaces();
@@ -718,6 +812,7 @@ export default function ChatImportPanel({ projectId, project, batches, onChanged
               <div className="grid md:grid-cols-[1fr_auto] gap-3">
                 <select
                   value={selectedSpaceName}
+                  disabled={!canReplaceDownload || operationRunning || busyAction !== null}
                   onChange={(event) => setSelectedSpaceName(event.target.value)}
                   className="h-8 rounded-lg border border-input bg-background px-2.5 text-sm"
                 >
@@ -729,17 +824,26 @@ export default function ChatImportPanel({ projectId, project, batches, onChanged
                     </option>
                   ))}
                 </select>
-                <Button disabled={!selectedSpace || !defaultChatRoot || busyAction !== null || operationRunning} onClick={() => void startDownload()}>
+                <Button disabled={!isGoogleConnected || !canReplaceDownload || !selectedSpace || !defaultChatRoot || busyAction !== null || operationRunning} onClick={() => void startDownload()}>
                   {busyAction === 'download' ? <Loader2 size={16} className="mr-2 animate-spin" /> : <MessageSquare size={16} className="mr-2" />}
                   {assignedSpace ? 'Pobierz i zmien pokoj' : 'Pobierz zdjecia'}
                 </Button>
               </div>
             )}
 
+            {canResumeDownload && showSpacePicker && (
+              <p className="text-sm text-muted-foreground">
+                Uruchomienie pobierania z wybranego pokoju zastąpi zapisane zadanie.
+                Pobrane pliki pozostaną na dysku.
+              </p>
+            )}
+
+            {downloadError && <p role="alert" className="text-sm text-destructive">{downloadError}</p>}
+
             {downloadStatus && downloadStatus.state !== 'IDLE' && (
               <div className="rounded-md bg-muted/30 p-3 text-sm flex flex-col gap-2">
                 <div className="flex items-center justify-between gap-3">
-                  <span className="font-medium">Pobieranie: {downloadStatus.state}</span>
+                  <span className="font-medium">{getGoogleChatDownloadLabel(downloadStatus.state)}</span>
                   {downloadStatus.spaceDisplayName && (
                     <span className="text-muted-foreground">{downloadStatus.spaceDisplayName}</span>
                   )}
@@ -759,6 +863,34 @@ export default function ChatImportPanel({ projectId, project, batches, onChanged
                   )}
                 </div>
                 {downloadStatus.error && <p className="text-destructive">{downloadStatus.error}</p>}
+                {canResumeDownload && (
+                  <div className="flex flex-col items-start gap-2 border-t pt-3">
+                    <p>
+                      Postęp został zapisany. Wznowienie ponowi brakujące pliki w tym samym pobieraniu.
+                      Ten przebieg przejdzie do importu i Qwen po pobraniu wszystkich plików.
+                    </p>
+                    {!isGoogleConnected && (
+                      <p className="text-muted-foreground">Najpierw połącz Google w panelu powyżej.</p>
+                    )}
+                    <Button
+                      disabled={!isGoogleConnected || operationRunning || busyAction !== null}
+                      onClick={() => void startDownload('resume')}
+                    >
+                      <RefreshCw size={16} />
+                      Wznów pobieranie
+                    </Button>
+                  </div>
+                )}
+                {canProcessDownload && !operationRunning && (
+                  <Button
+                    variant="outline"
+                    className="self-start"
+                    disabled={busyAction !== null}
+                    onClick={() => void startDownload('continue')}
+                  >
+                    Sprawdź pobrane zdjęcia i uruchom Qwen
+                  </Button>
+                )}
                 {downloadStatus.recentLines.length > 0 && (
                   <pre className="max-h-36 overflow-auto rounded bg-background p-2 text-xs whitespace-pre-wrap">
                     {downloadStatus.recentLines.join('\n')}

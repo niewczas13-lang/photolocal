@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { authenticateUser, listAppUsers, upsertAppUser } from './app-auth.js';
 import { buildApp } from '../app.js';
 import { ProjectsRepository } from '../projects/projects-repository.js';
@@ -116,6 +116,40 @@ describe('app auth', () => {
         }),
       ]),
     );
+  });
+
+  it('protects Google connection endpoints and allows the OAuth callback with browser cookies', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'photo-local-auth-google-'));
+    process.env.PHOTO_LOCAL_AUTH = 'enabled';
+    process.env.PHOTO_LOCAL_DB = join(dir, 'test.sqlite');
+    process.env.GOOGLE_CHAT_CREDENTIALS_FILE = join(dir, 'credentials.json');
+    process.env.GOOGLE_CHAT_TOKEN_FILE = join(dir, 'token.json');
+    process.env.GOOGLE_CHAT_OAUTH_REDIRECT_URI = 'https://romek.example/api/google-chat/auth/callback';
+    writeFileSync(process.env.GOOGLE_CHAT_CREDENTIALS_FILE, JSON.stringify({ web: { client_id: 'test', client_secret: 'secret' } }));
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+      access_token: 'test-access', refresh_token: 'test-refresh', expires_in: 3600,
+      scope: 'https://www.googleapis.com/auth/chat.messages.readonly https://www.googleapis.com/auth/chat.spaces.readonly',
+    }))));
+    const { app } = await buildApp();
+    try {
+      expect((await app.inject('/api/google-chat/auth/status')).statusCode).toBe(401);
+      expect((await app.inject({ method: 'POST', url: '/api/google-chat/auth/start', payload: {} })).statusCode).toBe(401);
+      const login = await app.inject({ method: 'POST', url: '/api/auth/login', payload: { username: 'aniela', password: 'aniela' } });
+      const appCookie = String(login.headers['set-cookie']).split(';')[0];
+      const start = await app.inject({ method: 'POST', url: '/api/google-chat/auth/start',
+        headers: { cookie: appCookie, origin: 'https://romek.example' }, payload: { returnPath: '/#/projects/one/import' } });
+      expect(start.statusCode).toBe(200);
+      const binding = String(start.headers['set-cookie']).split(';')[0];
+      const state = new URL(start.json().authorizationUrl).searchParams.get('state');
+      const callback = await app.inject({ url: `/api/google-chat/auth/callback?code=test-code&state=${state}`,
+        headers: { cookie: `${appCookie}; ${binding}` } });
+      expect(callback.statusCode).toBe(303);
+      expect(callback.headers.location).toBe('/?googleChatAuth=connected#/projects/one/import');
+    } finally {
+      await app.close();
+      vi.unstubAllGlobals();
+      for (const key of ['GOOGLE_CHAT_CREDENTIALS_FILE', 'GOOGLE_CHAT_TOKEN_FILE', 'GOOGLE_CHAT_OAUTH_REDIRECT_URI']) delete process.env[key];
+    }
   });
 
   it('allows browser image requests to use the login session cookie', async () => {

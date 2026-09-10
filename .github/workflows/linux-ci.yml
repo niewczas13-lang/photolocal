@@ -1,0 +1,75 @@
+name: Linux CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: linux-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  javascript:
+    name: Node tests, migration, and production build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Test backend and frontend on Linux
+        run: npm test
+      - name: Test offline SQLite migration with synthetic databases
+        run: npm run test:migration --workspace backend
+      - name: Build frontend and backend
+        run: npm run build
+
+  python:
+    name: Python downloader tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          # Debian bookworm, used by Dockerfile, also provides Python 3.11.
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: pobierzchat/requirements.txt
+      - name: Install downloader dependencies
+        run: python -m pip install -r pobierzchat/requirements.txt
+      - name: Test downloader with synthetic files and mocked Google clients
+        run: python -m unittest discover -s pobierzchat -p 'test_*.py' -v
+
+  docker:
+    name: Build image and verify isolated persistence
+    runs-on: ubuntu-24.04
+    needs: [javascript, python]
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Validate staging Compose configuration
+        run: docker compose --env-file .env.docker.example config --quiet
+      - name: Build final Linux image
+        run: docker build --pull --target runtime --tag photolocal:ci .
+      - name: Check health, login, and persistence across restart and recreation
+        # No credentials, host data mounts, published ports, or external network in this test.
+        run: node scripts/docker-smoke.mjs --image photolocal:ci
