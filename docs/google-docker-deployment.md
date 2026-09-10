@@ -391,3 +391,68 @@ pozostaje zarządzany osobno.
 Źródła: [wolumen CIFS](https://docs.docker.com/engine/storage/volumes/#create-cifssamba-volumes),
 [Compose ze stdin](https://docs.docker.com/reference/cli/docker/compose/),
 [interpolacja Compose](https://docs.docker.com/reference/compose-file/interpolation/).
+
+### Windows: automatyczne logowanie i blokada konsoli
+
+Docker Desktop ma opcję startu po zalogowaniu użytkownika. Automatyczne logowanie
+tego samego konta Windows pozwala uruchomić istniejącą konfigurację Dockera po
+starcie komputera bez ręcznego wejścia przez RDP. Wymagany jest włączony start
+Dockera przy logowaniu; sam helper tego ustawienia nie zmienia.
+[Ustawienia Docker Desktop](https://docs.docker.com/desktop/settings-and-maintenance/settings/#general).
+
+Na serwerze otwórz **64-bitowy Windows PowerShell jako administrator**, na tym samym
+koncie Windows, które obecnie uruchamia Docker Desktop. Wykonaj:
+
+```powershell
+git -C C:\PhotoLocal-staging pull --ff-only
+if ($LASTEXITCODE -eq 0) {
+    powershell -NoProfile -ExecutionPolicy Bypass -File C:\PhotoLocal-staging\scripts\prepare-windows-autologon.ps1
+}
+```
+
+Helper sprawdza właściciela procesów Dockera i wpis startu przy logowaniu, pobiera
+oficjalny Microsoft Autologon oraz weryfikuje podpis Microsoft. W jego oknie sprawdź
+`User` i `Domain` względem konta wypisanego w PowerShell, wpisz **hasło Windows**
+(nie PIN, hasło Google ani SMB), kliknij **Enable**, a po komunikacie zamknij okno.
+Hasło wpisuje się wyłącznie w narzędziu Microsoft. Windows przechowuje je jako
+sekret LSA; administrator komputera może je odzyskać. Narzędzie Autologon nie
+sprawdza poprawności wpisanego hasła.
+[Microsoft Autologon](https://learn.microsoft.com/en-us/sysinternals/downloads/autologon).
+
+Przed otwarciem tego okna helper tworzy zadanie `PhotoLocal Docker Console Lock`,
+ograniczone do tego konta i zwykłych uprawnień. Przy logowaniu żąda blokady wyłącznie
+w sesji fizycznej konsoli; sesje RDP pomija. Próby są ograniczone do 15 sprawdzeń
+z dwusekundowymi przerwami. Istniejące zadanie o zgodnej konfiguracji jest zachowane
+przy ponowieniu; inna konfiguracja pod tą nazwą daje `LOCK_TASK_CONFLICT` i nie jest
+nadpisywana. Zachowaj katalog stagingu i znajdujący się w nim skrypt blokady.
+
+`AUTOLOGON_CONFIGURED_REBOOT_NOT_TESTED` potwierdza zapis flagi automatycznego
+logowania właściwego konta i konfigurację zadania. Nie potwierdza hasła, startu
+Dockera po restarcie ani faktycznej blokady ekranu. Również `LOCK_REQUEST_ACCEPTED`
+oznacza tylko przyjęcie asynchronicznego żądania przez Windows.
+[Kontrakt LockWorkStation](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-lockworkstation).
+
+**Na tym etapie nie restartuj Windowsa.** Próba restartu wymaga osobnego momentu
+przerwy i sprawdzenia dostępności aplikacji przed wejściem przez RDP. Zachowaj stare
+zadanie `PhotoLocal Autostart` do późniejszego przełączenia produkcji; ten helper
+nie zmienia uruchomionej Romki, portów ani kontenerów.
+
+Wycofanie: otwórz oficjalny `Autologon64.exe` z lokalizacji `AutologonTool` podanej
+w raporcie i wybierz **Disable**, następnie zamknij okno. Dopiero po wyłączeniu
+automatycznego logowania można usunąć nasze zadanie. Poniższy blok sprawdza flagę
+oraz zgodność zadania przed usunięciem wyłącznie `PhotoLocal Docker Console Lock`:
+
+```powershell
+. C:\PhotoLocal-staging\scripts\prepare-windows-autologon.ps1
+$romekState = Get-PhotoLocalAutologonState
+if ([string]$romekState.Enabled -eq '1') { throw 'Najpierw wybierz Disable w Microsoft Autologon.' }
+$romekSid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+$romekSpec = New-PhotoLocalConsoleLockSpec -Root 'C:\PhotoLocal-staging' -Sid $romekSid
+$romekTask = Get-ScheduledTask -TaskPath '\' -TaskName $romekSpec.Name -ErrorAction SilentlyContinue
+if ($romekTask) {
+    if (-not (Test-PhotoLocalConsoleLockTask -Task $romekTask -Spec $romekSpec)) {
+        throw 'LOCK_TASK_CONFLICT'
+    }
+    Unregister-ScheduledTask -InputObject $romekTask -Confirm:$false
+}
+```
