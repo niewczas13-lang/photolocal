@@ -489,3 +489,46 @@ sesji i stałe statusy, bez haseł czy nazw kont. Kolejne wejście przez RDP nie
 nadpisuje zapisu z bootowania. Pozostaje maksymalnie 20 własnych plików; problem
 z zapisem diagnostyki nie zatrzymuje blokowania. `LOCK_REQUEST_ACCEPTED` nadal
 oznacza przyjęcie żądania, a nie niezależny pomiar stanu ekranu.
+
+### Przygotowanie produkcyjnego udziału i kontrola starej instalacji
+
+Po sprawdzeniu stagingu przygotuj **osobny** wolumen NAS z prawem zapisu. Stagingowy
+wolumen ma `ro` również w opcjach CIFS; zmiana samego `read_only` w Compose nie
+wystarcza. Na serwerze, po pobraniu aktualnej wersji tej gałęzi:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File C:\PhotoLocal-staging\scripts\inspect-production-before-cutover.ps1 -ProductionRoot C:\PhotoLocal
+```
+
+`READ_ONLY_INVENTORY` pokazuje nazwy rozpoznanych ustawień z `.env`, domyślne
+lokalizacje, proces nasłuchujący, jego potomków i metadane starego autostartu.
+Nie pokazuje wartości konfiguracji ani pełnych argumentów procesów. Ustawienia
+nadpisane w środowisku działającego procesu, rzeczywiste niestandardowe ścieżki
+i aktywne operacje aplikacji wymagają osobnego sprawdzenia. Raport nie potwierdza
+gotowości ani tożsamości procesu wystarczającej do jego zatrzymania.
+
+Następnie użyj własnego serwera, udziału, podfolderu i konta SMB:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File C:\PhotoLocal-staging\scripts\connect-production-storage.ps1 -Server 192.0.2.70 -Share Photos -Subdirectory Projects -UserName photoBot -OutputDirectory C:\PhotoLocal-staging\docker-data
+```
+
+Hasło wpisz lokalnie w oknie poświadczeń. Helper przesyła je przez stdin i nie
+wypisuje surowych logów Dockera. Po powodzeniu hasło pozostaje w opcjach nowego
+wolumenu Dockera; nie publikuj pełnego `docker inspect` ani konfiguracji Compose.
+Test odczytuje próbkę zdjęcia oraz zapisuje, odczytuje i usuwa dane wyłącznie we
+własnym nowym folderze testowym. Sukces wymaga zakończenia testu i jego sprzątania.
+
+Oczekiwany wynik to `PRODUCTION_STORAGE_READY` / `Cleanup: CLEAN`. Powstaje
+`docker-data\production-storage.json`, zawierający wyłącznie `version: 2`,
+`accessMode: rw`, nazwę wolumenu `photolocal-production-nas-...`, punkt `/nas`
+i podfolder. Stary `storage.json` oraz stagingowy udział pozostają zachowane.
+Istniejący manifest blokuje ponowienie; nie usuwaj go, aby wymusić kolejny test.
+Wynik `Cleanup: REQUIRED` wymaga sprawdzenia wskazanego testu i zasobów przed
+kontynuacją, bez zbiorczego czyszczenia Dockera.
+
+Te komendy nie uruchamiają produkcyjnego kontenera i nie przełączają portów.
+Do końcowego przełączenia potrzebna jest świeża kopia po zakończeniu operacji
+starej aplikacji, zachowanie konfiguracji integracji oraz weryfikacja znanych
+braków zdjęć. Baza zmieniona podczas testowania stagingu nie zastępuje aktualnej
+bazy produkcji.

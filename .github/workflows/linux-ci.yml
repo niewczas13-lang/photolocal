@@ -28,7 +28,7 @@ jobs:
           package-manager-cache: false
       - name: Test with Windows PowerShell 5.1 and mocked system changes
         # No passwords, real task registration, GUI launch, lock or autologon changes.
-        run: node --test scripts/prepare-windows-autologon.spec.mjs scripts/lock-autologon-session.spec.mjs
+        run: node --test scripts/prepare-windows-autologon.spec.mjs scripts/lock-autologon-session.spec.mjs scripts/inspect-production-before-cutover.spec.mjs scripts/connect-production-storage.spec.mjs
 
   javascript:
     name: Node tests, migration, and production build
@@ -49,7 +49,7 @@ jobs:
       - name: Test offline SQLite migration with synthetic databases
         run: npm run test:migration --workspace backend
       - name: Test isolated SMB diagnostics without real shares or credentials
-        run: node --test scripts/test-smb-access.spec.mjs scripts/test-smb-access.windows.spec.mjs
+        run: node --test scripts/test-smb-access.spec.mjs scripts/test-smb-access.windows.spec.mjs scripts/connect-production-storage.spec.mjs
       - name: Test online snapshots and read-only staging preparation
         run: node --test scripts/snapshot-staging-database.spec.mjs scripts/connect-staging-storage.spec.mjs scripts/audit-staging-copy.spec.mjs scripts/prepare-staging-copy.spec.mjs scripts/diagnose-staging-copy.spec.mjs scripts/start-staging-preview.spec.mjs
       - name: Build frontend and backend
