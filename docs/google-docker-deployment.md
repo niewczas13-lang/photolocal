@@ -228,3 +228,37 @@ na starą i uruchom ją z zachowanymi danymi oraz konfiguracją. Po rozpoczęciu
 na nowej wersji nie wracaj po prostu do starej bazy: najpierw zachowaj nową bazę
 i pliki, potem uzgodnij przeniesienie zmian. Raport mapowania pomaga ustalić ścieżki,
 ale nie jest automatyczną migracją powrotną i nie scala nowszych danych.
+
+## Diagnostyka udziału SMB z Windows
+
+Jeżeli Windows czyta udział, lecz Docker odrzuca jego ścieżkę UNC jako bind mount,
+można wykonać jedną izolowaną próbę odczytu przez wolumen CIFS. W katalogu staging,
+z zainstalowanym Node.js i istniejącym obrazem `photolocal:staging`, uruchom:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-smb-access.ps1 -Server fileserver.example -Share Photos -Subdirectory Projects -UserName 'EXAMPLE-PC\photo-user'
+```
+
+Podaj rzeczywisty serwer, udział, podkatalog i konto. Hasło wpisuje się wyłącznie
+w lokalnym oknie `Get-Credential`. Skrypt przekazuje je przez stdin do Node i Docker
+Compose; nie zapisuje konfiguracji na dysku ani nie umieszcza hasła w argumentach
+procesu. Docker przechowuje jednak opcje CIFS w metadanych testowego wolumenu do jego
+usunięcia; administrator silnika ma do nich dostęp. Nie udostępniaj inspekcji wolumenu,
+`compose config` ani surowych logów montowania.
+
+Próba używa SMB 3.1.1 i użytkownika UID/GID 1000. Wolumen i kontener są tylko do
+odczytu, kontener nie ma sieci ani portów, a kopiowanie zawartości obrazu do wolumenu
+jest wyłączone. Test tylko odczytuje katalog; nie potwierdza jeszcze dostępu do
+wszystkich zdjęć, możliwości zapisu ani autostartu. Nie wymaga zatrzymania aplikacji.
+
+Raport `Status: DIRECTORY_READ_OK` i `Cleanup: CLEAN` potwierdza odczyt i zakończenie
+sprzątania. `Cleanup: REQUIRED` wymaga sprawdzenia zasobów nazwanych w `ProbeId`
+(wolumen ma dodatkowo końcówkę `-remote`); po timeoutach silnik może jeszcze kończyć
+montowanie. Skrypt usuwa wyłącznie zasoby tej próby. Nigdy nie wykonuje `prune`.
+`CREDENTIAL_FORMAT_UNSUPPORTED` oznacza, że nie wykonano logowania: przecinek,
+NUL lub znak nowej linii w danych konta wymagają innej konfiguracji montowania.
+Nie zmieniaj hasła w celu obejścia tego ograniczenia.
+
+Źródła: [wolumen CIFS](https://docs.docker.com/engine/storage/volumes/#create-cifssamba-volumes),
+[Compose ze stdin](https://docs.docker.com/reference/cli/docker/compose/),
+[interpolacja Compose](https://docs.docker.com/reference/compose-file/interpolation/).

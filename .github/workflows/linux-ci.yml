@@ -32,6 +32,8 @@ jobs:
         run: npm test
       - name: Test offline SQLite migration with synthetic databases
         run: npm run test:migration --workspace backend
+      - name: Test isolated SMB diagnostics without real shares or credentials
+        run: node --test scripts/test-smb-access.spec.mjs scripts/test-smb-access.windows.spec.mjs
       - name: Build frontend and backend
         run: npm run build
 
