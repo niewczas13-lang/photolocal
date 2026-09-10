@@ -3,7 +3,8 @@ param(
   [Parameter(Mandatory = $true)][string]$Share,
   [Parameter(Mandatory = $true)][string]$Subdirectory,
   [Parameter(Mandatory = $true)][string]$UserName,
-  [string]$Image = 'photolocal:staging'
+  [string]$Image = 'photolocal:staging',
+  [switch]$CheckFilesAndWrite
 )
 
 $ErrorActionPreference = 'Stop'
@@ -17,12 +18,17 @@ try {
   $nodePath = @(Get-Command node.exe -CommandType Application)[0].Source
   $helperPath = Join-Path $PSScriptRoot 'test-smb-access.mjs'
   if (-not (Test-Path -LiteralPath $helperPath -PathType Leaf)) { throw 'HELPER_MISSING' }
-  Write-Host 'Test SMB: jedno logowanie, tylko odczyt. Wpisz haslo w oknie lokalnym.'
+  if ($CheckFilesAndWrite) {
+    Write-Host 'Test SMB: odczyt zdjecia i zapis tylko we wlasnym nowym folderze testowym. Wpisz haslo lokalnie.'
+  } else {
+    Write-Host 'Test SMB: jedno logowanie, tylko odczyt. Wpisz haslo w oknie lokalnym.'
+  }
   $probeCredential = Get-Credential -UserName $UserName -Message 'Haslo do udzialu SMB (nie do Romka ani Google)'
   if ($null -eq $probeCredential) { throw 'CANCELLED' }
   $probeNetworkCredential = $probeCredential.GetNetworkCredential()
   $probePayload = @{
     probeId = $probeId
+    checkFilesAndWrite = [bool]$CheckFilesAndWrite
     server = $Server; share = $Share; subdirectory = $Subdirectory; image = $Image
     username = $probeNetworkCredential.UserName; domain = $probeNetworkCredential.Domain
     password = $probeNetworkCredential.Password
@@ -59,7 +65,7 @@ try {
 
   # Never print raw child output: Docker mount errors may contain credentials.
   $probeReport = $probeOutput.Result | ConvertFrom-Json
-  $allowedStatuses = @('DIRECTORY_READ_OK', 'MOUNT_ACCESS_DENIED', 'DIRECTORY_ACCESS_DENIED', 'UNREACHABLE', 'UNSUPPORTED', 'TIMEOUT', 'IMAGE_MISSING', 'DIRECTORY_MISSING', 'OTHER_ERROR', 'CREDENTIAL_FORMAT_UNSUPPORTED', 'INVALID_INPUT')
+  $allowedStatuses = @('DIRECTORY_READ_OK', 'STORAGE_READ_WRITE_OK', 'STORAGE_WRITE_DENIED', 'PHOTO_SAMPLE_NOT_FOUND', 'STORAGE_PROBE_ERROR', 'TEST_FOLDER_CLEANUP_REQUIRED', 'MOUNT_ACCESS_DENIED', 'DIRECTORY_ACCESS_DENIED', 'UNREACHABLE', 'UNSUPPORTED', 'TIMEOUT', 'IMAGE_MISSING', 'DIRECTORY_MISSING', 'OTHER_ERROR', 'CREDENTIAL_FORMAT_UNSUPPORTED', 'INVALID_INPUT')
   if ($probeReport.status -notin $allowedStatuses -or $probeReport.cleanup -notin @('CLEAN', 'REQUIRED', 'NOT_NEEDED')) { throw 'INVALID_REPORT' }
   if ($probeReport.probeId -ne '' -and $probeReport.probeId -notmatch '^photolocal-smb-probe-[a-f0-9]+$') { throw 'INVALID_REPORT' }
   [pscustomobject]@{

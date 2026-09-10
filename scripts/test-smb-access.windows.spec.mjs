@@ -22,7 +22,7 @@ function powershellLiteral(value) {
   return `'${value.replaceAll("'", "''")}'`;
 }
 
-function runWrapper(context, helperSource) {
+function runWrapper(context, helperSource, checkFilesAndWrite = false) {
   const temporaryRoot = resolve(tmpdir());
   const directory = mkdtempSync(join(temporaryRoot, 'photolocal smb wrapper '));
   context.after(() => {
@@ -41,7 +41,7 @@ function Get-Credential {
   foreach ($syntheticCharacter in ${powershellLiteral(sentinel)}.ToCharArray()) { $syntheticPassword.AppendChar($syntheticCharacter) }
   return New-Object System.Management.Automation.PSCredential('EXAMPLE-PC\\photo user', $syntheticPassword)
 }
-& (Join-Path $PSScriptRoot 'test-smb-access.ps1') -Server '192.0.2.70' -Share 'Photos' -Subdirectory 'Projects' -UserName 'EXAMPLE-PC\\photo user' -Image 'photolocal:staging'
+& (Join-Path $PSScriptRoot 'test-smb-access.ps1') -Server '192.0.2.70' -Share 'Photos' -Subdirectory 'Projects' -UserName 'EXAMPLE-PC\\photo user' -Image 'photolocal:staging' ${checkFilesAndWrite ? '-CheckFilesAndWrite' : ''}
 `;
   const runnerPath = join(directory, 'runner.ps1');
   writeFileSync(runnerPath, `\uFEFF${runner}`, 'utf8');
@@ -61,23 +61,26 @@ function Get-Credential {
   return output;
 }
 
-test('Windows PowerShell 5 wrapper preserves private UTF-8 credentials through stdin from a path with spaces', {
+for (const checkFilesAndWrite of [false, true]) {
+test(`Windows PowerShell 5 wrapper preserves private UTF-8 credentials and write opt-in=${checkFilesAndWrite}`, {
   skip: process.platform !== 'win32',
 }, (context) => {
   const output = runWrapper(context, `
 import { readFileSync, writeFileSync } from 'node:fs';
 writeFileSync(new URL('./helper-started', import.meta.url), 'started');
 const input = JSON.parse(readFileSync(0, 'utf8'));
-const expected = ${JSON.stringify(expectedPayload)};
+const expected = ${JSON.stringify({ ...expectedPayload, checkFilesAndWrite })};
 const matches = Object.entries(expected).every(([key, value]) => input[key] === value);
 const validId = /^photolocal-smb-probe-[a-f0-9]+$/.test(input.probeId);
 if (!matches || !validId) process.exit(1);
-process.stdout.write(JSON.stringify({ status: 'DIRECTORY_READ_OK', cleanup: 'CLEAN', probeId: input.probeId }));
-`);
-  assert.ok(/Status\s*:\s*DIRECTORY_READ_OK/.test(output), 'Wrapper must display the validated read-success status');
+process.stdout.write(JSON.stringify({ status: ${JSON.stringify(checkFilesAndWrite ? 'STORAGE_READ_WRITE_OK' : 'DIRECTORY_READ_OK')}, cleanup: 'CLEAN', probeId: input.probeId }));
+`, checkFilesAndWrite);
+  const expectedStatus = checkFilesAndWrite ? 'STORAGE_READ_WRITE_OK' : 'DIRECTORY_READ_OK';
+  assert.ok(new RegExp(`Status\\s*:\\s*${expectedStatus}`).test(output), 'Wrapper must display the validated success status');
   assert.ok(/Cleanup\s*:\s*CLEAN/.test(output), 'Wrapper must display validated cleanup status');
   assert.ok(!output.includes('PROBE_LAUNCH_FAILED'), 'Credential transport must succeed');
 });
+}
 
 test('Windows PowerShell wrapper suppresses secret-bearing raw child output and stack traces', {
   skip: process.platform !== 'win32',

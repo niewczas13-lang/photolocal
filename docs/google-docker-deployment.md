@@ -262,6 +262,22 @@ montowanie. Skrypt usuwa wyłącznie zasoby tej próby. Nigdy nie wykonuje `prun
 NUL lub znak nowej linii w danych konta wymagają innej konfiguracji montowania.
 Nie zmieniaj hasła w celu obejścia tego ograniczenia.
 
+Po udanym odczycie katalogu można dodać `-CheckFilesAndWrite` do tego samego polecenia.
+Ten jawny wariant montuje udział do zapisu, odczytuje do 64 KiB jednego istniejącego
+zdjęcia i wykonuje zapis, odczyt, zmianę nazwy oraz usunięcie pliku wyłącznie w nowym
+katalogu `.<ProbeId>` pod wybranym podkatalogiem udziału. Istniejące zdjęcia są tylko
+odczytywane. Folder testowy jest tworzony wyłącznie, gdy jeszcze nie istnieje;
+sprzątanie nie usuwa rekurencyjnie katalogów. Sukces ma kod `STORAGE_READ_WRITE_OK`.
+`TEST_FOLDER_CLEANUP_REQUIRED` wymaga sprawdzenia pozostawionego katalogu próbnego.
+Wyszukiwanie zdjęcia ma limit 500 katalogów i 10 000 wpisów; `PHOTO_SAMPLE_NOT_FOUND`
+nie oznacza, że na całym udziale nie ma zdjęć. Ten test nie zastępuje sprawdzenia
+ścieżek i oryginałów w poszczególnych projektach po migracji kopii bazy.
+
+Przy stagingu z istniejącym NAS nie trzeba kopiować całego udziału na dysk Windows.
+Można podłączyć go tylko do odczytu w `/nas` i odwzorować np. `P:\Projekty` na
+`/nas/Projekty`, jeżeli korzeń `P:` odpowiada korzeniowi montowanego udziału.
+Próby importu i edycji wykonuj w osobnym projekcie i katalogu testowym.
+
 Źródła: [wolumen CIFS](https://docs.docker.com/engine/storage/volumes/#create-cifssamba-volumes),
 [Compose ze stdin](https://docs.docker.com/reference/cli/docker/compose/),
 [interpolacja Compose](https://docs.docker.com/reference/compose-file/interpolation/).

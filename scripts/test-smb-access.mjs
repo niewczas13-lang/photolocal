@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -32,9 +33,11 @@ function composeLiteral(value) {
   return value.replaceAll('$', () => '$$');
 }
 
-/** Build only an isolated, read-only probe; never configure the application. */
+/** Build an isolated probe; writes require an explicit opt-in and never start the application. */
 export function buildProbeConfig(input, probeId) {
   if (!PROBE_ID.test(probeId) || !input || typeof input !== 'object') reject('INVALID_INPUT');
+  if (input.checkFilesAndWrite !== undefined && typeof input.checkFilesAndWrite !== 'boolean') reject('INVALID_INPUT');
+  const checkFilesAndWrite = input.checkFilesAndWrite === true;
   for (const key of ['server', 'share', 'subdirectory', 'username', 'domain', 'password', 'image']) {
     if (typeof input[key] !== 'string' || input[key].length > 4096) reject('INVALID_INPUT');
   }
@@ -49,10 +52,17 @@ export function buildProbeConfig(input, probeId) {
   if (!/^[a-z0-9][a-z0-9._/:@-]*$/i.test(input.image)) reject('INVALID_INPUT');
 
   const options = [
-    'ro', 'vers=3.1.1', 'uid=1000', 'gid=1000', 'file_mode=0440', 'dir_mode=0550',
+    checkFilesAndWrite ? 'rw' : 'ro', 'vers=3.1.1', 'uid=1000', 'gid=1000',
+    checkFilesAndWrite ? 'file_mode=0660' : 'file_mode=0440',
+    checkFilesAndWrite ? 'dir_mode=0770' : 'dir_mode=0550',
     `addr=${input.server}`, `username=${input.username}`, `password=${input.password}`,
   ];
   if (input.domain) options.push(`domain=${input.domain}`);
+  const command = ['-c', PYTHON_PROBE, composeLiteral(`/probe/${input.subdirectory}`)];
+  if (checkFilesAndWrite) {
+    command[1] = composeLiteral(readFileSync(new URL('./smb-storage-probe.py', import.meta.url), 'utf8'));
+    command.push(probeId);
+  }
   return {
     services: {
       probe: {
@@ -65,8 +75,8 @@ export function buildProbeConfig(input, probeId) {
         healthcheck: { disable: true },
         logging: { driver: 'none' },
         entrypoint: ['/opt/venv/bin/python'],
-        command: ['-c', PYTHON_PROBE, composeLiteral(`/probe/${input.subdirectory}`)],
-        volumes: [{ type: 'volume', source: 'remote', target: '/probe', read_only: true, volume: { nocopy: true } }],
+        command,
+        volumes: [{ type: 'volume', source: 'remote', target: '/probe', read_only: !checkFilesAndWrite, volume: { nocopy: true } }],
       },
     },
     volumes: {
@@ -131,6 +141,13 @@ export function invokeDocker(args, stdin = '', timeoutMs = 90000) {
 function classify(result) {
   if (result.timedOut) return 'TIMEOUT';
   const lines = result.stdout.trim().split(/\r?\n/);
+  if (lines.includes('PROBE_STARTED')) {
+    if (lines.includes('TEST_FOLDER_CLEANUP_REQUIRED')) return 'TEST_FOLDER_CLEANUP_REQUIRED';
+    if (result.code === 0 && lines.includes('STORAGE_READ_WRITE_OK')) return 'STORAGE_READ_WRITE_OK';
+    for (const status of ['STORAGE_WRITE_DENIED', 'PHOTO_SAMPLE_NOT_FOUND', 'STORAGE_PROBE_ERROR']) {
+      if (lines.includes(status)) return status;
+    }
+  }
   if (result.code === 0 && lines.includes('DIRECTORY_READ_OK')) return 'DIRECTORY_READ_OK';
   if (lines.includes('PROBE_STARTED') && lines.includes('DIRECTORY_ACCESS_DENIED')) {
     return 'DIRECTORY_ACCESS_DENIED';
@@ -186,8 +203,9 @@ export async function runProbe(input, {
         report.cleanup = 'REQUIRED';
       }
     }
-    // A timed-out client does not prove that a daemon-side mount was cancelled.
-    if (uncertain) report.cleanup = 'REQUIRED';
+    // Docker removal cannot prove that an interrupted Python probe cleaned its SMB folder.
+    const interruptedWrite = input.checkFilesAndWrite === true && report.status === 'OTHER_ERROR';
+    if (uncertain || interruptedWrite || report.status === 'TEST_FOLDER_CLEANUP_REQUIRED') report.cleanup = 'REQUIRED';
   }
   return report;
 }
@@ -204,7 +222,7 @@ async function main() {
     raw = '';
     const report = await runProbe(input, { probeId: input.probeId });
     process.stdout.write(JSON.stringify(report) + '\n');
-    process.exitCode = report.status === 'DIRECTORY_READ_OK' && report.cleanup === 'CLEAN' ? 0 : 1;
+    process.exitCode = ['DIRECTORY_READ_OK', 'STORAGE_READ_WRITE_OK'].includes(report.status) && report.cleanup === 'CLEAN' ? 0 : 1;
   } catch {
     process.stdout.write(JSON.stringify({ status: 'INVALID_INPUT', cleanup: 'NOT_NEEDED', probeId: '' }) + '\n');
     process.exitCode = 1;

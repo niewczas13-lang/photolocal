@@ -76,6 +76,67 @@ test('probe mounts the requested SMB share read-only in an isolated existing ima
   assert.equal(mount.volume.nocopy, true);
 });
 
+test('explicit storage test allows only its volume to be writable and retains an isolated container', () => {
+  const config = buildProbeConfig({ ...INPUT, checkFilesAndWrite: true }, PROBE_ID);
+  const service = config.services.probe;
+  const options = config.volumes.remote.driver_opts.o.split(',');
+  assert.ok(options.includes('rw'));
+  assert.ok(!options.includes('ro'));
+  assert.ok(options.includes('file_mode=0660'));
+  assert.ok(options.includes('dir_mode=0770'));
+  assert.equal(service.read_only, true);
+  assert.equal(service.network_mode, 'none');
+  assert.equal(service.volumes[0].read_only, false);
+  assert.equal(service.volumes[0].volume.nocopy, true);
+  assert.equal(service.command.at(-1), PROBE_ID);
+  assert.ok(service.command[1].includes('STORAGE_READ_WRITE_OK'));
+});
+
+test('storage read/write success and leftover test folder are reported distinctly', async () => {
+  for (const [marker, cleanup] of [
+    ['STORAGE_READ_WRITE_OK', 'CLEAN'],
+    ['TEST_FOLDER_CLEANUP_REQUIRED', 'REQUIRED'],
+    ['STORAGE_WRITE_DENIED', 'CLEAN'],
+    ['PHOTO_SAMPLE_NOT_FOUND', 'CLEAN'],
+  ]) {
+    const report = await runProbe({ ...INPUT, checkFilesAndWrite: true }, {
+      probeId: PROBE_ID,
+      invoke: async (args) => args[0] === 'compose'
+        ? { code: marker === 'STORAGE_READ_WRITE_OK' ? 0 : 1, stdout: `PROBE_STARTED\n${marker}\n`, stderr: '' }
+        : { code: 0, stdout: '', stderr: '' },
+    });
+    assert.equal(report.status, marker);
+    assert.equal(report.cleanup, cleanup);
+  }
+});
+
+test('storage success marker with a failed exit cannot report success', async () => {
+  const report = await runProbe({ ...INPUT, checkFilesAndWrite: true }, {
+    probeId: PROBE_ID,
+    invoke: async (args) => args[0] === 'compose'
+      ? { code: 1, stdout: 'PROBE_STARTED\nSTORAGE_READ_WRITE_OK\n', stderr: '' }
+      : { code: 0, stdout: '', stderr: '' },
+  });
+  assert.notEqual(report.status, 'STORAGE_READ_WRITE_OK');
+});
+
+test('an abruptly terminated write probe cannot report complete cleanup from Docker removal alone', async () => {
+  for (const code of [137, 143, 1, 0]) {
+    const report = await runProbe({ ...INPUT, checkFilesAndWrite: true }, {
+      probeId: PROBE_ID,
+      invoke: async (args) => args[0] === 'compose'
+        ? { code, stdout: 'PROBE_STARTED\nPHOTO_READ_OK\n', stderr: '' }
+        : { code: 0, stdout: '', stderr: '' },
+    });
+    assert.equal(report.status, 'OTHER_ERROR');
+    assert.equal(report.cleanup, 'REQUIRED');
+  }
+});
+
+test('write mode cannot be enabled by a string or other truthy value', () => {
+  assert.throws(() => buildProbeConfig({ ...INPUT, checkFilesAndWrite: 'false' }, PROBE_ID), { code: 'INVALID_INPUT' });
+});
+
 for (const password of [
   ' leading and trailing spaces ',
   'cash$HOME${PRIVATE_VALUE}$$end',
@@ -96,9 +157,10 @@ for (const password of [
   });
 }
 
-test('Docker Compose resolves literal credentials and preserves the read-only probe configuration offline', (context) => {
+for (const checkFilesAndWrite of [false, true]) {
+test(`Docker Compose preserves literal credentials and embedded code offline with write opt-in=${checkFilesAndWrite}`, (context) => {
   const password = ' synthetic $HOME ${PRIVATE_VALUE} $$ \'" \\ zażółć 🔑 ';
-  const config = buildProbeConfig({ ...INPUT, password }, PROBE_ID);
+  const config = buildProbeConfig({ ...INPUT, password, checkFilesAndWrite }, PROBE_ID);
   const result = spawnSync('docker', [
     'compose', '--project-name', PROBE_ID, '--file', '-', 'config', '--format', 'json',
   ], {
@@ -134,9 +196,11 @@ test('Docker Compose resolves literal credentials and preserves the read-only pr
   assert.equal(resolved.services.probe.pull_policy, 'never');
   assert.equal(resolved.services.probe.read_only, true);
   assert.equal(resolved.services.probe.network_mode, 'none');
-  assert.equal(resolved.services.probe.volumes[0].read_only, true);
+  assert.equal(resolved.services.probe.volumes[0].read_only ?? false, !checkFilesAndWrite);
   assert.equal(resolved.services.probe.volumes[0].volume.nocopy, true);
+  assert.deepEqual(resolved.services.probe.command, config.services.probe.command);
 });
+}
 
 for (const password of ['comma,in-password', 'nul\0in-password', 'cr\rin-password', 'lf\nin-password']) {
   test(`unsupported credential format is rejected before Docker: ${JSON.stringify(password)}`, async () => {
