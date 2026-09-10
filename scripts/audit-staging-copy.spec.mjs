@@ -307,4 +307,123 @@ describe('read-only staging copy audit', () => {
     assert.equal(report.failuresTruncated, 0);
     assert.equal(fs.existsSync(absent), false);
   });
+
+  it('locate finds the first absent middle directory without searching the NAS tree recursively', () => {
+    const folder = project('p1');
+    fs.mkdirSync(join(folder, 'Actual directory'));
+    db.prepare('UPDATE projects SET base_folder = ?').run(join(folder, 'missing', 'deeper'));
+    const report = audit({ locateFailures: true });
+    const location = report.failures[0].location;
+    assert.equal(location.deepestDirectory, fs.realpathSync(folder));
+    assert.equal(location.firstMissingSegment, 'missing');
+    assert.equal(location.reason, 'ENOENT');
+    assert.deepEqual(location.nearbyDirectories, ['Actual directory']);
+    assert.deepEqual(location.scan, { complete: true, truncated: false, entriesRead: 1 });
+    assert.equal(location.walkTruncated, false);
+  });
+
+  it('locate suggests actual similar filenames with case, diacritic, underscore and space differences', () => {
+    const folder = project('p1');
+    const actualName = 'ŻÓŁĆ_2024.JPG';
+    const missingName = 'zolc 2024.jpg';
+    fs.writeFileSync(join(folder, actualName), 'original');
+    photo('a', 'p1', join(folder, missingName), null);
+    const report = audit({ locateFailures: true });
+    const location = report.failures[0].location;
+    assert.equal(location.firstMissingSegment, missingName);
+    assert.equal(location.deepestDirectory, fs.realpathSync(folder));
+    assert.deepEqual(location.suggestions, [actualName]);
+    assert.equal(fs.existsSync(join(folder, missingName)), false);
+  });
+
+  it('locate never scans outside allowed roots and does not describe permission errors as missing', () => {
+    const folder = project('p1');
+    const denied = join(folder, 'denied.jpg');
+    photo('a', 'p1', denied);
+    photo('b', 'p1', join(directory, 'outside.jpg'), null);
+    const realOpen = fs.openSync;
+    mock.method(fs, 'openSync', (...args) => {
+      if (args[0] === denied) throw Object.assign(new Error('private'), { code: 'EACCES' });
+      return realOpen(...args);
+    });
+    let listingCalls = 0;
+    mock.method(fs, 'opendirSync', () => { listingCalls += 1; throw new Error('must not list'); });
+    const report = audit({ locateFailures: true });
+    const [permission, outside] = report.failures.map((failure) => failure.location);
+    assert.equal(permission.firstMissingSegment, null);
+    assert.equal(permission.reason, 'EACCES');
+    assert.equal(permission.deepestDirectory, fs.realpathSync(folder));
+    assert.equal(outside.reason, 'OUTSIDE_ROOT');
+    assert.equal(outside.deepestDirectory, null);
+    assert.equal(listingCalls, 0);
+  });
+
+  it('locate lists at most 2000 entries once for a shared parent and returns at most 12 suggestions', () => {
+    const folder = project('p1');
+    for (let index = 0; index < 2003; index += 1) fs.writeFileSync(join(folder, `photo-prefix-${index}.jpg`), '');
+    photo('a', 'p1', join(folder, 'photo-prefix-missing.jpg'), null);
+    photo('b', 'p1', join(folder, 'photo-prefix-other.jpg'), null);
+    const realOpendir = fs.opendirSync;
+    let listingCalls = 0;
+    let entryReads = 0;
+    mock.method(fs, 'opendirSync', (...args) => {
+      listingCalls += 1;
+      const handle = realOpendir(...args);
+      return {
+        readSync() { entryReads += 1; return handle.readSync(); },
+        closeSync() { handle.closeSync(); },
+      };
+    });
+    const report = audit({ locateFailures: true });
+    assert.equal(listingCalls, 1);
+    assert.equal(entryReads, 2000);
+    for (const failure of report.failures) {
+      assert.equal(failure.location.suggestions.length, 12);
+      assert.deepEqual(failure.location.scan, { complete: false, truncated: true, entriesRead: 2000 });
+    }
+  });
+
+  it('locate bounds directory walking to 64 components', () => {
+    let deepest = storage;
+    for (let index = 0; index < 64; index += 1) {
+      deepest = join(deepest, 'a');
+      fs.mkdirSync(deepest);
+    }
+    db.prepare('INSERT INTO projects VALUES (?, ?, ?)').run('p1', 'private', join(deepest, 'unvisited', 'deeper'));
+    const report = audit({ locateFailures: true });
+    const location = report.failures[0].location;
+    assert.equal(location.deepestDirectory, fs.realpathSync(deepest));
+    assert.equal(location.firstMissingSegment, null);
+    assert.equal(location.walkTruncated, true);
+    assert.equal(location.scan.entriesRead, 0);
+  });
+
+  it('locate limits pretty JSON to 48 KiB without changing counts', () => {
+    const longPrefix = 'VeryLongPrivateMissingFolder'.repeat(7);
+    const insert = db.prepare('INSERT INTO projects VALUES (?, ?, ?)');
+    for (let index = 0; index < 50; index += 1) {
+      const longId = `p${index}-` + 'x'.repeat(1600);
+      insert.run(longId, 'private', join(storage, `${longPrefix}-${index}`, longPrefix));
+    }
+    const report = audit({ locateFailures: true });
+    assert.ok(Buffer.byteLength(JSON.stringify(report, null, 2) + '\n', 'utf8') <= 48 * 1024);
+    assert.equal(report.projectFolders.checked, 50);
+    assert.equal(report.projectFolders.missing, 50);
+    assert.ok(report.failuresTruncated > 0);
+    assert.equal(report.failures.length + report.failuresTruncated, 50);
+  });
+
+  it('CLI --locate implies details while ordinary details remain location-free', () => {
+    project('p1');
+    photo('a', 'p1', join(storage, 'missing.jpg'), null);
+    const details = audit({ includeFailures: true });
+    assert.equal(Object.hasOwn(details.failures[0], 'location'), false);
+    const script = fileURLToPath(new URL('./audit-staging-copy.mjs', import.meta.url));
+    const child = spawnSync(process.execPath, [script, '--database', databasePath, '--locate'], { encoding: 'utf8' });
+    assert.equal(child.status, 1);
+    const report = JSON.parse(child.stdout);
+    assert.equal(report.status, 'STAGING_COPY_FILES_MISSING');
+    assert.ok(report.failures[0].location);
+    assert.equal(child.stderr, '');
+  });
 });

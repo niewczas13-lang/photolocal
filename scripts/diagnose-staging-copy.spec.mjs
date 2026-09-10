@@ -72,8 +72,8 @@ test('native comparison child accepts UTF-8 paths through stdin and reads a boun
   assert.deepEqual(JSON.parse(result.stdout), [{ ...input[0], windowsResult: 'READ_OK' }]);
 });
 
-for (const missingVolume of [false, true]) {
-test(`diagnosis requires the retained CIFS volume and never recreates it (missing=${missingVolume})`, async context => {
+for (const [missingVolume, locate] of [[false, false], [true, false], [false, true]]) {
+test(`diagnosis requires retained CIFS storage and can locate without Windows (missing=${missingVolume}, locate=${locate})`, async context => {
   const folder = fs.mkdtempSync(join(tmpdir(), 'photolocal-diagnose-'));
   context.after(() => {
     assert.equal(dirname(resolve(folder)), resolve(tmpdir()));
@@ -85,7 +85,8 @@ test(`diagnosis requires the retained CIFS volume and never recreates it (missin
     { type: 'bind', source: 'C:/PhotoLocal/pobierzchat/pobrane_zdjecia', target: '/legacy-downloads', read_only: true },
   ] } }, volumes: { staging_nas: { external: true, name: 'photolocal-staging-nas-ab12' } } }));
   const calls = [];
-  const operation = diagnoseStagingCopy({ runDirectory: folder, windowsShare: '\\\\192.0.2.70\\Photos' }, {
+  let nativeCalls = 0;
+  const operation = diagnoseStagingCopy({ runDirectory: folder, windowsShare: locate ? undefined : '\\\\192.0.2.70\\Photos', locate }, {
     invoke: async args => {
       calls.push(args);
       if (args[0] === 'volume') {
@@ -94,10 +95,11 @@ test(`diagnosis requires the retained CIFS volume and never recreates it (missin
           : { code: 0, stdout: 'photolocal-staging-nas-ab12|local|cifs\n', stderr: '' };
       }
       if (args[0] === 'container') return { code: 1, stdout: '', stderr: 'No such container' };
+      assert.equal(args.includes('--locate'), locate);
       assert.ok(args.filter(arg => arg.startsWith('type=')).every(arg => arg.includes('readonly')));
-      return { code: 1, stderr: 'must stay private', stdout: JSON.stringify({ status: 'STAGING_COPY_FILES_MISSING', counts: { projects: 1 }, projectFolders: { missing: 1 }, photoSamples: { unreadable: 0 }, failures: [{ kind: 'project_folder', projectId: 'p1', photoId: null, path: '/nas/Projects/Job', reason: 'ENOENT' }], failuresTruncated: 0 }) };
+      return { code: 1, stderr: 'must stay private', stdout: JSON.stringify({ status: 'STAGING_COPY_FILES_MISSING', counts: { projects: 1 }, projectFolders: { missing: 1 }, photoSamples: { unreadable: 0 }, failures: [{ kind: 'project_folder', projectId: 'p1', photoId: null, path: '/nas/Projects/Job', reason: 'ENOENT', ...(locate ? { location: { deepestDirectory: '/nas/Projects', firstMissingSegment: 'Job', reason: 'ENOENT', suggestions: ['JOB'] } } : {}) }], failuresTruncated: 0 }) };
     },
-    nativeCheck: checks => checks.map(check => ({ ...check, windowsResult: 'READ_OK' })),
+    nativeCheck: checks => { nativeCalls++; return checks.map(check => ({ ...check, windowsResult: 'READ_OK' })); },
   });
   if (missingVolume) {
     await assert.rejects(operation, { code: 'STAGING_STORAGE_VOLUME_MISSING' });
@@ -106,7 +108,14 @@ test(`diagnosis requires the retained CIFS volume and never recreates it (missin
   }
   const report = await operation;
   assert.equal(report.status, 'STAGING_DIAGNOSIS_COMPLETE');
-  assert.equal(report.comparisons[0].windowsResult, 'READ_OK');
+  if (locate) {
+    assert.equal(nativeCalls, 0);
+    assert.equal(report.locations[0].location.firstMissingSegment, 'Job');
+    assert.deepEqual(report.locations[0].location.suggestions, ['JOB']);
+    assert.equal(Object.hasOwn(report, 'comparisons'), false);
+  } else {
+    assert.equal(report.comparisons[0].windowsResult, 'READ_OK');
+  }
   assert.ok(fs.existsSync(report.reportPath));
   assert.ok(!calls.some(args => (args[0] === 'volume' && args[1] !== 'inspect') || args[0] === 'compose'));
   assert.equal(JSON.stringify(report).includes('must stay private'), false);

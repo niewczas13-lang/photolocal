@@ -84,7 +84,7 @@ export function groupComparisons(checks) {
   return [...groups.values()];
 }
 
-export async function diagnoseStagingCopy({ runDirectory, windowsShare }, {
+export async function diagnoseStagingCopy({ runDirectory, windowsShare, locate = false }, {
   invoke = invokeDocker, nativeCheck: checkNative = nativeCheck,
 } = {}) {
   runDirectory = resolve(runDirectory);
@@ -94,7 +94,8 @@ export async function diagnoseStagingCopy({ runDirectory, windowsShare }, {
   const nasMapping = mapping.find(entry => typeof entry.to === 'string' && entry.to.startsWith('/nas/'));
   if (!/^photolocal-staging-nas-[a-f0-9]+$/.test(volumeName) || !nasMapping || /[,\x00-\x1f]/.test(runDirectory)) fail('INVALID_DIAGNOSIS_CONFIGURATION');
   const subdirectory = nasMapping.to.slice('/nas/'.length);
-  compareFailurePaths([], mapping, windowsShare, subdirectory); // Validate before any Docker call.
+  if (typeof locate !== 'boolean') fail('INVALID_ARGUMENTS');
+  if (!locate) compareFailurePaths([], mapping, windowsShare, subdirectory); // Validate before any Docker call.
   const binds = ['/legacy-local-photos', '/legacy-downloads'].map(target => {
     const mount = override.services?.photolocal?.volumes?.find(entry => entry.target === target);
     if (mount?.type !== 'bind' || mount.read_only !== true || typeof mount.source !== 'string' ||
@@ -113,7 +114,7 @@ export async function diagnoseStagingCopy({ runDirectory, windowsShare }, {
       '--mount', `type=bind,source=${join(runDirectory, 'data')},target=/data,readonly`,
       '--mount', `type=volume,source=${volumeName},target=/nas,readonly,volume-nocopy`, ...binds,
       '--mount', `type=bind,source=${join(dirname(SCRIPT), 'audit-staging-copy.mjs')},target=/app/scripts/audit-staging-copy.mjs,readonly`,
-      '--entrypoint', 'node', 'photolocal:staging', '/app/scripts/audit-staging-copy.mjs', '--database', '/data/photo-local.sqlite', '--details'], '', 180_000);
+      '--entrypoint', 'node', 'photolocal:staging', '/app/scripts/audit-staging-copy.mjs', '--database', '/data/photo-local.sqlite', '--details', ...(locate ? ['--locate'] : [])], '', 180_000);
   } finally {
     const cleanup = await invoke(['container', 'rm', '--force', containerName], '', 30_000);
     if (cleanup.timedOut || (cleanup.code !== 0 && !(cleanup.code === 1 && /no such container/i.test(cleanup.stderr)))) fail('DIAGNOSIS_CLEANUP_REQUIRED', { containerName });
@@ -122,23 +123,25 @@ export async function diagnoseStagingCopy({ runDirectory, windowsShare }, {
   let audit;
   try { audit = JSON.parse(result.stdout); } catch { fail('DIAGNOSIS_AUDIT_FAILED'); }
   if (!Array.isArray(audit.failures) || !['STAGING_COPY_VERIFIED', 'STAGING_COPY_FILES_MISSING'].includes(audit.status)) fail('DIAGNOSIS_AUDIT_FAILED');
-  const comparisons = checkNative(compareFailurePaths(audit.failures, mapping, windowsShare, subdirectory));
+  if (locate && audit.failures.some(failure => !failure.location)) fail('DIAGNOSIS_AUDIT_FAILED');
+  const comparisons = locate ? undefined : checkNative(compareFailurePaths(audit.failures, mapping, windowsShare, subdirectory));
   const reportPath = join(runDirectory, `diagnosis-${randomUUID().replaceAll('-', '')}.json`);
   fs.writeFileSync(reportPath, JSON.stringify({ audit, comparisons }, null, 2), { flag: 'wx', mode: 0o600 });
   return { status: 'STAGING_DIAGNOSIS_COMPLETE', counts: audit.counts, projectFolders: audit.projectFolders,
-    photoSamples: audit.photoSamples, failuresTruncated: audit.failuresTruncated, comparisons: groupComparisons(comparisons), reportPath };
+    photoSamples: audit.photoSamples, failuresTruncated: audit.failuresTruncated,
+    ...(locate ? { locations: audit.failures } : { comparisons: groupComparisons(comparisons) }), reportPath };
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   try {
-    const { values } = parseArgs({ options: { 'run-directory': { type: 'string' }, 'windows-share': { type: 'string' }, 'windows-check': { type: 'boolean' } } });
+    const { values } = parseArgs({ options: { 'run-directory': { type: 'string' }, 'windows-share': { type: 'string' }, 'windows-check': { type: 'boolean' }, locate: { type: 'boolean' } } });
     if (values['windows-check']) {
       const input = fs.readFileSync(0, 'utf8');
       if (input.length > 64 * 1024) fail('INVALID_CHECK_INPUT');
       process.stdout.write(JSON.stringify(checkWindowsPaths(JSON.parse(input))) + '\n');
     } else {
-      if (!values['run-directory'] || !values['windows-share']) fail('INVALID_ARGUMENTS');
-      process.stdout.write(JSON.stringify(await diagnoseStagingCopy({ runDirectory: values['run-directory'], windowsShare: values['windows-share'] }), null, 2) + '\n');
+      if (!values['run-directory'] || (!values.locate && !values['windows-share'])) fail('INVALID_ARGUMENTS');
+      process.stdout.write(JSON.stringify(await diagnoseStagingCopy({ runDirectory: values['run-directory'], windowsShare: values['windows-share'], locate: values.locate }), null, 2) + '\n');
     }
   } catch (error) {
     const status = typeof error.code === 'string' && /^[A-Z_]+$/.test(error.code) ? error.code : 'STAGING_DIAGNOSIS_FAILED';

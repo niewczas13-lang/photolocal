@@ -354,6 +354,34 @@ i przyczyn, pokazując przykładowe ścieżki; raporty zawierają prywatne nazwy
 i zdjęć, ale nie dane logowania. Natywny odczyt Windows ma osobny limit 60 sekund;
 przekroczenie daje `WINDOWS_CHECK_TIMEOUT`, a nie informację o braku plików.
 
+Jeśli bieżąca sesja Windows nie widzi nawet katalogów kontrolnych dostępnych
+w Dockerze, jej błędy nie potwierdzają braku plików. Użyj
+`node scripts/diagnose-staging-copy.mjs --run-directory <katalog-próby> --locate`.
+Ten wariant korzysta wyłącznie z zachowanego wolumenu CIFS. Dla nieudanych ścieżek
+pokazuje najgłębszy dostępny katalog, pierwszy brakujący segment oraz rzeczywiste
+podobne nazwy. Rozpoznaje podobieństwa wielkości liter, polskich znaków i odstępów;
+sugestie nie są automatycznie stosowane. Sprawdza maksymalnie 64 segmenty ścieżki,
+2000 wpisów katalogu i 12 podobnych nazw, bez rekurencyjnego przeszukiwania udziału.
+Raport zachowuje pełne liczniki, a szczegóły ogranicza do 48 KiB.
+
+### Podgląd istniejącej kopii z raportem braków
+
+Do obejrzenia projektów i dostępnych zdjęć można uruchomić osobny tryb podglądu:
+`node scripts/start-staging-preview.mjs --run-directory <katalog-próby>`.
+Nie wykonuje kolejnego backupu ani napraw ścieżek. Sprawdza świeży audyt przez
+Docker, zgodność wszystkich pięciu liczników z zapisaną migawką oraz scaloną
+konfigurację Compose. Wymaga uwierzytelniania, portu `127.0.0.1:4874`, osobnej bazy
+stagingu i montowania NAS oraz starych plików lokalnych tylko do odczytu.
+
+`STAGING_PREVIEW_RUNNING` oznacza uruchomiony podgląd, także wtedy, gdy część
+folderów lub próbek zdjęć jest niedostępna. Raport zawiera te braki i lokalizacje
+rozbieżności; nie jest potwierdzeniem pełnej dostępności zdjęć ani gotowości
+produkcji. Samo sprawdzenie obejmuje próbki, a nie każdy plik z bazy. Baza podglądu
+pozostaje zapisywalna dla działania aplikacji, a produkcyjne pliki są tylko do
+odczytu. Zapisana konfiguracja podglądu jest oddzielona od manifestu pełnej migracji.
+Ponowienie wymaga tej samej kopii i nadal zgodnych liczników; dodanie w podglądzie
+nowych projektów lub zdjęć zmieni liczniki i wymaga osobnej decyzji o dalszej pracy.
+
 Podstawa kopii online: [SQLite Online Backup API](https://www.sqlite.org/backup.html)
 i [better-sqlite3 backup](https://github.com/WiseLibs/better-sqlite3/blob/master/docs/api.md#backupdestination-options---promise).
 Przy scalaniu plików Compose [montowania są łączone według punktu docelowego](https://docs.docker.com/reference/compose-file/merge/#unique-resources),
