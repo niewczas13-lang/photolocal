@@ -45,3 +45,39 @@ The read-only inventory is not a complete quiescence check or permission to kill
 PID. It deliberately does not expose command lines, task arguments or `.env`
 values. Relative entrypoint text plus a PID file provides correlation, not proof
 of the process working directory.
+
+## Private production configuration implementation
+
+The server has now verified the separate RW volume and supplied a native-process
+inventory. Source `.env` declares DB, log, port and Windows invite-headless only.
+Proceed with preparation within the approved migration; do not start downtime yet.
+
+- [x] Add `production-deployment-config.mjs` and tests: resolve native relative
+  paths against `productionRoot/backend`; generate one standalone production
+  Compose service pinned to the inspected image ID, host port 4873, public OAuth
+  callback, six explicit mounts and fixed authentication. Preserve only known
+  integrations with literal Compose escaping. Validate resolved Compose privately.
+- [x] Add `prepare-production-deployment.mjs` and tests: parse native dotenv without
+  importing app configuration; detect conflicts with the caller's Process/User/
+  Machine settings; resolve the source DB and local directories; count all local
+  files including hidden metadata while rejecting links and limiting traversal.
+  Check the five source tables/counts through the native readonly SQLite runtime.
+  Reserve local-copy bytes plus three SQLite/WAL/journal sizes and 1 GiB headroom.
+  Copy the prepared Google web client and matching refresh token into the private
+  production directory; verify the configured public callback is listed. Write
+  config, mappings, source metadata and a nonsecret summary, but no database copy.
+- [x] Add `prepare-production-deployment.ps1` and Windows tests: verify current
+  Docker owner, create a fresh directory with a protected owner/SYSTEM/Administrators
+  ACL, capture only known environment keys and pass them via UTF-8 stdin. Print
+  validated summary fields only. Never print raw child errors or configuration.
+- [x] Run focused Node/PS5 tests and real Compose parsing without starting services:
+  57 tests passed, including private ACL creation, protected stdin transport,
+  source WAL reads and actual offline Compose normalization. Read-only review
+  confirmed scope; fix Windows key casing and match real Compose dollar escaping.
+- [ ] Collect one server preparation report before constructing
+  the final quiesce/snapshot/copy/start operation. A prepared config does not mark
+  the pending database and file copy as complete.
+
+Commands after implementation: `node --test scripts/production-deployment-config.spec.mjs
+scripts/prepare-production-deployment.spec.mjs scripts/prepare-production-deployment.windows.spec.mjs`.
+Fixtures use disposable local trees and synthetic tokens, never live customer data.

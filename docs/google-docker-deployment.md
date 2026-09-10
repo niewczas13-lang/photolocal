@@ -532,3 +532,55 @@ Do końcowego przełączenia potrzebna jest świeża kopia po zakończeniu opera
 starej aplikacji, zachowanie konfiguracji integracji oraz weryfikacja znanych
 braków zdjęć. Baza zmieniona podczas testowania stagingu nie zastępuje aktualnej
 bazy produkcji.
+
+### Prywatna konfiguracja końcowego uruchomienia
+
+Po otrzymaniu raportu starej instalacji i `PRODUCTION_STORAGE_READY` przygotuj
+konfigurację przyszłej produkcji. Poniższe wartości NAS i domeny są przykładami;
+podaj używany dotąd prefiks Windows oraz docelowy publiczny adres Romki.
+
+```powershell
+git -C C:\PhotoLocal-staging pull --ff-only
+if ($LASTEXITCODE -eq 0) {
+    powershell -NoProfile -ExecutionPolicy Bypass -File C:\PhotoLocal-staging\scripts\prepare-production-deployment.ps1 -ProductionRoot C:\PhotoLocal -StagingRoot C:\PhotoLocal-staging -NetworkPrefix 'Z:\Projects' -PublicUrl 'https://photos.example.org'
+}
+```
+
+Uruchom na koncie właściciela Docker Desktop. Wrapper tworzy nowy katalog
+`docker-data\production-<id>` z chronionymi uprawnieniami konta, SYSTEM i lokalnych
+administratorów. Ustawienia integracji przekazuje prywatnie przez stdin. Nie
+wypisuje haseł, kluczy API ani surowego wyniku konfiguracji Compose.
+
+Helper odczytuje `.env` przez parser z produkcyjnej instalacji, bez uruchamiania
+kodu aplikacji. Sprawdza zgodność znanych ustawień z zakresem Process/User/Machine;
+konflikt daje `SOURCE_ENV_OVERRIDE_REVIEW_REQUIRED` z nazwami kluczy. Nie odczytuje
+środowiska już działającego procesu. Względną ścieżkę bazy rozwiązuje względem
+`ProductionRoot\backend`, zgodnie ze sprawdzonym natywnym autostartem. Otwiera bazę
+tylko do odczytu i sprawdza pięć tabel/liczników; odczyt WAL może utrzymywać indeks
+pamięci współdzielonej SQLite. To nie jest końcowy snapshot.
+
+Inwentaryzacja liczy pełne lokalne drzewa zdjęć i pobrań, w tym ukryte manifesty,
+bez wchodzenia w dowiązania i junctiony. Zapas miejsca obejmuje ich sumę, trzy
+rozmiary bazy wraz z WAL/journal oraz 1 GiB na pracę. Wynik opisuje bieżący rozmiar;
+przed końcową kopią wymaga ponownego sprawdzenia po zakończeniu zapisów.
+
+Do nowego prywatnego katalogu trafiają kopie Google web client/token ze stagingu.
+Sprawdzane są zgodne identyfikator i sekret klienta, refresh token, zakresy czatów
+oraz obecność publicznego callbacku w pobranym JSON klienta. Sprawdzenie nie wykonuje
+logowania ani żądań do Google. `GOOGLE_CALLBACK_NOT_LISTED` oznacza, że lokalny JSON
+nie wymienia docelowego callbacku; po sprawdzeniu ustawień tego samego klienta w
+Google Cloud można pobrać aktualny JSON. Nie publikuj jego zawartości.
+
+`PRODUCTION_CONFIG_PREPARED` podaje `runDirectory`, faktyczną ścieżkę bazy źródłowej,
+liczniki, rozmiary plików oraz miejsce na dysku. W katalogu znajdują się prywatny
+`compose.production.json`, mapowanie i `production-preparation.json`. Konfiguracja
+ma osobny projekt `photolocal-production`, przypięty identyfikator istniejącego
+obrazu, port `0.0.0.0:4873`, uwierzytelnianie i publiczny callback. Dane lokalne
+wskazują nowe katalogi, a NAS osobny zweryfikowany wolumen RW. Walidacja używa
+wyłącznie `docker image inspect` z polem ID oraz `docker compose config`.
+
+**Na tym etapie baza i zdjęcia nie są jeszcze skopiowane, a kontener produkcyjny
+nie jest uruchomiony.** `FINAL_SNAPSHOT_REQUIRED` oznacza konieczność końcowej kopii
+po zakończeniu operacji starej aplikacji. Nie uruchamiaj samego Compose na pustych
+katalogach danych. Zachowaj raport z `runDirectory` do następnego kroku; nie wklejaj
+prywatnej konfiguracji ani plików `wrapper.*.log`.

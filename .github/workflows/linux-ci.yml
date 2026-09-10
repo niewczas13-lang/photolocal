@@ -29,6 +29,8 @@ jobs:
       - name: Test with Windows PowerShell 5.1 and mocked system changes
         # No passwords, real task registration, GUI launch, lock or autologon changes.
         run: node --test scripts/prepare-windows-autologon.spec.mjs scripts/lock-autologon-session.spec.mjs scripts/inspect-production-before-cutover.spec.mjs scripts/connect-production-storage.spec.mjs
+      - name: Test private production preparation without live server changes
+        run: node --test scripts/production-deployment-config.spec.mjs scripts/prepare-production-deployment.spec.mjs scripts/prepare-production-deployment.windows.spec.mjs
 
   javascript:
     name: Node tests, migration, and production build
@@ -52,6 +54,8 @@ jobs:
         run: node --test scripts/test-smb-access.spec.mjs scripts/test-smb-access.windows.spec.mjs scripts/connect-production-storage.spec.mjs
       - name: Test online snapshots and read-only staging preparation
         run: node --test scripts/snapshot-staging-database.spec.mjs scripts/connect-staging-storage.spec.mjs scripts/audit-staging-copy.spec.mjs scripts/prepare-staging-copy.spec.mjs scripts/diagnose-staging-copy.spec.mjs scripts/start-staging-preview.spec.mjs
+      - name: Test production configuration and local file inventory
+        run: node --test scripts/production-deployment-config.spec.mjs scripts/prepare-production-deployment.spec.mjs
       - name: Build frontend and backend
         run: npm run build
 
