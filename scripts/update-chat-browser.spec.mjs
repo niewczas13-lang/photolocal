@@ -158,6 +158,58 @@ test('PrepareOnly checks the browser without touching the running app', windows,
   assert.deepEqual(f.calls.filter(call => call.args.includes('up')).map(call => call.args.at(-1)), ['chat-browser']);
 });
 
+test('changing Docker inspect mount order preserves update and rollback on the same data', windows, async t => {
+  const f = await fixture(t);
+  let inspection = 0;
+  const run = async (executable, args) => {
+    const result = await f.run(executable, args);
+    if (args[0] !== 'container' || args[1] !== 'inspect' || args.at(-1) !== appId) return result;
+    const app = JSON.parse(result.stdout);
+    const offset = ++inspection % app.mounts.length;
+    app.mounts = [...app.mounts.slice(offset), ...app.mounts.slice(0, offset)];
+    return { ...result, stdout: JSON.stringify(app) };
+  };
+  const prepared = await updateChatBrowser({ ...f.input, prepareOnly: true, disableSandbox: true }, { run });
+  assert.equal(prepared.status, 'CHAT_BROWSER_PREPARED');
+  assert.equal(f.app.image, originalImage);
+  const updated = await updateChatBrowser({ ...f.input, disableSandbox: true }, { run });
+  assert.equal(updated.status, 'CHAT_BROWSER_UPDATED');
+  const restored = await updateChatBrowser({ ...f.input, rollbackReport: updated.rollbackReport }, { run });
+  assert.equal(restored.status, 'CHAT_BROWSER_ROLLED_BACK');
+  assert.equal(f.app.image, originalImage);
+  for (const folder of ['data', 'google', 'downloads', 'local-photos', 'photos']) {
+    assert.equal(await readFile(join(f.input.runDirectory, folder, 'sentinel'), 'utf8'), `preserve ${folder}`);
+  }
+});
+
+test('mount reordering never hides a changed source, permission, volume, or destination', windows, async t => {
+  for (const change of ['source', 'permission', 'volume', 'type', 'destination', 'removed', 'duplicate']) {
+    const f = await fixture(t);
+    let inspection = 0;
+    const run = async (executable, args) => {
+      const result = await f.run(executable, args);
+      if (args[0] !== 'container' || args[1] !== 'inspect' || args.at(-1) !== appId) return result;
+      const app = JSON.parse(result.stdout);
+      if (++inspection > 1) {
+        const data = app.mounts.find(mount => mount.Destination === '/data');
+        if (change === 'source') data.Source = 'C:/different/data';
+        if (change === 'permission') data.RW = false;
+        if (change === 'type') data.Type = 'volume';
+        if (change === 'volume') app.mounts.find(mount => mount.Destination === '/nas').Name = 'different-volume';
+        if (change === 'destination') data.Destination = '/different-data';
+        if (change === 'removed') app.mounts.pop();
+        if (change === 'duplicate') app.mounts.push({ ...data });
+        app.mounts.reverse();
+      }
+      return { ...result, stdout: JSON.stringify(app) };
+    };
+    await assert.rejects(updateChatBrowser({ ...f.input, prepareOnly: true }, { run }), {
+      code: 'CHAT_BROWSER_UPDATE_ACTIVE_CONFIGURATION_CHANGED', applicationMayHaveChanged: false,
+    });
+    assert.ok(!f.calls.some(call => call.args.includes('up')));
+  }
+});
+
 test('malformed, missing or out-of-run Compose paths cannot authorize an update', windows, async t => {
   for (const invalid of ['C:\\outside\\compose.json', join(tmpdir(), 'missing.json'), `${'C:\\safe'}\ncompose.json`]) {
     const f = await fixture(t);

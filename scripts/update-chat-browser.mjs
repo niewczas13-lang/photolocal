@@ -107,6 +107,19 @@ function bindKey(value) {
   return pathKey(translated);
 }
 
+function sameMounts(left, right) {
+  const ordered = mounts => {
+    if (!Array.isArray(mounts) || mounts.some(mount => !mount || typeof mount.Destination !== 'string' || !mount.Destination)) return null;
+    if (new Set(mounts.map(mount => mount.Destination)).size !== mounts.length) return null;
+    // Docker can return the same mount set in a different order on every inspect.
+    // Preserve every field and leave the original snapshots untouched.
+    return [...mounts].sort((a, b) => a.Destination < b.Destination ? -1 : a.Destination > b.Destination ? 1 : 0);
+  };
+  const before = ordered(left);
+  const after = ordered(right);
+  return before !== null && after !== null && isDeepStrictEqual(before, after);
+}
+
 function verifyApp(config, app, runDirectory, { requireHealthy = true } = {}) {
   const service = config.services?.photolocal;
   if (!service || service.image !== app.image || service.environment?.PHOTO_LOCAL_AUTH !== 'enabled' ||
@@ -201,7 +214,7 @@ async function rollbackChatBrowser(input, run) {
   await call([...args, 'up', '--no-deps', '--force-recreate', '-d', '--no-build', '--pull', 'never', '--wait', '--wait-timeout', '120', 'photolocal'], 150000);
   const restored = await inspect();
   verifyApp(before, restored, directory);
-  if (restored.image !== report.imageId || !isDeepStrictEqual(restored.mounts, current.mounts) || restored.labels['com.docker.compose.project.config_files'] !== files.join(',')) fail('ROLLBACK_FAILED');
+  if (restored.image !== report.imageId || !sameMounts(restored.mounts, current.mounts) || restored.labels['com.docker.compose.project.config_files'] !== files.join(',')) fail('ROLLBACK_FAILED');
   const callback = new URL(decode(before.services.photolocal.environment.GOOGLE_CHAT_OAUTH_REDIRECT_URI));
   return { status: 'CHAT_BROWSER_ROLLED_BACK', url: callback.origin, runDirectory: directory, rollbackReport: reportPath, applicationUpdated: true };
 }
@@ -291,7 +304,7 @@ export async function updateChatBrowser(input, { run = nativeRun } = {}) {
       }
       const current = await inspect('photolocal');
       if (current.id !== original.id || current.image !== original.image || !isDeepStrictEqual(current.labels, original.labels) ||
-          !isDeepStrictEqual(current.mounts, original.mounts) || !isDeepStrictEqual(current.environment, original.environment)) fail('ACTIVE_CONFIGURATION_CHANGED');
+          !sameMounts(current.mounts, original.mounts) || !isDeepStrictEqual(current.environment, original.environment)) fail('ACTIVE_CONFIGURATION_CHANGED');
       verifyApp(before, current, directory);
     };
     await assertUnchanged();
@@ -312,7 +325,7 @@ export async function updateChatBrowser(input, { run = nativeRun } = {}) {
       const current = await inspect('photolocal');
       verifyApp(after, current, directory);
       if (current.image !== mainImage || current.labels['com.docker.compose.project.config_files'] !== [...files, overridePath].join(',') ||
-          !isDeepStrictEqual(current.mounts, original.mounts)) fail('APP_VERIFICATION_FAILED');
+          !sameMounts(current.mounts, original.mounts)) fail('APP_VERIFICATION_FAILED');
     }
     return { status: input.prepareOnly ? 'CHAT_BROWSER_PREPARED' : 'CHAT_BROWSER_UPDATED',
       url: callback.origin, runDirectory: directory, overridePath, rollbackReport, sandboxEnabled: !input.disableSandbox,
