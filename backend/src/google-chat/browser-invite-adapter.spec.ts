@@ -1,15 +1,15 @@
-import { createServer, type RequestListener } from 'node:http';
+import { createServer, type RequestListener, type Server } from 'node:http';
 import type { Browser, Page } from 'playwright-core';
 import { describe, expect, it, vi } from 'vitest';
 import { DockerBrowserInviteAdapter, resolvePrivateCdpWebSocket } from './browser-invite-adapter.js';
 
-async function withCdpServer(handler: RequestListener, check: (url: string) => Promise<void>): Promise<void> {
+async function withCdpServer(handler: RequestListener, check: (url: string, server: Server) => Promise<void>): Promise<void> {
   const server = createServer(handler);
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   try {
     const address = server.address();
     if (!address || typeof address === 'string') throw new Error('Missing test server port');
-    await check(`http://127.0.0.1:${address.port}`);
+    await check(`http://127.0.0.1:${address.port}`, server);
   } finally {
     server.closeAllConnections();
     await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
@@ -35,6 +35,22 @@ describe('private CDP browser adapter', () => {
       await expect(new DockerBrowserInviteAdapter(url, { connect }).list()).resolves.toMatchObject({ state: 'NEEDS_LOGIN' });
       expect(connect).toHaveBeenCalledWith(expected);
       expect(close).toHaveBeenCalledOnce();
+    });
+    expect(hosts).toEqual(['localhost', 'localhost']);
+  });
+
+  it('sends the Chromium-required Host header in the real WebSocket handshake too', async () => {
+    const hosts: Array<string | undefined> = [];
+    await withCdpServer((request, response) => {
+      hosts.push(request.headers.host);
+      response.end(JSON.stringify({ webSocketDebuggerUrl: 'ws://localhost/devtools/browser/test-id' }));
+    }, async (url, server) => {
+      server.once('upgrade', (request, socket) => {
+        hosts.push(request.headers.host);
+        // Capture the actual Playwright handshake, then stop before any CDP commands.
+        socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\nContent-Length: 0\r\n\r\n');
+      });
+      await expect(new DockerBrowserInviteAdapter(url).list()).rejects.toThrow(/connectOverCDP/);
     });
     expect(hosts).toEqual(['localhost', 'localhost']);
   });

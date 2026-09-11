@@ -65,7 +65,10 @@ export class DockerBrowserInviteAdapter implements BrowserInviteAdapter {
   constructor(private readonly cdpUrl: string, options: {
     connect?: (url: string) => Promise<Browser>; fetch?: CdpVersionRequest;
   } = {}) {
-    this.connect = options.connect ?? ((url) => chromium.connectOverCDP(url, { timeout: 10_000 }));
+    // Chromium applies its Host check to the WebSocket upgrade as well as HTTP discovery.
+    this.connect = options.connect ?? ((url) => chromium.connectOverCDP(url, {
+      timeout: 10_000, headers: { Host: 'localhost' },
+    }));
     this.request = options.fetch ?? requestCdpVersion;
   }
 
