@@ -16,13 +16,15 @@ function powershell(code) {
     process.env.SystemRoot || 'C:\\Windows',
     'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe',
   );
+  // Include PowerShell 5.1 startup and module loading on hosted Windows runners.
+  // Retry/lock bounds are asserted separately below with mocked waits and APIs.
   const result = spawnSync(executable, [
     '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
     '-EncodedCommand', Buffer.from(`
 Import-Module Microsoft.PowerShell.Management,Microsoft.PowerShell.Utility -ErrorAction Stop
 $PSModuleAutoLoadingPreference = 'None'
 ${code}`, 'utf16le').toString('base64'),
-  ], { encoding: 'utf8', timeout: 15000, windowsHide: true });
+  ], { encoding: 'utf8', timeout: 30000, windowsHide: true });
   assert.equal(result.error, undefined);
   assert.equal(result.status, 0, result.stderr || result.stdout);
   return JSON.parse(result.stdout.trim());
