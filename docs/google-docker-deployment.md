@@ -702,3 +702,70 @@ Po uruchomieniu zdrowego kontenera użyj w istniejącym zleceniu **Weryfikuj Qwe
 Ponowi to klasyfikację oczekujących paczek. Sprawdź, czy zniknął błąd LLM i paczki
 trafiły do importu albo ręcznego review. Zachowaj nazwę pliku poprawki do kolejnych
 aktualizacji — wywołanie Compose tylko z plikiem bazowym wybierze poprzedni obraz.
+
+### Błąd Qwen kieruje paczkę do ręcznej weryfikacji
+
+Po wyczerpaniu prób klasyfikacji błąd odpowiedzi, timeout lub wyjątek klasyfikatora
+przenosi paczkę do `PENDING_REVIEW`, z opisem problemu i bez automatycznego
+przypisania do checklisty. Kolejne paczki są nadal przetwarzane. Również żądanie
+zwolnienia modelu przed ponowną próbą ma teraz limit czasu, maksymalnie pięć sekund.
+Paczki pozostające wcześniej w `WAITING_FOR_CLASSIFICATION` wymagają ponownego
+kliknięcia **Weryfikuj Qwen**; aktualizacja nie zmienia ich samoczynnie.
+
+Poniższy blok uruchom na serwerze w PowerShell. Buduje obraz przy działającej Romce,
+a następnie odtwarza wyłącznie jej kontener. Zakończ bieżące operacje aplikacji przed
+końcowym `up`. Blok odczytuje pełne nazwy obecnych plików Compose z etykiety kontenera,
+więc wcześniejszy, ucięty na ekranie adres `compose.ollama-fix-...` nie jest potrzebny.
+Zachowuje ich kolejność i dodaje wyłącznie nowe ID obrazu. Korzysta z aktualnej bazy
+i zdjęć produkcji; nie uruchamiaj ponownie migracji ani kopiowania starej bazy.
+
+```powershell
+& {
+    $ErrorActionPreference = 'Stop'
+    $romekRepo = 'C:\PhotoLocal-staging'
+    $romekRun = 'C:\PhotoLocal-staging\docker-data\production-938460e57d394e1bbe0c1371e4dd391e'
+    $romekContainer = 'photolocal-production-photolocal-1'
+    $romekMeta = docker inspect --format '{{.Image}}|{{index .Config.Labels `com.docker.compose.project`}}|{{index .Config.Labels `com.docker.compose.project.config_files`}}' $romekContainer
+    if ($LASTEXITCODE -ne 0) { throw 'CONTAINER_INSPECT_FAILED' }
+    $romekParts = $romekMeta.Trim() -split '\|', 3
+    if ($romekParts.Count -ne 3 -or $romekParts[0] -cnotmatch '^sha256:[0-9a-f]{64}$' -or $romekParts[1] -cne 'photolocal-production') { throw 'CONTAINER_IDENTITY_INVALID' }
+    $romekOldImage = $romekParts[0]
+    $romekFiles = @($romekParts[2].Split(',') | ForEach-Object { [IO.Path]::GetFullPath($_.Trim()) })
+    if ($romekFiles.Count -lt 1 -or $romekFiles[0] -ine (Join-Path $romekRun 'compose.production.json')) { throw 'COMPOSE_FILES_INVALID' }
+    $romekArgs = @('compose', '-p', 'photolocal-production', '--project-directory', $romekRun, '--env-file', (Join-Path $romekRun 'empty.env'))
+    foreach ($romekFile in $romekFiles) {
+        if ([IO.Path]::GetDirectoryName($romekFile) -ine $romekRun -or -not (Test-Path -LiteralPath $romekFile -PathType Leaf)) { throw 'COMPOSE_FILES_INVALID' }
+        $romekArgs += @('-f', $romekFile)
+    }
+    $romekConfiguredImages = @(docker @romekArgs config --images)
+    if ($LASTEXITCODE -ne 0 -or $romekConfiguredImages.Count -ne 1 -or $romekConfiguredImages[0].Trim() -cne $romekOldImage) { throw 'LIVE_IMAGE_CONFIG_MISMATCH' }
+    git -C $romekRepo pull --ff-only
+    if ($LASTEXITCODE -ne 0) { throw 'GIT_PULL_FAILED' }
+    $romekCommit = git -C $romekRepo rev-parse --short HEAD
+    if ($LASTEXITCODE -ne 0 -or $romekCommit -cnotmatch '^[0-9a-f]{7,40}$') { throw 'GIT_VERSION_FAILED' }
+    $romekTag = 'photolocal:qwen-review-' + $romekCommit.Trim()
+    docker build --target runtime -t $romekTag $romekRepo
+    if ($LASTEXITCODE -ne 0) { throw 'IMAGE_BUILD_FAILED' }
+    $romekImage = docker image inspect --format '{{.Id}}' $romekTag
+    if ($LASTEXITCODE -ne 0 -or $romekImage -cnotmatch '^sha256:[0-9a-f]{64}$') { throw 'IMAGE_INSPECT_FAILED' }
+    $romekOverride = Join-Path $romekRun ('compose.qwen-review-' + [guid]::NewGuid().ToString('N') + '.json')
+    if (Test-Path -LiteralPath $romekOverride) { throw 'OVERRIDE_ALREADY_EXISTS' }
+    $romekJson = @{services=@{photolocal=@{image=$romekImage.Trim()}}} | ConvertTo-Json -Depth 4
+    [IO.File]::WriteAllText($romekOverride, $romekJson, (New-Object Text.UTF8Encoding($false)))
+    $romekArgs += @('-f', $romekOverride)
+    docker @romekArgs config --quiet
+    if ($LASTEXITCODE -ne 0) { throw 'COMPOSE_INVALID' }
+    $romekCurrentImage = docker inspect --format '{{.Image}}' $romekContainer
+    if ($LASTEXITCODE -ne 0 -or $romekCurrentImage.Trim() -cne $romekOldImage) { throw 'LIVE_CONTAINER_CHANGED' }
+    docker @romekArgs up --no-deps -d --no-build --pull never --wait --wait-timeout 120 photolocal
+    if ($LASTEXITCODE -ne 0) { throw 'UPDATE_FAILED' }
+    $romekResult = docker inspect --format '{{.Image}}|{{.State.Health.Status}}' $romekContainer
+    if ($LASTEXITCODE -ne 0 -or $romekResult.Trim() -cne ($romekImage.Trim() + '|healthy')) { throw 'UPDATE_VERIFICATION_FAILED' }
+    [pscustomobject]@{Status='QWEN_REVIEW_FIX_DEPLOYED';Commit=$romekCommit.Trim();Override=$romekOverride} | Format-List
+}
+```
+
+Po komunikacie `QWEN_REVIEW_FIX_DEPLOYED` kliknij **Weryfikuj Qwen** przy oczekujących
+paczkach. Poprawna klasyfikacja działa jak dotychczas, a nieudana udostępnia paczkę
+do ręcznego przypisania zdjęć. Zachowaj wszystkie pliki Compose wymienione przez
+kontener; kolejne aktualizacje powinny ponownie odczytywać tę listę.
