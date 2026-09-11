@@ -282,6 +282,56 @@ test('actual offline Compose merge retains dollars and adds no browser host port
   assert.equal(decode(rendered.services.photolocal.environment.ADRESY_APP_API_KEY), 'literal$secret${TOKEN}');
 });
 
+test('repeated browser updates and rollback use real Compose without duplicating security settings', windows, async t => {
+  const f = await fixture(t);
+  const version = spawnSync('docker', ['compose', 'version'], { encoding: 'utf8', windowsHide: true });
+  if (version.status !== 0) return t.skip('Docker Compose CLI unavailable; no engine is needed.');
+  const installed = buildChatBrowserOverride({ imageId: originalImage, browserImageId: browserImage, disableSandbox: true });
+  const installedPath = join(f.input.runDirectory, 'compose.chat-browser-installed.json');
+  await writeFile(installedPath, JSON.stringify(installed));
+  f.files.push(installedPath);
+  Object.assign(f.base, merged(f.base, installed));
+  f.app.labels['com.docker.compose.project.config_files'] = f.files.join(',');
+  f.app.environment = Object.entries(f.base.services.photolocal.environment).map(([key, value]) => `${key}=${decode(value)}`);
+  const originalFiles = await Promise.all(f.files.map(path => readFile(path, 'utf8')));
+  const rendered = [];
+  let composeError = '';
+  const run = async (executable, args) => {
+    if (args[0] !== 'compose' || !args.includes('config')) return f.run(executable, args);
+    f.calls.push({ executable, args });
+    const result = spawnSync(executable, args, { encoding: 'utf8', windowsHide: true });
+    if (result.status !== 0) composeError = result.stderr;
+    else rendered.push(JSON.parse(result.stdout));
+    return { code: result.status, stdout: result.stdout, stderr: result.stderr };
+  };
+  const first = await updateChatBrowser({ ...f.input, disableSandbox: true }, { run })
+    .catch(error => assert.fail(`${error.code}: ${composeError}`));
+  const second = await updateChatBrowser({ ...f.input, disableSandbox: true }, { run });
+  for (const report of [first, second]) {
+    assert.equal(report.status, 'CHAT_BROWSER_UPDATED');
+    const delta = JSON.parse(await readFile(report.overridePath, 'utf8'));
+    assert.deepEqual(Object.keys(delta.services['chat-browser']).sort(), ['environment', 'image']);
+    assert.equal(delta.volumes, undefined);
+  }
+  assert.equal(f.app.labels['com.docker.compose.project.config_files'], [...f.files, first.overridePath, second.overridePath].join(','));
+  const restored = await updateChatBrowser({ ...f.input, rollbackReport: second.rollbackReport }, { run });
+  assert.equal(restored.status, 'CHAT_BROWSER_ROLLED_BACK');
+  assert.equal(f.app.labels['com.docker.compose.project.config_files'], [...f.files, first.overridePath].join(','));
+  assert.deepEqual(await Promise.all(f.files.map(path => readFile(path, 'utf8'))), originalFiles);
+  for (const config of rendered) {
+    assert.deepEqual(config.services['chat-browser'].security_opt, ['no-new-privileges:true']);
+    assert.deepEqual(config.services['chat-browser'].tmpfs, ['/tmp:mode=1777,size=512m']);
+    assert.equal(config.services['chat-browser'].environment.CHAT_BROWSER_DISABLE_SANDBOX, 'true');
+    assert.equal(config.services['chat-browser'].ports, undefined);
+    assert.equal(config.volumes.chat_browser_profile.name, PROFILE_VOLUME);
+    assert.equal(decode(config.services.photolocal.environment.ADRESY_APP_API_KEY), 'literal$secret${TOKEN}');
+    assert.deepEqual(config.services.photolocal.volumes, rendered[0].services.photolocal.volumes);
+  }
+  for (const folder of ['data', 'google', 'downloads', 'local-photos', 'photos']) {
+    assert.equal(await readFile(join(f.input.runDirectory, folder, 'sentinel'), 'utf8'), `preserve ${folder}`);
+  }
+});
+
 test('PowerShell 5 coordinator pulls first and sanitizes child failures without changing data', windows, async t => {
   const f = await fixture(t);
   await mkdir(join(f.input.stagingRoot, 'scripts'));

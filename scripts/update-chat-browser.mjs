@@ -288,7 +288,15 @@ export async function updateChatBrowser(input, { run = nativeRun } = {}) {
     }
     const mainImage = await call(['image', 'inspect', '--format', '{{.Id}}', mainTag], 'INVALID_IMAGE');
     const browserImage = await call(['image', 'inspect', '--format', '{{.Id}}', browserTag], 'INVALID_IMAGE');
-    const override = buildChatBrowserOverride({ imageId: mainImage, browserImageId: browserImage, disableSandbox: input.disableSandbox ?? false });
+    const desired = buildChatBrowserOverride({ imageId: mainImage, browserImageId: browserImage, disableSandbox: input.disableSandbox ?? false });
+    // An installed browser already passed the full contract above. Inherit its
+    // static settings: re-appending lists such as security_opt creates duplicates.
+    const override = before.services['chat-browser'] ? {
+      services: {
+        photolocal: desired.services.photolocal,
+        'chat-browser': { image: browserImage, environment: desired.services['chat-browser'].environment },
+      },
+    } : desired;
     const overridePath = join(directory, `compose.chat-browser-${unique}.json`);
     await localPath(directory, true);
     const content = JSON.stringify(override, null, 2);
@@ -296,7 +304,7 @@ export async function updateChatBrowser(input, { run = nativeRun } = {}) {
     fingerprints.set(overridePath, digest(content));
     const args = compose([overridePath]);
     const after = JSON.parse(await call([...args, 'config', '--format', 'json'], 'COMPOSE_FAILED'));
-    verifyChatBrowserMerge(before, after, override);
+    verifyChatBrowserMerge(before, after, desired);
     const assertUnchanged = async () => {
       for (const [file, hash] of fingerprints) {
         await localPath(file, false);
