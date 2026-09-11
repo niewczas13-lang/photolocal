@@ -47,4 +47,22 @@ describe('config', () => {
 
     expect(config.googleChatInviteHeadless).toBe(true);
   });
+
+  it('uses explicit mounted Google paths and stores job state beside the database', () => {
+    process.env.GOOGLE_CHAT_TOKEN_FILE = join(backendRoot, 'data', 'google', 'token.json');
+    process.env.GOOGLE_CHAT_CREDENTIALS_FILE = join(backendRoot, 'data', 'google', 'client.json');
+    process.env.GOOGLE_CHAT_DOWNLOAD_ROOT = join(backendRoot, 'data', 'downloads');
+    process.env.GOOGLE_CHAT_OAUTH_REDIRECT_URI = 'https://romek.example/api/google-chat/auth/callback';
+    process.env.PHOTO_LOCAL_DB = join(backendRoot, 'data', 'custom.sqlite');
+    try {
+      const config = loadConfig();
+      expect(config.googleChatTokenFile).toBe(process.env.GOOGLE_CHAT_TOKEN_FILE);
+      expect(config.googleChatCredentialsFile).toBe(process.env.GOOGLE_CHAT_CREDENTIALS_FILE);
+      expect(config.googleChatDownloadRoot).toBe(process.env.GOOGLE_CHAT_DOWNLOAD_ROOT);
+      expect(config.googleChatOAuthRedirectUri).toBe(process.env.GOOGLE_CHAT_OAUTH_REDIRECT_URI);
+      expect(config.googleChatJobStateFile).toBe(join(backendRoot, 'data', 'google-chat-download.json'));
+    } finally {
+      for (const key of ['GOOGLE_CHAT_TOKEN_FILE', 'GOOGLE_CHAT_CREDENTIALS_FILE', 'GOOGLE_CHAT_DOWNLOAD_ROOT', 'GOOGLE_CHAT_OAUTH_REDIRECT_URI']) delete process.env[key];
+    }
+  });
 });

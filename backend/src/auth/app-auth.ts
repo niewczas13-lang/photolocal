@@ -24,6 +24,7 @@ export interface AppUserPasswordInfo {
 const DEFAULT_USERS = ['aniela', 'pawel', 'jarek', 'piotr', 'karol'];
 const SESSION_DURATION_MS = 30 * 24 * 60 * 60 * 1000;
 const SESSION_COOKIE_NAME = 'photo_local_session';
+const sessionDeletionListeners = new WeakMap<Database.Database, Set<(token: string) => void>>();
 
 function normalizeUsername(username: string): string {
   return username.trim().toLowerCase();
@@ -99,7 +100,7 @@ function getUserBySessionToken(db: Database.Database, token: string): AuthUser |
   if (!row) return null;
 
   if (row.expiresAt && Date.parse(row.expiresAt) <= Date.now()) {
-    db.prepare('DELETE FROM app_sessions WHERE token = ?').run(token);
+    deleteSession(db, token);
     return null;
   }
 
@@ -208,6 +209,20 @@ export function createSession(db: Database.Database, user: AuthUser): AuthSessio
 
 export function deleteSession(db: Database.Database, token: string): void {
   db.prepare('DELETE FROM app_sessions WHERE token = ?').run(token);
+  for (const listener of sessionDeletionListeners.get(db) ?? []) listener(token);
+}
+
+/** Browser display leases deliberately require the HttpOnly app cookie, not a bearer URL/token. */
+export function readAuthenticatedCookieSession(db: Database.Database, request: FastifyRequest): AuthSession | null {
+  const token = getCookieSessionToken(request);
+  const user = token ? getUserBySessionToken(db, token) : null;
+  return token && user ? { token, user } : null;
+}
+
+export function observeSessionDeletion(db: Database.Database, listener: (token: string) => void): () => void {
+  const listeners = sessionDeletionListeners.get(db) ?? new Set<(token: string) => void>();
+  listeners.add(listener); sessionDeletionListeners.set(db, listeners);
+  return () => { listeners.delete(listener); };
 }
 
 export function registerAuthRoutes(app: FastifyInstance, db: Database.Database): void {

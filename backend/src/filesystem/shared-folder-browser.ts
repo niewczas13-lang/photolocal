@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
-import { mkdir, readdir } from 'node:fs/promises';
-import { basename, dirname, isAbsolute, relative, resolve } from 'node:path';
+import { mkdir, readdir, realpath, stat } from 'node:fs/promises';
+import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
@@ -42,6 +42,33 @@ function driveRoot(deviceId: string): string {
 }
 
 export async function listSharedFolderRoots(): Promise<SharedFolderRoot[]> {
+  const configuredRoots = process.env.PHOTO_LOCAL_SHARED_ROOTS;
+  if (configuredRoots !== undefined) {
+    let value: unknown;
+    try {
+      value = JSON.parse(configuredRoots);
+    } catch {
+      throw new Error('PHOTO_LOCAL_SHARED_ROOTS musi byc tablica JSON katalogow');
+    }
+    if (!Array.isArray(value)) {
+      throw new Error('PHOTO_LOCAL_SHARED_ROOTS musi byc tablica JSON katalogow');
+    }
+    return Promise.all(value.map(async (entry: unknown): Promise<SharedFolderRoot> => {
+      if (
+        !entry || typeof entry !== 'object' || !('path' in entry) ||
+        typeof entry.path !== 'string' || !isAbsolute(entry.path) ||
+        ('label' in entry && typeof entry.label !== 'string')
+      ) {
+        throw new Error('PHOTO_LOCAL_SHARED_ROOTS wymaga bezwzglednej sciezki i opcjonalnej etykiety');
+      }
+      const path = await realpath(entry.path);
+      if (!(await stat(path)).isDirectory()) {
+        throw new Error('PHOTO_LOCAL_SHARED_ROOTS moze wskazywac tylko katalogi');
+      }
+      const label = 'label' in entry && typeof entry.label === 'string' ? entry.label.trim() : '';
+      return { path, label: label || basename(path) || path, providerName: null };
+    }));
+  }
   if (process.platform !== 'win32') return [];
 
   const script = `
@@ -76,32 +103,48 @@ Get-CimInstance Win32_LogicalDisk -Filter "DriveType=4" |
 }
 
 function isPathInside(candidatePath: string, rootPath: string): boolean {
-  const candidate = resolve(candidatePath).toLowerCase();
-  const root = resolve(rootPath).toLowerCase();
-  const difference = relative(root, candidate);
-  return difference === '' || (!difference.startsWith('..') && !isAbsolute(difference));
+  // node:path follows the host's case sensitivity (win32 versus POSIX).
+  const difference = relative(resolve(rootPath), resolve(candidatePath));
+  return difference === '' || (
+    difference !== '..' && !difference.startsWith(`..${sep}`) && !isAbsolute(difference)
+  );
+}
+
+async function resolveSharedFolder(path: string): Promise<{ currentPath: string; rootPath: string }> {
+  const roots = await listSharedFolderRoots();
+  for (const root of roots) {
+    const rootPath = await realpath(root.path).catch(() => null);
+    if (!rootPath || (!isPathInside(path, root.path) && !isPathInside(path, rootPath))) continue;
+    const currentPath = await realpath(path);
+    if (isPathInside(currentPath, rootPath)) return { currentPath, rootPath };
+  }
+  throw new Error('Folder musi byc w katalogu udostepnionym');
 }
 
 export async function listSharedFolderChildren(path: string): Promise<SharedFolderListResult> {
-  const roots = await listSharedFolderRoots();
-  const root = roots.find((entry) => isPathInside(path, entry.path));
-  if (!root) {
-    throw new Error('Folder musi byc na zmapowanym dysku udostepnionym');
-  }
-
-  const currentPath = resolve(path);
+  const { currentPath, rootPath } = await resolveSharedFolder(path);
   const entries = await readdir(currentPath, { withFileTypes: true });
-  const folders = entries
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => ({
-      name: entry.name,
-      path: resolve(currentPath, entry.name),
-    }))
+  const candidates = await Promise.all(entries.map(async (entry): Promise<SharedFolderEntry | null> => {
+    if (!entry.isDirectory() && !entry.isSymbolicLink()) return null;
+    const childPath = resolve(currentPath, entry.name);
+    try {
+      const canonicalPath = await realpath(childPath);
+      if (!isPathInside(canonicalPath, rootPath) || !(await stat(canonicalPath)).isDirectory()) {
+        return null;
+      }
+      return { name: entry.name, path: childPath };
+    } catch {
+      // A disappearing or unreadable child must not break the entire listing.
+      return null;
+    }
+  }));
+  const folders = candidates
+    .filter((entry): entry is SharedFolderEntry => entry !== null)
     .sort((left, right) => left.name.localeCompare(right.name, 'pl'));
 
   const parentCandidate = dirname(currentPath);
   const parentPath =
-    parentCandidate !== currentPath && isPathInside(parentCandidate, root.path) && basename(currentPath)
+    parentCandidate !== currentPath && isPathInside(parentCandidate, rootPath) && basename(currentPath)
       ? parentCandidate
       : null;
 
@@ -124,16 +167,11 @@ function validateFolderName(name: string): string {
 }
 
 export async function createSharedFolder(parentPath: string, folderName: string): Promise<SharedFolderCreateResult> {
-  const roots = await listSharedFolderRoots();
-  const root = roots.find((entry) => isPathInside(parentPath, entry.path));
-  if (!root) {
-    throw new Error('Folder musi byc na zmapowanym dysku udostepnionym');
-  }
-
+  const { currentPath, rootPath } = await resolveSharedFolder(parentPath);
   const safeName = validateFolderName(folderName);
-  const targetPath = resolve(parentPath, safeName);
-  if (!isPathInside(targetPath, root.path)) {
-    throw new Error('Nie mozna utworzyc folderu poza dyskiem udostepnionym');
+  const targetPath = resolve(currentPath, safeName);
+  if (!isPathInside(targetPath, rootPath)) {
+    throw new Error('Nie mozna utworzyc folderu poza katalogiem udostepnionym');
   }
 
   await mkdir(targetPath, { recursive: false });

@@ -42,11 +42,11 @@ import {
   createNominatimGeocoder,
   type AddressGeocoder,
 } from '../geocoding/address-geocoder.js';
-import {
-  getGoogleChatDownloadStatus,
-  listGoogleChatSpaces,
-  startGoogleChatDownload,
-} from '../google-chat/google-chat-downloader.js';
+import { GoogleChatDownloadManager } from '../google-chat/google-chat-downloader.js';
+import { GoogleChatAuth } from '../google-chat/google-chat-auth.js';
+import { GoogleChatOperationQueue } from '../google-chat/google-chat-files.js';
+import { registerGoogleChatRoutes } from '../google-chat/google-chat-routes.js';
+import { registerChatInviteRoutes } from '../google-chat/chat-invite-routes.js';
 import { generateChecklistNodes, markAerialAddressReserves } from '../checklist/checklist-generator.js';
 import type { ChecklistAddress, GeneratedChecklistNode } from '../checklist/checklist-generator.js';
 import { loadConfig } from '../config.js';
@@ -270,6 +270,22 @@ export async function registerProjectRoutes(
   const repository = new ProjectsRepository(db);
   const chatBatchesRepository = new ChatBatchesRepository(db);
   const initialConfig = loadConfig();
+  const googleQueue = new GoogleChatOperationQueue();
+  const googleAuth = new GoogleChatAuth({
+    credentialsFile: initialConfig.googleChatCredentialsFile,
+    tokenFile: initialConfig.googleChatTokenFile,
+    redirectUri: initialConfig.googleChatOAuthRedirectUri,
+  });
+  const googleDownloads = new GoogleChatDownloadManager({
+    credentialsFile: initialConfig.googleChatCredentialsFile,
+    tokenFile: initialConfig.googleChatTokenFile,
+    pythonCommand: initialConfig.googleChatPythonCommand,
+    scriptPath: initialConfig.googleChatScriptPath,
+    downloadRoot: initialConfig.googleChatDownloadRoot,
+    stateFile: initialConfig.googleChatJobStateFile,
+  }, googleQueue);
+  registerGoogleChatRoutes(app, repository, googleAuth, googleDownloads);
+  registerChatInviteRoutes(app, db, initialConfig, googleDownloads);
   const addressGeocoder =
     options.addressGeocoder ??
     createFallbackAddressGeocoder([
@@ -299,13 +315,6 @@ export async function registerProjectRoutes(
     }
     classificationDiagnosticsTimers.clear();
   });
-  const googleChatConfig = () => {
-    const config = loadConfig();
-    return {
-      pythonCommand: config.googleChatPythonCommand,
-      scriptPath: config.googleChatScriptPath,
-    };
-  };
 
   app.get('/api/projects', async () => repository.listProjects());
 
@@ -327,44 +336,9 @@ export async function registerProjectRoutes(
     }));
   });
 
-  app.get('/api/google-chat/spaces', async () => listGoogleChatSpaces(googleChatConfig()));
-
-  app.get('/api/projects/:projectId/google-chat/download/status', async () =>
-    getGoogleChatDownloadStatus(),
-  );
-
   app.get('/api/projects/:projectId/chat-import/status', async (request) => {
     const { projectId } = request.params as { projectId: string };
     return getChatImportStatus(projectId);
-  });
-
-  app.post('/api/projects/:projectId/google-chat/download', async (request, reply) => {
-    const { projectId } = request.params as { projectId: string };
-    const body = request.body as { spaceName?: string; spaceDisplayName?: string };
-    const project = repository.getProject(projectId);
-
-    if (!project) return reply.status(404).send({ error: 'Project not found' });
-    if (!body.spaceName?.trim()) return reply.status(400).send({ error: 'spaceName is required' });
-
-    const spaceName = body.spaceName.trim();
-    const spaceDisplayName = body.spaceDisplayName?.trim() || spaceName;
-
-    try {
-      const downloadStatus = startGoogleChatDownload({
-        projectId,
-        spaceName,
-        spaceDisplayName,
-        config: googleChatConfig(),
-      });
-      repository.assignGoogleChatSpace(projectId, {
-        spaceName,
-        spaceDisplayName,
-        lastDownloadAt: downloadStatus.startedAt ?? new Date().toISOString(),
-      });
-      return reply.status(202).send(downloadStatus);
-    } catch (error) {
-      return reply.status(409).send({ error: error instanceof Error ? error.message : String(error) });
-    }
   });
 
   app.post('/api/projects/:projectId/chat-import', async (request, reply) => {

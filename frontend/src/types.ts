@@ -391,13 +391,15 @@ export interface GoogleChatSpace {
 export interface AppConfig {
   googleChatDownloadRoot: string;
   googleChatInviteProfileDir: string;
+  googleChatInviteMode?: 'DOCKER_BROWSER' | 'LEGACY_WINDOWS' | 'LINK_ONLY';
 }
 
 export interface GoogleChatDownloadStatus {
-  state: 'IDLE' | 'RUNNING' | 'COMPLETED' | 'FAILED';
+  state: 'IDLE' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'AUTH_REQUIRED' | 'PAUSED' | 'PARTIAL_FAILURE';
   projectId: string | null;
   spaceName: string | null;
   spaceDisplayName: string | null;
+  rootPath?: string | null;
   downloadedFiles?: number;
   skippedFiles?: number;
   totalFiles?: number;
@@ -408,6 +410,13 @@ export interface GoogleChatDownloadStatus {
   finishedAt?: string;
   error?: string;
   recentLines: string[];
+}
+
+export interface GoogleChatAuthStatus {
+  state: 'CONNECTED' | 'AUTH_REQUIRED' | 'NOT_CONNECTED' | 'NOT_CONFIGURED';
+  canConnect: boolean;
+  message: string;
+  inviteMode: 'WINDOWS_BROWSER' | 'GOOGLE_CHAT_LINK';
 }
 
 export interface SharedFolderRoot {
@@ -432,6 +441,14 @@ export interface GoogleChatInvite {
   roomName: string | null;
   senderEmail: string | null;
   textPreview: string;
+  canAccept?: boolean;
+  reason?: string;
+}
+
+export interface GoogleChatBrowserSession {
+  sessionId: string;
+  expiresAt: string;
+  websocketPath: string;
 }
 
 export interface GoogleChatInviteSessionStatus {

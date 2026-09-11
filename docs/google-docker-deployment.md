@@ -1,0 +1,771 @@
+# Google i Docker — wdrożenie istniejącego PhotoLocal
+
+Zmiany można wdrożyć najpierw na Windows, a Docker uruchomić równolegle na kopii danych.
+Przełączenie produkcji wymaga krótkiej przerwy na końcową, spójną kopię. Nie należy
+uruchamiać dwóch instancji zapisujących do tej samej bazy, zdjęć ani tokenu Google.
+
+## 1. Ustalenie obecnego stanu na serwerze
+
+W PowerShell, przez pulpit zdalny:
+
+```powershell
+Set-Location C:\PhotoLocal
+git status --short
+git rev-parse HEAD
+docker info --format '{{.OSType}}'
+Get-NetTCPConnection -State Listen -LocalPort 4873 | Select-Object LocalAddress, OwningProcess
+```
+
+Zapisz identyfikator wersji i sprawdź lokalnie `.env`: faktyczne położenie bazy,
+pobranych zdjęć, tokenu i pliku klienta Google. Nie wklejaj sekretów do zgłoszeń lub GitHuba.
+Sprawdź katalogi projektów w aplikacji, dostępność udziałów sieciowych i adres Ollamy.
+Ścieżki względne bazy zależą od katalogu roboczego procesu — obecny `start.bat` uruchamia
+backend z katalogu `backend`. Przed migracją ustal pełne ścieżki istniejących danych.
+
+Do obrazu potrzebny jest silnik **Linux containers**. Samo zainstalowanie Docker Desktop
+nie oznacza, że silnik działa. Przy wielu udostępnionych dyskach trzeba odwzorować każdy
+używany katalog; litery dysków sesji RDP nie pojawiają się automatycznie w kontenerze.
+
+## 2. Jednorazowa konfiguracja logowania Google
+
+Właściciel projektu Google Cloud:
+
+1. Włącza Google Chat API w odpowiednim projekcie. Konfiguruje ekran zgody i dostęp dla
+   konta, które już ma dostęp do pobieranych czatów.
+2. Tworzy klienta OAuth typu **Web application**. JSON z kluczem `installed` jest klientem
+   desktopowym; nowe logowanie przez Romka wymaga JSON z kluczem `web`.
+3. Rejestruje dokładny adres **Authorized redirect URI**:
+   `https://romek.pawelzykubek.pl/api/google-chat/auth/callback`.
+4. Zapisuje pobrany JSON w prywatnym katalogu na serwerze i ustawia
+   `GOOGLE_CHAT_CREDENTIALS_FILE` oraz powyższy `GOOGLE_CHAT_OAUTH_REDIRECT_URI` w `.env`.
+   Istniejący token zostaje zachowany do udanego połączenia. Zrób jego prywatną kopię
+   razem z dotychczasowym plikiem klienta przed pierwszą zmianą.
+5. Po uruchomieniu nowej wersji loguje się do Romka, otwiera import Google Chat,
+   wybiera **Połącz Google**, właściwe konto i przyznaje oba uprawnienia odczytu:
+   `chat.spaces.readonly` i `chat.messages.readonly`.
+6. Sprawdza połączenie, listę czatów i pobranie małej paczki. Logowanie odbywa się
+   w przeglądarce osoby obsługującej Romka. Token trafia wyłącznie na serwer.
+
+Adres powrotu musi prowadzić do tej samej instancji, która rozpoczęła logowanie.
+Nie używaj produkcyjnego callbacku do testowania kontenera na innym porcie.
+Do testu w przeglądarce **na serwerze** można osobno zarejestrować
+`http://localhost:4874/api/google-chat/auth/callback` i otworzyć Romka przez
+`http://localhost:4874`. Do testu z innego komputera użyj osobnej domeny HTTPS
+kierującej do stagingu. Logowanie wymaga zachowania sesji Romka w tej przeglądarce.
+Restart backendu w czasie logowania wymaga rozpoczęcia połączenia od nowa.
+
+Google przyznaje dostęp offline, a downloader odświeża wygasły token dostępu.
+Dla aplikacji zewnętrznej w stanie **Testing** odświeżanie z tymi zakresami wygasa
+po 7 dniach. Sprawdź stan publikacji i wymagania Google; przejście do Production
+nie gwarantuje niewygasającej zgody. Cofnięcie dostępu lub zasady administratora
+nadal mogą wymagać ponownego połączenia.
+Źródła: [OAuth Google](https://developers.google.com/identity/protocols/oauth2),
+[logowanie aplikacji webowej](https://developers.google.com/identity/protocols/oauth2/web-server).
+
+**Zaproszenia:** uprawnienia API i sesja przeglądarki Google Chat są osobne. Na Windows
+dotychczasowa automatyzacja zaproszeń pozostaje dostępna. W kontenerze przycisk otwiera
+zwykły Google Chat na komputerze użytkownika. Zaakceptuj zaproszenie na **tym samym
+koncie**, które połączono z Romkiem, a potem odśwież listę czatów. Kontener nie zawiera
+zdalnego pulpitu ani automatyzacji przeglądarki Windows.
+
+**Starsza metoda:** jawne `python pobierzchat/chat.py --login` pozostaje dostępne
+dla konfiguracji desktopowej. Zwykłe pobieranie i listowanie nigdy same nie otwierają
+okna logowania. Po ręcznej wymianie tokenu użyj **Sprawdź połączenie** w aplikacji.
+
+## 3. Przygotowanie kodu bez zatrzymywania obecnej aplikacji
+
+Zbuduj zatwierdzoną wersję w osobnym katalogu, np. `C:\PhotoLocal-staging`.
+Do próby tej gałęzi można pobrać osobny checkout (katalog docelowy musi być nowy):
+
+```powershell
+git clone --branch codex/google-auth-docker --single-branch https://github.com/niewczas13-lang/photolocal.git C:\PhotoLocal-staging
+```
+
+Przy testowaniu wariantu Windows potrzebne są Node.js 24 oraz Python 3.11 lub nowszy.
+Zainstaluj zależności i zbuduj kod w tym nowym katalogu:
+
+```powershell
+Set-Location C:\PhotoLocal-staging
+npm ci
+npm run build
+python -m pip install -r pobierzchat/requirements.txt
+```
+
+Na etapie Windows ustaw pełne, osobne ścieżki danych testowych oraz inny port w `.env`.
+Sprawdź działanie nowej wersji przed zatrzymaniem starego procesu. Nie podmieniaj
+pliku `.env` przykładową konfiguracją i nie kieruj nowego procesu na produkcyjną bazę
+w czasie równoległego testu. Istniejący `update.bat` nie zastępuje procedury wykonania
+spójnej kopii i przygotowania wersji przed przerwą.
+
+## 4. Pusty kontener testowy
+
+W nowym katalogu stagingu, przed kopiowaniem danych:
+
+```powershell
+Copy-Item .env.docker.example .env.docker
+New-Item -ItemType Directory -Path docker-data/data,docker-data/google,docker-data/downloads,docker-data/photos
+docker compose --env-file .env.docker config --quiet
+docker compose --env-file .env.docker build
+docker compose --env-file .env.docker up -d --wait
+Invoke-RestMethod http://localhost:4874/health
+```
+
+Domyślnie port 4874 jest dostępny tylko lokalnie. Nowa pusta baza tworzy standardowe
+konta aplikacji z domyślnymi hasłami; zmień je przed jakimkolwiek publicznym udostępnieniem.
+Docelowo użyj zmigrowanej kopii istniejącej bazy, zachowującej jej konta i dane.
+Do zmiany hasła w działającym kontenerze służy istniejące narzędzie
+`docker compose --env-file .env.docker exec photolocal node backend/dist/auth/add-user-cli.js`;
+sprawdź jego wymagane argumenty w instrukcji zarządzania kontami repozytorium.
+
+Obraz działa jako UID/GID 1000. Na Linuksie nadaj temu użytkownikowi prawa do **nowych
+katalogów stagingu**; same prawa do folderu nadrzędnego nie wystarczą dla plików
+skopiowanych z prawami 0600. Na Windows sprawdź możliwość zapisu przez Docker Desktop.
+
+Trwałe katalogi:
+
+| Katalog kontenera | Zawartość |
+| --- | --- |
+| `/data` | SQLite, WAL/SHM, stan pobierania, logi |
+| `/google` | `credentials.json`, `token.json`, blokada tokenu |
+| `/downloads` | pobrane zdjęcia, manifesty, `.receipts`, `.spaces.json` |
+| `/photos` | pełne katalogi projektów ze zdjęciami i miniaturami |
+
+Montowane są całe katalogi: atomowa wymiana tokenu i pliki pomocnicze SQLite wymagają
+zapisywalnego katalogu. W `.env.docker` używaj ścieżek Windows z `/`, np.
+`C:/PhotoLocal-staging/docker-data/data`. Tokenów nie umieszczaj w obrazie ani repozytorium.
+Skonfiguruj również `OLLAMA_URL`; domyślnie kontener łączy się z hostem przez
+`http://host.docker.internal:11434`. Sprawdź dostęp i wybrany model przed klasyfikacją.
+
+Obraz domyślnie używa `TZ=Europe/Warsaw`, aby zachować interpretację zdjęć, których
+EXIF nie podaje strefy czasowej, tak jak na dotychczasowym serwerze. Jawny offset
+zapisany w EXIF ma pierwszeństwo. Dla instalacji w innej strefie ustaw `TZ` w sekcji
+`environment` usługi. Obraz zawiera też czcionki potrzebne do napisów na zdjęciach.
+
+## 5. Kopia danych i mapowanie ścieżek
+
+Zaczekaj na koniec pobierania, importowania, klasyfikacji i zapisu zdjęć. Wstrzymaj
+pracę użytkowników, zatrzymaj właściwy proces aplikacji oraz ewentualny osobny downloader.
+Sprawdź brak procesów zapisujących do tych danych. Wtedy wykonaj prywatną kopię całej
+bazy **wraz z istniejącymi plikami `-wal`, `-shm`, `-journal`**, pasujących zdjęć,
+miniatur, katalogu pobrań z plikami ukrytymi i konfiguracji Google. Wszystkie elementy
+muszą pochodzić z tego samego momentu bez zapisów. Nie kopiuj wyłącznie aktywnego pliku
+SQLite. Zachowaj tę kopię poza katalogiem wdrożenia.
+
+Do próbnej migracji można uruchomić starą aplikację ponownie po wykonaniu spójnej kopii.
+Końcowe przełączenie wymaga później **nowej** kopii, obejmującej nowszą pracę.
+
+Migrator przepisuje wyłącznie kopię bazy; nie kopiuje i nie sprawdza istnienia zdjęć.
+Mapę przygotuj według rzeczywistych ścieżek w bazie. Przykład `mapping.json`:
+
+```json
+[
+  {"from":"P:\\Projekty","to":"/photos"},
+  {"from":"C:\\PhotoLocal\\pobierzchat\\pobrane_zdjecia","to":"/downloads"}
+]
+```
+
+Zawartość `P:\Projekty` musi trafić do katalogu montowanego jako `/photos`, z zachowaniem
+podkatalogów. Przy wielu udziałach dodaj osobne mounty i rozłączne prefiksy docelowe,
+np. `/photos-a`, `/photos-b`, oraz ustaw je w `PHOTO_LOCAL_SHARED_ROOTS`. Nieznane
+bezwzględne ścieżki powodują przerwanie migracji. Migracja dotyczy ośmiu kolumn ścieżek;
+logiczne ścieżki checklisty pozostają bez zmian. Różnice wielkości liter nazw plików
+Windows/Linux wymagają sprawdzenia na rzeczywistym zestawie zdjęć.
+
+Zatrzymaj testowy kontener. Wskaż **nieistniejący plik wynikowy** w istniejącym pustym
+katalogu, np. nowym `docker-data/migrated-data`:
+
+```powershell
+docker compose --env-file .env.docker stop
+New-Item -ItemType Directory -Path docker-data/migrated-data
+node scripts/migrate-docker-data.mjs --source C:/PhotoLocal-backup/photo-local.sqlite --output ./docker-data/migrated-data/photo-local.sqlite --mapping ./mapping.json
+```
+
+Narzędzie nie otwiera oryginału przez SQLite: weryfikuje prywatną kopię bazy/WAL,
+tworzy backup, przepisuje ścieżki transakcyjnie i sprawdza `integrity_check`. Obok
+powstaje raport `*.migration.json`. Potrzebne jest miejsce na kopię roboczą i wynik
+oraz system plików obsługujący hardlinki, np. NTFS/ext4. Pliki źródłowe muszą pozostawać
+niezmienione przez cały czas. Błąd migracji oznacza brak zgody na przełączenie danych.
+
+Ustaw `PHOTO_LOCAL_DATA_DIR=./docker-data/migrated-data`, przygotuj odpowiadające mu
+kopie zdjęć/pobrań i konfigurację Google. Istniejący `google-chat-download.json`
+można skopiować razem z danymi; zadanie RUNNING wraca jako PAUSED. Ścieżka pobierania
+jest ustalana ponownie z `.spaces.json` po zmianie systemu. Zachowaj cały katalog
+pobrań, aby wznowienie korzystało z manifestów i zweryfikowanych plików.
+
+Po ustawieniu nowych mountów uruchom kontener ponownie przez `up`, które zastosuje
+zmiany konfiguracji (samo `restart` tego nie robi):
+
+```powershell
+docker compose --env-file .env.docker up -d --wait
+Invoke-RestMethod http://localhost:4874/health
+```
+
+## 6. Sprawdzenie i przełączenie
+
+Przed zmianą publicznego adresu sprawdź na kopii: konta, liczbę projektów/zdjęć,
+otwieranie miniatur i oryginałów z różnych projektów, pobranie istniejącej paczki
+bez duplikacji, wznowienie po restarcie kontenera, import i klasyfikację Qwen.
+Wymuszone wygaśnięcie Google ma pokazać prośbę o połączenie i zachować już pobrane pliki.
+Weryfikację utraty dostępu wykonuj na koncie testowym, bez cofania zgody produkcyjnej.
+
+Po udanym teście wykonaj końcową spójną kopię przy wstrzymanych zapisach, powtórz
+migrację do nowego katalogu i sprawdź dane. Dopiero wtedy skieruj istniejący reverse
+proxy na port kontenera. Jeśli proxy jest innym kontenerem, `127.0.0.1` oznacza jego
+własny kontener — użyj uzgodnionej sieci Dockera/nazwy usługi lub dostępnego adresu
+hosta. Publiczny callback Google musi już prowadzić do nowej instancji.
+
+`restart: unless-stopped` uruchamia kontener po powrocie silnika Docker, chyba że
+został ręcznie zatrzymany. Sprawdź **restart całego serwera bez logowania przez RDP**
+w uzgodnionym oknie, bo dotyczy też pozostałych usług. Docker Desktop ma opcję startu
+przy logowaniu użytkownika; to nie stanowi gwarancji startu przed logowaniem.
+Jeśli obecny host tego nie zapewnia, trzeba najpierw ustalić sposób startu silnika
+lub użyć uruchamianej z systemem maszyny Linux z Docker Engine.
+Źródła: [ustawienia Desktop](https://docs.docker.com/desktop/settings-and-maintenance/settings/),
+[reguły restartu](https://docs.docker.com/engine/containers/start-containers-automatically/).
+
+Powrót przed nowymi zapisami: zatrzymaj nową instancję, przywróć kierowanie ruchu
+na starą i uruchom ją z zachowanymi danymi oraz konfiguracją. Po rozpoczęciu pracy
+na nowej wersji nie wracaj po prostu do starej bazy: najpierw zachowaj nową bazę
+i pliki, potem uzgodnij przeniesienie zmian. Raport mapowania pomaga ustalić ścieżki,
+ale nie jest automatyczną migracją powrotną i nie scala nowszych danych.
+
+## Diagnostyka udziału SMB z Windows
+
+Jeżeli Windows czyta udział, lecz Docker odrzuca jego ścieżkę UNC jako bind mount,
+można wykonać jedną izolowaną próbę odczytu przez wolumen CIFS. W katalogu staging,
+z zainstalowanym Node.js i istniejącym obrazem `photolocal:staging`, uruchom:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-smb-access.ps1 -Server fileserver.example -Share Photos -Subdirectory Projects -UserName 'EXAMPLE-PC\photo-user'
+```
+
+Podaj rzeczywisty serwer, udział, podkatalog i konto. Hasło wpisuje się wyłącznie
+w lokalnym oknie `Get-Credential`. Skrypt przekazuje je przez stdin do Node i Docker
+Compose; nie zapisuje konfiguracji na dysku ani nie umieszcza hasła w argumentach
+procesu. Docker przechowuje jednak opcje CIFS w metadanych testowego wolumenu do jego
+usunięcia; administrator silnika ma do nich dostęp. Nie udostępniaj inspekcji wolumenu,
+`compose config` ani surowych logów montowania.
+
+Próba używa SMB 3.1.1 i użytkownika UID/GID 1000. Wolumen i kontener są tylko do
+odczytu, kontener nie ma sieci ani portów, a kopiowanie zawartości obrazu do wolumenu
+jest wyłączone. Test tylko odczytuje katalog; nie potwierdza jeszcze dostępu do
+wszystkich zdjęć, możliwości zapisu ani autostartu. Nie wymaga zatrzymania aplikacji.
+
+Raport `Status: DIRECTORY_READ_OK` i `Cleanup: CLEAN` potwierdza odczyt i zakończenie
+sprzątania. `MOUNT_ACCESS_DENIED` oznacza odmowę przed odczytem katalogu (np.
+uwierzytelnienie, uprawnienia udziału lub zasady SMB), a `DIRECTORY_ACCESS_DENIED`
+odmowę odczytu w uruchomionym kontenerze. Żaden z tych kodów samodzielnie nie
+potwierdza błędnego hasła. `Cleanup: REQUIRED` wymaga sprawdzenia zasobów nazwanych w `ProbeId`
+(wolumen ma dodatkowo końcówkę `-remote`); po timeoutach silnik może jeszcze kończyć
+montowanie. Skrypt usuwa wyłącznie zasoby tej próby. Nigdy nie wykonuje `prune`.
+`CREDENTIAL_FORMAT_UNSUPPORTED` oznacza, że nie wykonano logowania: przecinek,
+NUL lub znak nowej linii w danych konta wymagają innej konfiguracji montowania.
+Nie zmieniaj hasła w celu obejścia tego ograniczenia.
+
+Po udanym odczycie katalogu można dodać `-CheckFilesAndWrite` do tego samego polecenia.
+Ten jawny wariant montuje udział do zapisu, odczytuje do 64 KiB jednego istniejącego
+zdjęcia i wykonuje zapis, odczyt, zmianę nazwy oraz usunięcie pliku wyłącznie w nowym
+katalogu `.<ProbeId>` pod wybranym podkatalogiem udziału. Istniejące zdjęcia są tylko
+odczytywane. Folder testowy jest tworzony wyłącznie, gdy jeszcze nie istnieje;
+sprzątanie nie usuwa rekurencyjnie katalogów. Sukces ma kod `STORAGE_READ_WRITE_OK`.
+`TEST_FOLDER_CLEANUP_REQUIRED` wymaga sprawdzenia pozostawionego katalogu próbnego.
+Wyszukiwanie zdjęcia ma limit 500 katalogów i 10 000 wpisów; `PHOTO_SAMPLE_NOT_FOUND`
+nie oznacza, że na całym udziale nie ma zdjęć. Ten test nie zastępuje sprawdzenia
+ścieżek i oryginałów w poszczególnych projektach po migracji kopii bazy.
+
+Przy stagingu z istniejącym NAS nie trzeba kopiować całego udziału na dysk Windows.
+Można podłączyć go tylko do odczytu w `/nas` i odwzorować np. `P:\Projekty` na
+`/nas/Projekty`, jeżeli korzeń `P:` odpowiada korzeniowi montowanego udziału.
+Próby importu i edycji wykonuj w osobnym projekcie i katalogu testowym.
+
+### Trwały udział i kopia bazy działającego Windowsa
+
+Po udanym `STORAGE_READ_WRITE_OK` helper `scripts/connect-staging-storage.ps1`
+tworzy osobny wolumen CIFS tylko do odczytu. Przyjmuje te same parametry serwera,
+udziału, podkatalogu i konta oraz `-OutputDirectory <staging>\docker-data`.
+Hasło wpisujesz lokalnie; pozostaje w metadanych wolumenu Dockera potrzebnych do
+ponownego montowania. Plik `docker-data/storage.json` zawiera tylko nazwę wolumenu,
+punkt montowania i podkatalog. Sukces: `STAGING_STORAGE_READY`, `Cleanup: CLEAN`.
+Istniejący manifest zatrzymuje kolejną próbę przed pytaniem o hasło.
+
+Następnie na serwerze Windows uruchom (dostosuj trzy ścieżki):
+
+```powershell
+node C:\PhotoLocal-staging\scripts\prepare-staging-copy.mjs --production-root C:\PhotoLocal --staging-root C:\PhotoLocal-staging --network-prefix 'P:\Projekty' --start
+```
+
+`--network-prefix` wskazuje prefiks w starej bazie odpowiadający podkatalogowi
+z manifestu SMB. Cały udział jest zamontowany w `/nas`, np. `P:\Projekty`
+odpowiada `/nas/Projekty`. Helper zakłada standardowe katalogi lokalnych zdjęć
+`backend/zdjęcia` i pobrań `pobierzchat/pobrane_zdjecia` pod katalogiem produkcji.
+
+Proces najpierw sprawdza Compose i katalogi. Potem natywne `better-sqlite3` ze starego
+backendu wykonuje kopię online do nowego `docker-data/migration-*`. Zatwierdzone
+rekordy z WAL są uwzględniane przez API SQLite; nie kopiujemy ręcznie aktywnego pliku.
+Źródłowa aplikacja może nadal zapisywać. Limit 60 sekund działa między krokami
+backupu i nie przerywa blokującego wywołania systemowego. Brak natywnej zależności,
+brak wolnego miejsca lub przekroczenie limitu kończy przygotowanie przed startem.
+
+Kontener migracji otrzymuje wyłącznie ukończoną kopię bazy. Zdjęcia z NAS oraz stare
+lokalne zdjęcia i pobrania są potem montowane tylko do odczytu. Audyt sprawdza liczby
+rekordów, każdy folder projektu i do trzech oryginalnych zdjęć na projekt. Nowe
+pobrania, testowe projekty i pliki Google pozostają w dotychczasowych katalogach
+stagingu. `--start` odtwarza wyłącznie usługę `photolocal-staging` na
+`127.0.0.1:4874`, bez budowania obrazu, i czeka na zdrowy kontener.
+
+Sukces przygotowania: `STAGING_COPY_READY`; z `--start`: `STAGING_COPY_RUNNING`.
+`docker-data/staging-copy.json` zapisuje ścieżkę dodatkowego pliku Compose i wyniki.
+Dotychczasowa testowa baza nie jest nadpisywana. Użytkownicy i hasła aplikacji
+pochodzą z kopii produkcyjnej bazy. Na tym etapie edycję i pobieranie do istniejących
+projektów ogranicza montowanie NAS tylko do odczytu; próby zapisu wykonuj w osobnym
+projekcie z plikiem GPKG i folderem `/photos`.
+
+Przy błędzie raport podaje katalog konkretnej próby. `audit.json` rozróżnia brak
+plików od nieprawidłowej bazy, a `container-migrate.json` i `container-audit.json`
+zawierają nazwy własnych kontenerów potrzebne do celowanego sprzątania. Nie usuwaj
+produkcji ani nie nadpisuj manifestów w celu ponowienia — sprawdź przyczynę.
+Kopie bazy zawierają prywatne dane, hasła aplikacji w postaci skrótów i sesje;
+pozostają w ignorowanym przez Git `docker-data`.
+
+Przy późniejszym uruchamianiu zachowaj oba pliki Compose:
+
+```powershell
+$stagingCopy = Get-Content -Raw -LiteralPath C:\PhotoLocal-staging\docker-data\staging-copy.json | ConvertFrom-Json
+docker compose -p photolocal-staging --project-directory C:\PhotoLocal-staging --env-file C:\PhotoLocal-staging\.env.docker -f C:\PhotoLocal-staging\compose.yaml -f $stagingCopy.composeFile up -d --no-build --pull never --wait photolocal
+```
+
+Powrót do wcześniejszej pustej bazy stagingu polega na uruchomieniu tej samej komendy
+bez drugiego `-f $stagingCopy.composeFile`. Publiczna produkcja pozostaje osobną
+aplikacją. Baza stanowi spójną migawkę z czasu backupu; zdalne zdjęcia mogą w tym czasie
+zmieniać się w produkcji. Końcowe przełączenie wymaga świeżej kopii i uzgodnionego
+momentu zatrzymania zapisów oraz osobnego sprawdzenia autostartu po restarcie Windowsa.
+
+Gdy raport wskazuje `STAGING_COPY_FILES_MISSING`, sprawdź istniejącą próbę poleceniem
+`node scripts/diagnose-staging-copy.mjs --run-directory <katalog-próby> --windows-share <UNC-udziału>`.
+Nie powstaje nowa kopia bazy ani konfiguracja udziału. Helper ponawia audyt tylko do
+odczytu z `--details` i porównuje nieudane ścieżki z ich odpowiednikami Windows.
+Prefiks dysku sieciowego zastępuje podanym UNC; używa bieżących poświadczeń sesji
+Windows, które mogą różnić się od konta zapisanego w wolumenie Dockera.
+
+Stałe przyczyny rozróżniają m.in. `ENOENT`, `EACCES`, `EMPTY_FILE`, `OUTSIDE_ROOT`
+i `MOUNT_UNAVAILABLE`. Maksymalnie 50 szczegółów oraz wyniki porównania trafiają do
+nowego `diagnosis-*.json` w katalogu próby. Konsola grupuje je według projektu
+i przyczyn, pokazując przykładowe ścieżki; raporty zawierają prywatne nazwy folderów
+i zdjęć, ale nie dane logowania. Natywny odczyt Windows ma osobny limit 60 sekund;
+przekroczenie daje `WINDOWS_CHECK_TIMEOUT`, a nie informację o braku plików.
+
+Jeśli bieżąca sesja Windows nie widzi nawet katalogów kontrolnych dostępnych
+w Dockerze, jej błędy nie potwierdzają braku plików. Użyj
+`node scripts/diagnose-staging-copy.mjs --run-directory <katalog-próby> --locate`.
+Ten wariant korzysta wyłącznie z zachowanego wolumenu CIFS. Dla nieudanych ścieżek
+pokazuje najgłębszy dostępny katalog, pierwszy brakujący segment oraz rzeczywiste
+podobne nazwy. Rozpoznaje podobieństwa wielkości liter, polskich znaków i odstępów;
+sugestie nie są automatycznie stosowane. Sprawdza maksymalnie 64 segmenty ścieżki,
+2000 wpisów katalogu i 12 podobnych nazw, bez rekurencyjnego przeszukiwania udziału.
+Raport zachowuje pełne liczniki, a szczegóły ogranicza do 48 KiB.
+
+### Podgląd istniejącej kopii z raportem braków
+
+Do obejrzenia projektów i dostępnych zdjęć można uruchomić osobny tryb podglądu:
+`node scripts/start-staging-preview.mjs --run-directory <katalog-próby>`.
+Nie wykonuje kolejnego backupu ani napraw ścieżek. Sprawdza świeży audyt przez
+Docker, zgodność wszystkich pięciu liczników z zapisaną migawką oraz scaloną
+konfigurację Compose. Wymaga uwierzytelniania, portu `127.0.0.1:4874`, osobnej bazy
+stagingu i montowania NAS oraz starych plików lokalnych tylko do odczytu.
+
+`STAGING_PREVIEW_RUNNING` oznacza uruchomiony podgląd, także wtedy, gdy część
+folderów lub próbek zdjęć jest niedostępna. Raport zawiera te braki i lokalizacje
+rozbieżności; nie jest potwierdzeniem pełnej dostępności zdjęć ani gotowości
+produkcji. Samo sprawdzenie obejmuje próbki, a nie każdy plik z bazy. Baza podglądu
+pozostaje zapisywalna dla działania aplikacji, a produkcyjne pliki są tylko do
+odczytu. Zapisana konfiguracja podglądu jest oddzielona od manifestu pełnej migracji.
+Ponowienie wymaga tej samej kopii i nadal zgodnych liczników; dodanie w podglądzie
+nowych projektów lub zdjęć zmieni liczniki i wymaga osobnej decyzji o dalszej pracy.
+
+Podstawa kopii online: [SQLite Online Backup API](https://www.sqlite.org/backup.html)
+i [better-sqlite3 backup](https://github.com/WiseLibs/better-sqlite3/blob/master/docs/api.md#backupdestination-options---promise).
+Przy scalaniu plików Compose [montowania są łączone według punktu docelowego](https://docs.docker.com/reference/compose-file/merge/#unique-resources),
+a [wolumen external](https://docs.docker.com/reference/compose-file/volumes/#external)
+pozostaje zarządzany osobno.
+
+Źródła: [wolumen CIFS](https://docs.docker.com/engine/storage/volumes/#create-cifssamba-volumes),
+[Compose ze stdin](https://docs.docker.com/reference/cli/docker/compose/),
+[interpolacja Compose](https://docs.docker.com/reference/compose-file/interpolation/).
+
+### Windows: automatyczne logowanie i blokada konsoli
+
+Docker Desktop ma opcję startu po zalogowaniu użytkownika. Automatyczne logowanie
+tego samego konta Windows pozwala uruchomić istniejącą konfigurację Dockera po
+starcie komputera bez ręcznego wejścia przez RDP. Wymagany jest włączony start
+Dockera przy logowaniu; sam helper tego ustawienia nie zmienia.
+[Ustawienia Docker Desktop](https://docs.docker.com/desktop/settings-and-maintenance/settings/#general).
+
+Na serwerze otwórz **64-bitowy Windows PowerShell jako administrator**, na tym samym
+koncie Windows, które obecnie uruchamia Docker Desktop. Wykonaj:
+
+```powershell
+git -C C:\PhotoLocal-staging pull --ff-only
+if ($LASTEXITCODE -eq 0) {
+    powershell -NoProfile -ExecutionPolicy Bypass -File C:\PhotoLocal-staging\scripts\prepare-windows-autologon.ps1
+}
+```
+
+Helper sprawdza właściciela procesów Dockera i wpis startu przy logowaniu, pobiera
+oficjalny Microsoft Autologon oraz weryfikuje podpis Microsoft. W jego oknie sprawdź
+`User` i `Domain` względem konta wypisanego w PowerShell, wpisz **hasło Windows**
+(nie PIN, hasło Google ani SMB), kliknij **Enable**, a po komunikacie zamknij okno.
+Hasło wpisuje się wyłącznie w narzędziu Microsoft. Windows przechowuje je jako
+sekret LSA; administrator komputera może je odzyskać. Narzędzie Autologon nie
+sprawdza poprawności wpisanego hasła.
+[Microsoft Autologon](https://learn.microsoft.com/en-us/sysinternals/downloads/autologon).
+
+Przed otwarciem tego okna helper tworzy zadanie `PhotoLocal Docker Console Lock`,
+ograniczone do tego konta i zwykłych uprawnień. Przy logowaniu żąda blokady wyłącznie
+w sesji fizycznej konsoli; sesje RDP pomija. Próby są ograniczone do 15 sprawdzeń
+z dwusekundowymi przerwami. Całe zadanie ma limit pięciu minut, obejmujący również
+uruchomienie PowerShell i ładowanie funkcji Windows; nie oznacza to opóźnienia startu.
+Istniejące zadanie o zgodnej konfiguracji jest zachowane przy ponowieniu. Znany starszy
+limit jednej minuty jest aktualizowany po sprawdzeniu pozostałej definicji; inne
+różnice dają `LOCK_TASK_CONFLICT`. Zachowaj katalog stagingu i skrypt blokady.
+
+`AUTOLOGON_CONFIGURED_REBOOT_NOT_TESTED` potwierdza zapis flagi automatycznego
+logowania właściwego konta i konfigurację zadania. Nie potwierdza hasła, startu
+Dockera po restarcie ani faktycznej blokady ekranu. Również `LOCK_REQUEST_ACCEPTED`
+oznacza tylko przyjęcie asynchronicznego żądania przez Windows.
+[Kontrakt LockWorkStation](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-lockworkstation).
+
+**Na tym etapie nie restartuj Windowsa.** Próba restartu wymaga osobnego momentu
+przerwy i sprawdzenia dostępności aplikacji przed wejściem przez RDP. Zachowaj stare
+zadanie `PhotoLocal Autostart` do późniejszego przełączenia produkcji; ten helper
+nie zmienia uruchomionej Romki, portów ani kontenerów.
+
+Wycofanie: otwórz oficjalny `Autologon64.exe` z lokalizacji `AutologonTool` podanej
+w raporcie i wybierz **Disable**, następnie zamknij okno. Dopiero po wyłączeniu
+automatycznego logowania można usunąć nasze zadanie. Poniższy blok sprawdza flagę
+oraz zgodność zadania przed usunięciem wyłącznie `PhotoLocal Docker Console Lock`:
+
+```powershell
+. C:\PhotoLocal-staging\scripts\prepare-windows-autologon.ps1
+$romekState = Get-PhotoLocalAutologonState
+if ([string]$romekState.Enabled -eq '1') { throw 'Najpierw wybierz Disable w Microsoft Autologon.' }
+$romekSid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+$romekSpec = New-PhotoLocalConsoleLockSpec -Root 'C:\PhotoLocal-staging' -Sid $romekSid
+$romekTask = Get-ScheduledTask -TaskPath '\' -TaskName $romekSpec.Name -ErrorAction SilentlyContinue
+if ($romekTask) {
+    if (-not (Test-PhotoLocalConsoleLockTask -Task $romekTask -Spec $romekSpec -AllowLegacyTimeLimit)) {
+        throw 'LOCK_TASK_CONFLICT'
+    }
+    Unregister-ScheduledTask -InputObject $romekTask -Confirm:$false
+}
+```
+
+### Aktualizacja blokady po przekroczeniu limitu przy starcie Windows
+
+Zdarzenie Harmonogramu 329 potwierdza przekroczenie limitu czasu. Starsze zadanie
+mogło zostać zakończone po minucie podczas startu systemu, mimo poprawnej próby
+ręcznej przez RDP. Ten wynik nie wskazuje jeszcze, która część startu była opóźniona.
+Limit pięciu minut daje czas na uruchomienie procesu; próby blokowania nadal zaczynają
+się od razu. [ExecutionTimeLimit](https://learn.microsoft.com/en-us/windows/win32/taskschd/tasksettings-executiontimelimit).
+
+Na tym samym koncie właściciela Dockera, w PowerShell jako administrator:
+
+```powershell
+git -C C:\PhotoLocal-staging pull --ff-only
+if ($LASTEXITCODE -eq 0) {
+    powershell -NoProfile -ExecutionPolicy Bypass -File C:\PhotoLocal-staging\scripts\prepare-windows-autologon.ps1 -RepairConsoleLock
+}
+```
+
+Ten tryb aktualizuje tylko zweryfikowane, istniejące zadanie. Zachowuje pozostałe
+ustawienia i odmawia zmiany starszego zadania, gdy jest uruchomione lub oczekuje
+w kolejce. Nie otwiera Autologon, nie pyta o hasło, nie zmienia logowania i nie
+restartuje żadnych usług. `CONSOLE_LOCK_UPDATED_REBOOT_NOT_TESTED` oznacza zapisaną
+konfigurację; blokada po starcie Windows nadal wymaga sprawdzenia.
+
+Bezpośrednie uruchomienia skryptu blokady zapisują osobne pliki JSONL w
+`%LOCALAPPDATA%\PhotoLocal\console-lock`. Etapy obejmują start, sprawdzenie sesji,
+ładowanie funkcji Windows, żądanie blokady i wynik. Zapisy zawierają czas, numery
+sesji i stałe statusy, bez haseł czy nazw kont. Kolejne wejście przez RDP nie
+nadpisuje zapisu z bootowania. Pozostaje maksymalnie 20 własnych plików; problem
+z zapisem diagnostyki nie zatrzymuje blokowania. `LOCK_REQUEST_ACCEPTED` nadal
+oznacza przyjęcie żądania, a nie niezależny pomiar stanu ekranu.
+
+### Przygotowanie produkcyjnego udziału i kontrola starej instalacji
+
+Po sprawdzeniu stagingu przygotuj **osobny** wolumen NAS z prawem zapisu. Stagingowy
+wolumen ma `ro` również w opcjach CIFS; zmiana samego `read_only` w Compose nie
+wystarcza. Na serwerze, po pobraniu aktualnej wersji tej gałęzi:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File C:\PhotoLocal-staging\scripts\inspect-production-before-cutover.ps1 -ProductionRoot C:\PhotoLocal
+```
+
+`READ_ONLY_INVENTORY` pokazuje nazwy rozpoznanych ustawień z `.env`, domyślne
+lokalizacje, proces nasłuchujący, jego potomków i metadane starego autostartu.
+Nie pokazuje wartości konfiguracji ani pełnych argumentów procesów. Ustawienia
+nadpisane w środowisku działającego procesu, rzeczywiste niestandardowe ścieżki
+i aktywne operacje aplikacji wymagają osobnego sprawdzenia. Raport nie potwierdza
+gotowości ani tożsamości procesu wystarczającej do jego zatrzymania.
+
+Następnie użyj własnego serwera, udziału, podfolderu i konta SMB:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File C:\PhotoLocal-staging\scripts\connect-production-storage.ps1 -Server 192.0.2.70 -Share Photos -Subdirectory Projects -UserName photoBot -OutputDirectory C:\PhotoLocal-staging\docker-data
+```
+
+Hasło wpisz lokalnie w oknie poświadczeń. Helper przesyła je przez stdin i nie
+wypisuje surowych logów Dockera. Po powodzeniu hasło pozostaje w opcjach nowego
+wolumenu Dockera; nie publikuj pełnego `docker inspect` ani konfiguracji Compose.
+Test odczytuje próbkę zdjęcia oraz zapisuje, odczytuje i usuwa dane wyłącznie we
+własnym nowym folderze testowym. Sukces wymaga zakończenia testu i jego sprzątania.
+
+Oczekiwany wynik to `PRODUCTION_STORAGE_READY` / `Cleanup: CLEAN`. Powstaje
+`docker-data\production-storage.json`, zawierający wyłącznie `version: 2`,
+`accessMode: rw`, nazwę wolumenu `photolocal-production-nas-...`, punkt `/nas`
+i podfolder. Stary `storage.json` oraz stagingowy udział pozostają zachowane.
+Istniejący manifest blokuje ponowienie; nie usuwaj go, aby wymusić kolejny test.
+Wynik `Cleanup: REQUIRED` wymaga sprawdzenia wskazanego testu i zasobów przed
+kontynuacją, bez zbiorczego czyszczenia Dockera.
+
+Te komendy nie uruchamiają produkcyjnego kontenera i nie przełączają portów.
+Do końcowego przełączenia potrzebna jest świeża kopia po zakończeniu operacji
+starej aplikacji, zachowanie konfiguracji integracji oraz weryfikacja znanych
+braków zdjęć. Baza zmieniona podczas testowania stagingu nie zastępuje aktualnej
+bazy produkcji.
+
+### Prywatna konfiguracja końcowego uruchomienia
+
+Po otrzymaniu raportu starej instalacji i `PRODUCTION_STORAGE_READY` przygotuj
+konfigurację przyszłej produkcji. Poniższe wartości NAS i domeny są przykładami;
+podaj używany dotąd prefiks Windows oraz docelowy publiczny adres Romki.
+
+```powershell
+git -C C:\PhotoLocal-staging pull --ff-only
+if ($LASTEXITCODE -eq 0) {
+    powershell -NoProfile -ExecutionPolicy Bypass -File C:\PhotoLocal-staging\scripts\prepare-production-deployment.ps1 -ProductionRoot C:\PhotoLocal -StagingRoot C:\PhotoLocal-staging -NetworkPrefix 'Z:\Projects' -PublicUrl 'https://photos.example.org'
+}
+```
+
+Uruchom na koncie właściciela Docker Desktop. Wrapper tworzy nowy katalog
+`docker-data\production-<id>` z chronionymi uprawnieniami konta, SYSTEM i lokalnych
+administratorów. Ustawienia integracji przekazuje prywatnie przez stdin. Nie
+wypisuje haseł, kluczy API ani surowego wyniku konfiguracji Compose.
+
+Helper odczytuje `.env` przez parser z produkcyjnej instalacji, bez uruchamiania
+kodu aplikacji. Sprawdza zgodność znanych ustawień z zakresem Process/User/Machine;
+konflikt daje `SOURCE_ENV_OVERRIDE_REVIEW_REQUIRED` z nazwami kluczy. Nie odczytuje
+środowiska już działającego procesu. Względną ścieżkę bazy rozwiązuje względem
+`ProductionRoot\backend`, zgodnie ze sprawdzonym natywnym autostartem. Otwiera bazę
+tylko do odczytu i sprawdza pięć tabel/liczników; odczyt WAL może utrzymywać indeks
+pamięci współdzielonej SQLite. To nie jest końcowy snapshot.
+
+Inwentaryzacja liczy pełne lokalne drzewa zdjęć i pobrań, w tym ukryte manifesty,
+bez wchodzenia w dowiązania i junctiony. Zapas miejsca obejmuje ich sumę, trzy
+rozmiary bazy wraz z WAL/journal oraz 1 GiB na pracę. Wynik opisuje bieżący rozmiar;
+przed końcową kopią wymaga ponownego sprawdzenia po zakończeniu zapisów.
+
+Do nowego prywatnego katalogu trafiają kopie Google web client/token ze stagingu.
+Sprawdzane są zgodne identyfikator i sekret klienta, refresh token, zakresy czatów
+oraz obecność publicznego callbacku w pobranym JSON klienta. Sprawdzenie nie wykonuje
+logowania ani żądań do Google. `GOOGLE_CALLBACK_NOT_LISTED` oznacza, że lokalny JSON
+nie wymienia docelowego callbacku; po sprawdzeniu ustawień tego samego klienta w
+Google Cloud można pobrać aktualny JSON. Nie publikuj jego zawartości.
+
+`PRODUCTION_CONFIG_PREPARED` podaje `runDirectory`, faktyczną ścieżkę bazy źródłowej,
+liczniki, rozmiary plików oraz miejsce na dysku. W katalogu znajdują się prywatny
+`compose.production.json`, mapowanie i `production-preparation.json`. Konfiguracja
+ma osobny projekt `photolocal-production`, przypięty identyfikator istniejącego
+obrazu, port `0.0.0.0:4873`, uwierzytelnianie i publiczny callback. Dane lokalne
+wskazują nowe katalogi, a NAS osobny zweryfikowany wolumen RW. Walidacja używa
+wyłącznie `docker image inspect` z polem ID oraz `docker compose config`.
+
+**Na tym etapie baza i zdjęcia nie są jeszcze skopiowane, a kontener produkcyjny
+nie jest uruchomiony.** `FINAL_SNAPSHOT_REQUIRED` oznacza konieczność końcowej kopii
+po zakończeniu operacji starej aplikacji. Nie uruchamiaj samego Compose na pustych
+katalogach danych. Zachowaj raport z `runDirectory` do następnego kroku; nie wklejaj
+prywatnej konfiguracji ani plików `wrapper.*.log`.
+
+### Końcowe przełączenie na porcie 4873
+
+Po przygotowaniu konfiguracji zakończ pobieranie, import i klasyfikację oraz poproś
+użytkowników o przerwę w Romku i podglądzie stagingowym. `-WorkStopped` oznacza, że
+operator potwierdza ten stan. Stara wersja nie udostępnia globalnego mechanizmu
+opróżnienia kolejki; brak połączeń HTTP sam w sobie nie potwierdza końca operacji.
+Skrypt dodatkowo odmawia zatrzymania przy aktywnych procesach potomnych pobierania.
+
+Uruchom w Windows PowerShell na koncie właściciela Docker Desktop. Podstaw dokładny
+`runDirectory` z wyniku `PRODUCTION_CONFIG_PREPARED`, bez tworzenia nowego folderu:
+
+```powershell
+git -C C:\PhotoLocal-staging pull --ff-only
+if ($LASTEXITCODE -eq 0) {
+    powershell -NoProfile -ExecutionPolicy Bypass -File C:\PhotoLocal-staging\scripts\switch-production-to-docker.ps1 -RunDirectory 'C:\PhotoLocal-staging\docker-data\production-TWOJ_IDENTYFIKATOR' -WorkStopped
+}
+```
+
+Kontrola przed przerwą ponownie sprawdza konfigurację, obraz, wolumen i wolne miejsce.
+Tworzy aktualny snapshot SQLite, migruje jego ścieżki w izolowanym kontenerze i audytuje
+go z oryginalnymi lokalnymi plikami oraz NAS zamontowanymi tylko do odczytu. Dopuszcza
+wyłącznie konkretne braki `ENOENT` na NAS zapisane wcześniej w sprawdzonym
+`staging-preview.json` i jego raporcie diagnozy. Inne błędy dostępu lub nowe braki
+zatrzymują przełączenie. Historyczny raport opisuje dostęp z Dockera; nie dowodzi,
+że te same pliki były niedostępne dla natywnej aplikacji Windows.
+
+Następnie skrypt zatrzymuje dokładnie zweryfikowany kontener stagingowy i wyłącza
+zadanie `PhotoLocal Autostart`. Tożsamość starego Node potwierdza na podstawie
+nasłuchu, właściciela, czasu utworzenia, pliku PID, logu i definicji autostartu.
+Zatrzymuje tylko tę instancję. Stara wersja nie ma obsługi łagodnego zamykania;
+dlatego wcześniejsze zakończenie operacji przez użytkownika jest wymagane.
+
+Po zatrzymaniu powstaje **nowy** snapshot aktualnej bazy oraz osobne kopie pełnych
+katalogów pobrań i lokalnych zdjęć. Kopiowanie uwzględnia ukryte manifesty i puste
+katalogi, sprawdza zawartość SHA256 i brak zmian źródła. Nie nadpisuje istniejących
+plików ani nie korzysta z bazy zmienionej podczas testów stagingu. Kolejny audyt
+sprawdza pięć liczników i odrzuca nowe braki. Okno pokazuje postęp; pozostaw je otwarte
+do końca. Kopia około 9 GB i jej weryfikacja mogą potrwać kilka lub kilkanaście minut,
+zależnie od dysku. Limit całego procesu końcowej kopii wynosi 75 minut.
+
+Po pozytywnej weryfikacji uruchamiany jest wyłącznie projekt
+`photolocal-production`, z przypiętym istniejącym obrazem i portem `0.0.0.0:4873`.
+Kontrola końcowa wymaga zdrowego kontenera, zgodnych liczników świeżego snapshotu,
+lokalnego i publicznego `/health` oraz identycznego HTML aplikacji pod oboma adresami.
+`PRODUCTION_RUNNING` oznacza przejście tych kontroli. Następnie sprawdź w przeglądarce
+publiczny adres: logowanie do Romka, listę zleceń, kilka zdjęć i dostęp do czatów Google.
+Znane niedostępne referencje NAS pozostają odnotowane w `nasGaps`.
+
+Obsługa błędu zależy od etapu:
+
+- `CUTOVER_NOT_STARTED`: stara produkcja nie została zatrzymana. Odczytaj `failureCode`;
+  podgląd stagingowy mógł już zostać zatrzymany, jeśli błąd nastąpił przy kontroli Node.
+- `CUTOVER_FAILED_NATIVE_RESTORED`: próba zakończyła się przed uruchomieniem nowej
+  aplikacji; oryginalny autostart i proces zostały przywrócone. Częściowe kopie pozostają.
+- `NATIVE_RECOVERY_NEEDS_ATTENTION`: automatyczne przywrócenie nie zostało potwierdzone;
+  potrzebna jest diagnostyka wskazanego stanu, bez zbiorczego zabijania procesów.
+- `PRODUCTION_NEEDS_ATTENTION`: nowa aplikacja mogła przyjąć zapisy. **Nie uruchamiaj
+  starej bazy i nie usuwaj danych kontenera.** Najpierw sprawdź nowy kontener i raport.
+
+Prywatny `production-start-attempted.json` jest zapisywany przed wywołaniem Compose.
+Od tego momentu skrypt nie przywraca automatycznie starej bazy, nawet jeśli odpowiedź
+Dockera była niepewna. Próba z tym samym katalogiem nie jest powtarzana. Zachowaj
+`failureCode` oraz `runDirectory`; po ustaleniu przyczyny przygotuj nowy katalog
+zamiast usuwać znaczniki. Przy zamknięciu PowerShell lub restarcie hosta odzyskanie
+może wymagać osobnego uruchomienia funkcji recovery po sprawdzeniu etapu.
+
+Pełne wyniki procesów, kopia definicji starego zadania i szczegóły audytu pozostają
+w prywatnym katalogu. Nie publikuj plików `*-child.json`, `docker-call-*.json`, tokenów
+ani Compose. Przełączenie nie zmienia autologowania Windows, blokady konsoli,
+routera, proxy ani innych aplikacji Docker i nie wymaga restartu komputera.
+
+### Poprawka adresu Ollamy po migracji
+
+Klasyfikacja uruchamiana z panelu musi korzystać z `OLLAMA_URL`, podobnie jak
+diagnostyka modelu. Starszy klasyfikator używał domyślnie `localhost:11434`, nawet
+gdy konfiguracja produkcji poprawnie wskazywała `host.docker.internal:11434`.
+Powodowało to pozostawienie paczek w `WAITING_FOR_CLASSIFICATION` z komunikatem
+`Blad odpowiedzi LLM - ponow klasyfikacje`. Nie jest to wynik sprawdzania duplikatów.
+Poprawka zachowuje pierwszeństwo jawnego argumentu `ollamaUrl`, potem uwzględnia
+niepustą zmienną `OLLAMA_URL`, a na końcu dotychczasowy domyślny adres lokalny.
+
+Po potwierdzeniu z kontenera odpowiedzi HTTP 200 z `/api/tags` i obecności modelu
+`qwen2.5vl:3b` można zaktualizować sam obraz. Zakończ bieżące operacje aplikacji
+przed wymianą kontenera. Budowanie odbywa się przy działającej produkcji; krótka
+przerwa przypada na końcowe `up`.
+
+Pobierz poprawioną gałąź i zbuduj obraz pod nowym tagiem. Odczytaj jego dokładne ID
+przez `docker image inspect --format '{{.Id}}' <tag>`. W istniejącym prywatnym
+`runDirectory` utwórz nowy plik `compose.ollama-fix-<id>.json` zawierający tylko:
+
+```json
+{"services":{"photolocal":{"image":"sha256:ID_NOWEGO_OBRAZU"}}}
+```
+
+Zachowaj bazowy `compose.production.json` i dołącz plik poprawki jako drugi `-f`.
+Nie używaj repozytoryjnego `compose.yaml`, który opisuje staging. Ten wariant
+aktualizacji zachowuje obecne katalogi bazy, pobrań, Google, zdjęć oraz wolumen NAS.
+Nie wykonuj ponownie migracji ani kopii z `C:\PhotoLocal`.
+
+```powershell
+$romekComposeArgs = @(
+    'compose', '-p', 'photolocal-production',
+    '--project-directory', $romekRun,
+    '--env-file', (Join-Path $romekRun 'empty.env'),
+    '-f', (Join-Path $romekRun 'compose.production.json'),
+    '-f', $romekOverride
+)
+docker @romekComposeArgs config --quiet
+if ($LASTEXITCODE -ne 0) { throw 'COMPOSE_INVALID' }
+docker @romekComposeArgs up --no-deps -d --no-build --pull never --wait --wait-timeout 120 photolocal
+if ($LASTEXITCODE -ne 0) { throw 'UPDATE_FAILED' }
+```
+
+Po uruchomieniu zdrowego kontenera użyj w istniejącym zleceniu **Weryfikuj Qwen**.
+Ponowi to klasyfikację oczekujących paczek. Sprawdź, czy zniknął błąd LLM i paczki
+trafiły do importu albo ręcznego review. Zachowaj nazwę pliku poprawki do kolejnych
+aktualizacji — wywołanie Compose tylko z plikiem bazowym wybierze poprzedni obraz.
+
+### Błąd Qwen kieruje paczkę do ręcznej weryfikacji
+
+Po wyczerpaniu prób klasyfikacji błąd odpowiedzi, timeout lub wyjątek klasyfikatora
+przenosi paczkę do `PENDING_REVIEW`, z opisem problemu i bez automatycznego
+przypisania do checklisty. Kolejne paczki są nadal przetwarzane. Również żądanie
+zwolnienia modelu przed ponowną próbą ma teraz limit czasu, maksymalnie pięć sekund.
+Paczki pozostające wcześniej w `WAITING_FOR_CLASSIFICATION` wymagają ponownego
+kliknięcia **Weryfikuj Qwen**; aktualizacja nie zmienia ich samoczynnie.
+
+Poniższy blok uruchom na serwerze w PowerShell. Buduje obraz przy działającej Romce,
+a następnie odtwarza wyłącznie jej kontener. Zakończ bieżące operacje aplikacji przed
+końcowym `up`. Blok odczytuje pełne nazwy obecnych plików Compose z etykiety kontenera,
+więc wcześniejszy, ucięty na ekranie adres `compose.ollama-fix-...` nie jest potrzebny.
+Zachowuje ich kolejność i dodaje wyłącznie nowe ID obrazu. Korzysta z aktualnej bazy
+i zdjęć produkcji; nie uruchamiaj ponownie migracji ani kopiowania starej bazy.
+
+```powershell
+& {
+    $ErrorActionPreference = 'Stop'
+    $romekRepo = 'C:\PhotoLocal-staging'
+    $romekRun = 'C:\PhotoLocal-staging\docker-data\production-938460e57d394e1bbe0c1371e4dd391e'
+    $romekContainer = 'photolocal-production-photolocal-1'
+    $romekMeta = docker inspect --format '{{.Image}}|{{index .Config.Labels `com.docker.compose.project`}}|{{index .Config.Labels `com.docker.compose.project.config_files`}}' $romekContainer
+    if ($LASTEXITCODE -ne 0) { throw 'CONTAINER_INSPECT_FAILED' }
+    $romekParts = $romekMeta.Trim() -split '\|', 3
+    if ($romekParts.Count -ne 3 -or $romekParts[0] -cnotmatch '^sha256:[0-9a-f]{64}$' -or $romekParts[1] -cne 'photolocal-production') { throw 'CONTAINER_IDENTITY_INVALID' }
+    $romekOldImage = $romekParts[0]
+    $romekFiles = @($romekParts[2].Split(',') | ForEach-Object { [IO.Path]::GetFullPath($_.Trim()) })
+    if ($romekFiles.Count -lt 1 -or $romekFiles[0] -ine (Join-Path $romekRun 'compose.production.json')) { throw 'COMPOSE_FILES_INVALID' }
+    $romekArgs = @('compose', '-p', 'photolocal-production', '--project-directory', $romekRun, '--env-file', (Join-Path $romekRun 'empty.env'))
+    foreach ($romekFile in $romekFiles) {
+        if ([IO.Path]::GetDirectoryName($romekFile) -ine $romekRun -or -not (Test-Path -LiteralPath $romekFile -PathType Leaf)) { throw 'COMPOSE_FILES_INVALID' }
+        $romekArgs += @('-f', $romekFile)
+    }
+    $romekConfiguredImages = @(docker @romekArgs config --images)
+    if ($LASTEXITCODE -ne 0 -or $romekConfiguredImages.Count -ne 1 -or $romekConfiguredImages[0].Trim() -cne $romekOldImage) { throw 'LIVE_IMAGE_CONFIG_MISMATCH' }
+    git -C $romekRepo pull --ff-only
+    if ($LASTEXITCODE -ne 0) { throw 'GIT_PULL_FAILED' }
+    $romekCommit = git -C $romekRepo rev-parse --short HEAD
+    if ($LASTEXITCODE -ne 0 -or $romekCommit -cnotmatch '^[0-9a-f]{7,40}$') { throw 'GIT_VERSION_FAILED' }
+    $romekTag = 'photolocal:qwen-review-' + $romekCommit.Trim()
+    docker build --target runtime -t $romekTag $romekRepo
+    if ($LASTEXITCODE -ne 0) { throw 'IMAGE_BUILD_FAILED' }
+    $romekImage = docker image inspect --format '{{.Id}}' $romekTag
+    if ($LASTEXITCODE -ne 0 -or $romekImage -cnotmatch '^sha256:[0-9a-f]{64}$') { throw 'IMAGE_INSPECT_FAILED' }
+    $romekOverride = Join-Path $romekRun ('compose.qwen-review-' + [guid]::NewGuid().ToString('N') + '.json')
+    if (Test-Path -LiteralPath $romekOverride) { throw 'OVERRIDE_ALREADY_EXISTS' }
+    $romekJson = @{services=@{photolocal=@{image=$romekImage.Trim()}}} | ConvertTo-Json -Depth 4
+    [IO.File]::WriteAllText($romekOverride, $romekJson, (New-Object Text.UTF8Encoding($false)))
+    $romekArgs += @('-f', $romekOverride)
+    docker @romekArgs config --quiet
+    if ($LASTEXITCODE -ne 0) { throw 'COMPOSE_INVALID' }
+    $romekCurrentImage = docker inspect --format '{{.Image}}' $romekContainer
+    if ($LASTEXITCODE -ne 0 -or $romekCurrentImage.Trim() -cne $romekOldImage) { throw 'LIVE_CONTAINER_CHANGED' }
+    docker @romekArgs up --no-deps -d --no-build --pull never --wait --wait-timeout 120 photolocal
+    if ($LASTEXITCODE -ne 0) { throw 'UPDATE_FAILED' }
+    $romekResult = docker inspect --format '{{.Image}}|{{.State.Health.Status}}' $romekContainer
+    if ($LASTEXITCODE -ne 0 -or $romekResult.Trim() -cne ($romekImage.Trim() + '|healthy')) { throw 'UPDATE_VERIFICATION_FAILED' }
+    [pscustomobject]@{Status='QWEN_REVIEW_FIX_DEPLOYED';Commit=$romekCommit.Trim();Override=$romekOverride} | Format-List
+}
+```
+
+Po komunikacie `QWEN_REVIEW_FIX_DEPLOYED` kliknij **Weryfikuj Qwen** przy oczekujących
+paczkach. Poprawna klasyfikacja działa jak dotychczas, a nieudana udostępnia paczkę
+do ręcznego przypisania zdjęć. Zachowaj wszystkie pliki Compose wymienione przez
+kontener; kolejne aktualizacje powinny ponownie odczytywać tę listę.
