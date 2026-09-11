@@ -1,3 +1,4 @@
+import { get } from 'node:http';
 import { chromium, type Browser, type Page } from 'playwright-core';
 import { GOOGLE_CHAT_INVITES_URL, mapRawInviteCandidates } from './chat-invites.js';
 import { inspectBrowserInviteDom, clickBrowserPreviewJoin } from './browser-invite-dom.js';
@@ -5,7 +6,40 @@ import { BrowserInviteError, type BrowserInviteAdapter, type BrowserInviteTarget
 
 const unavailable = () => new BrowserInviteError('BROWSER_UNAVAILABLE', 'Przeglądarka Google jest niedostępna. Spróbuj ponownie za chwilę.', 502);
 
-export async function resolvePrivateCdpWebSocket(cdpUrl: string, request: typeof fetch = fetch): Promise<string> {
+type CdpVersionRequest = (url: string, options: RequestInit) => Promise<Pick<Response, 'ok' | 'text'>>;
+
+// Node's fetch ignores Host overrides. Chromium requires localhost here even though
+// the TCP connection goes to the private Docker bridge, so use the HTTP client.
+const requestCdpVersion: CdpVersionRequest = (url, options) => new Promise((resolve, reject) => {
+  const request = get(url, {
+    headers: { Host: 'localhost' }, signal: options.signal ?? undefined, agent: false,
+    maxHeaderSize: 16_384,
+  }, (response) => {
+    response.on('error', reject);
+    if (!response.statusCode || response.statusCode < 200 || response.statusCode >= 300) {
+      response.destroy();
+      reject(unavailable());
+      return;
+    }
+    const chunks: Buffer[] = [];
+    let bytes = 0;
+    response.on('data', (chunk: Buffer) => {
+      bytes += chunk.length;
+      if (bytes > 16_384) {
+        request.destroy(unavailable());
+        return;
+      }
+      chunks.push(chunk);
+    });
+    response.on('end', () => {
+      const body = Buffer.concat(chunks).toString('utf8');
+      resolve({ ok: true, text: async () => body });
+    });
+  });
+  request.on('error', reject);
+});
+
+export async function resolvePrivateCdpWebSocket(cdpUrl: string, request: CdpVersionRequest = requestCdpVersion): Promise<string> {
   try {
     const configured = new URL(cdpUrl);
     if (configured.protocol !== 'http:' || configured.username || configured.password || configured.pathname !== '/' || configured.search || configured.hash) throw unavailable();
@@ -27,12 +61,12 @@ export async function resolvePrivateCdpWebSocket(cdpUrl: string, request: typeof
 
 export class DockerBrowserInviteAdapter implements BrowserInviteAdapter {
   private readonly connect: (url: string) => Promise<Browser>;
-  private readonly request: typeof fetch;
+  private readonly request: CdpVersionRequest;
   constructor(private readonly cdpUrl: string, options: {
-    connect?: (url: string) => Promise<Browser>; fetch?: typeof fetch;
+    connect?: (url: string) => Promise<Browser>; fetch?: CdpVersionRequest;
   } = {}) {
     this.connect = options.connect ?? ((url) => chromium.connectOverCDP(url, { timeout: 10_000 }));
-    this.request = options.fetch ?? fetch;
+    this.request = options.fetch ?? requestCdpVersion;
   }
 
   private async withPage<T>(operation: (page: Page) => Promise<T>): Promise<T> {
