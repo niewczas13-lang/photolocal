@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { createRequire } from 'node:module';
 import { join, resolve, sep } from 'node:path';
@@ -15,9 +15,11 @@ const scopes = { process: {}, user: {}, machine: {} };
 const sourceCounts = { projects: 32, photos: 100, map_note_photos: 0, chat_photo_batches: 20, chat_photo_files: 30 };
 
 async function fixture(t) {
-  const root = await mkdtemp(join(tmpdir(), 'photolocal production prep '));
+  // Windows CI may supply TEMP as an 8.3 alias; production requires canonical paths.
+  const tempRoot = await realpath(tmpdir());
+  const root = await mkdtemp(join(tempRoot, 'photolocal production prep '));
   t.after(async () => {
-    assert.ok(resolve(root).startsWith(`${resolve(tmpdir())}${sep}`));
+    assert.ok(resolve(root).startsWith(`${tempRoot}${sep}`));
     await rm(root, { recursive: true, force: true });
   });
   return root;

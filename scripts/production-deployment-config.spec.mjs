@@ -196,11 +196,12 @@ test('actual Docker Compose normalization preserves private literals without con
   const configuration = { ...input, sourceEnvironment: { ADRESY_APP_API_KEY: privateValue, OLLAMA_URL: 'http://localhost:11434' } };
   const plan = buildProductionConfiguration(configuration);
   const result = spawnSync('docker', ['compose', '--project-directory', directory, '-p', 'photolocal-production', '-f', '-', 'config', '--format', 'json'], {
-    input: JSON.stringify(plan.compose), encoding: 'utf8', timeout: 20_000, windowsHide: true,
+    // Hosted Windows runners can spend over 20 seconds starting a native tool for the first time.
+    input: JSON.stringify(plan.compose), encoding: 'utf8', timeout: process.platform === 'win32' ? 60_000 : 20_000, windowsHide: true,
     env: { ...process.env, DOCKER_HOST: 'tcp://127.0.0.1:1', DOCKER_CONTEXT: '', NOT_AN_ENV: 'must-not-expand' },
   });
   if (result.error?.code === 'ENOENT') return context.skip('Docker CLI unavailable');
-  assert.equal(result.status, 0, 'Compose accepts a standalone configuration without an engine');
+  assert.equal(result.status, 0, `Compose accepts a standalone configuration without an engine (error=${result.error?.code ?? 'none'}, signal=${result.signal ?? 'none'})`);
   const normalized = JSON.parse(result.stdout);
   const rendered = normalized.services.photolocal.environment.ADRESY_APP_API_KEY;
   assert.equal(rendered, privateValue.replaceAll('$', () => '$$'));

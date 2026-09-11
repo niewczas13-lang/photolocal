@@ -1,19 +1,21 @@
 import assert from 'node:assert/strict';
 import { constants } from 'node:fs';
-import { copyFile, link, lstat, mkdir, mkdtemp, readFile, readdir, rename, rm, symlink, writeFile } from 'node:fs/promises';
+import { copyFile, link, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import test from 'node:test';
 import { copyVerifiedLocalTree } from './production-file-copy.mjs';
 
 async function fixture(context) {
-  const root = await mkdtemp(join(tmpdir(), 'photolocal-file-copy-'));
+  // Windows CI may supply TEMP as an 8.3 alias; production requires canonical paths.
+  const tempRoot = await realpath(tmpdir());
+  const root = await mkdtemp(join(tempRoot, 'photolocal-file-copy-'));
   const source = join(root, 'source');
   const destination = join(root, 'destination');
   await mkdir(source);
   await mkdir(destination);
   context.after(async () => {
-    assert.equal(dirname(resolve(root)), resolve(tmpdir()));
+    assert.equal(dirname(resolve(root)), tempRoot);
     assert.match(root, /photolocal-file-copy-[^\\/]+$/);
     await rm(root, { recursive: true, force: true });
   });

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
@@ -24,7 +24,8 @@ function gap(path = '/nas/Projects/missing.jpg', reason = 'ENOENT') {
 }
 
 async function fixture(context) {
-  const tempRoot = resolve(tmpdir());
+  // Windows CI may supply TEMP as an 8.3 alias; production requires canonical paths.
+  const tempRoot = await realpath(tmpdir());
   const root = await mkdtemp(join(tempRoot, 'photolocal-finalize-'));
   context.after(async () => {
     assert.ok(resolve(root).startsWith(`${tempRoot}${sep}`));

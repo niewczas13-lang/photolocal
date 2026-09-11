@@ -11,11 +11,13 @@ const quote = value => `'${value.replaceAll("'", "''")}'`;
 const windows = { skip: process.platform !== 'win32' };
 
 function fixture(t) {
-  const root = mkdtempSync(join(tmpdir(), 'photolocal-switch-test-'));
+  // Windows CI may supply TEMP as an 8.3 alias; production requires canonical paths.
+  const tempRoot = realpathSync.native(tmpdir());
+  const root = mkdtempSync(join(tempRoot, 'photolocal-switch-test-'));
   const run = join(root, 'production-0123456789abcdef0123456789abcdef');
   mkdirSync(run);
   t.after(() => {
-    assert.equal(dirname(resolve(root)).toLowerCase(), resolve(tmpdir()).toLowerCase());
+    assert.equal(dirname(resolve(root)).toLowerCase(), tempRoot.toLowerCase());
     assert.match(basename(root), /^photolocal-switch-test-/);
     assert.equal(lstatSync(root).isSymbolicLink(), false);
     assert.equal(realpathSync(root).toLowerCase(), resolve(root).toLowerCase());

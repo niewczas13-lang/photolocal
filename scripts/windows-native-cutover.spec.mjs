@@ -11,7 +11,9 @@ const quote = value => `'${value.replaceAll("'", "''")}'`;
 const windows = { skip: process.platform !== 'win32' };
 
 function fixture(t) {
-  const root = mkdtempSync(join(tmpdir(), 'photolocal-native-cutover-'));
+  // Windows CI may supply TEMP as an 8.3 alias; production requires canonical paths.
+  const tempRoot = realpathSync.native(tmpdir());
+  const root = mkdtempSync(join(tempRoot, 'photolocal-native-cutover-'));
   const production = join(root, 'production');
   const staging = join(root, 'staging');
   for (const path of [join(production, 'backend', 'dist'), join(production, 'scripts'), join(production, 'logs'), join(staging, 'scripts'), join(staging, 'docker-data')]) mkdirSync(path, { recursive: true });
@@ -19,7 +21,7 @@ function fixture(t) {
   for (const directory of [production, staging]) writeFileSync(join(directory, 'scripts', 'start-autostart.ps1'), '# Fixture, never run');
   writeFileSync(join(production, 'node.exe'), 'Fixture, never run');
   t.after(() => {
-    assert.equal(dirname(resolve(root)).toLowerCase(), resolve(tmpdir()).toLowerCase());
+    assert.equal(dirname(resolve(root)).toLowerCase(), tempRoot.toLowerCase());
     assert.match(basename(root), /^photolocal-native-cutover-/);
     assert.equal(lstatSync(root).isSymbolicLink(), false);
     assert.equal(realpathSync(root).toLowerCase(), resolve(root).toLowerCase());
