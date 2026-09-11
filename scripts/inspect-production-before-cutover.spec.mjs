@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -10,9 +10,10 @@ const script = fileURLToPath(new URL('./inspect-production-before-cutover.ps1', 
 const literal = (value) => `'${value.replaceAll("'", "''")}'`;
 
 function inspect(t, { missingEnv = false, unreadableEnv = false, listenerId = 4242, overrides = '' } = {}) {
-  const root = mkdtempSync(join(tmpdir(), 'photolocal inventory '));
+  // PowerShell expands 8.3 TEMP aliases; mocks must use the same physical path.
+  const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'photolocal inventory ')));
   t.after(() => {
-    assert.ok(resolve(root).startsWith(`${resolve(tmpdir())}${sep}`));
+    assert.ok(resolve(root).startsWith(`${realpathSync.native(tmpdir())}${sep}`));
     rmSync(root, { recursive: true, force: true });
   });
   mkdirSync(join(root, 'backend', 'dist'), { recursive: true });
@@ -95,4 +96,30 @@ test('unreadable environment reports unknown overrides instead of absent overrid
   assert.equal(report.defaultLocations.database.configurationOverrideDeclared, null);
   assert.equal(report.defaultLocations.downloads.configurationOverrideDeclared, null);
   assert.equal(report.defaultLocations.localPhotos.configurationOverrideDeclared, false);
+});
+
+test('inventory fixtures also work when Windows TEMP uses an 8.3 short-path alias', { skip: process.platform !== 'win32' }, (t) => {
+  const temporaryRoot = realpathSync.native(tmpdir());
+  const root = realpathSync.native(mkdtempSync(join(temporaryRoot, 'photolocal inventory short-path ')));
+  t.after(() => {
+    assert.ok(resolve(root).startsWith(`${resolve(temporaryRoot)}${sep}`));
+    rmSync(root, { recursive: true, force: true });
+  });
+  const shortPath = spawnSync('powershell.exe', ['-NoProfile', '-Command',
+    `(New-Object -ComObject Scripting.FileSystemObject).GetFolder(${literal(root)}).ShortPath`],
+  { encoding: 'utf8', timeout: 30000, windowsHide: true });
+  assert.equal(shortPath.status, 0, shortPath.stderr);
+  const alias = shortPath.stdout.trim();
+  assert.equal(realpathSync.native(alias), root);
+  if (alias.toLowerCase() === root.toLowerCase()) {
+    t.skip('The temporary volume does not provide 8.3 aliases.');
+    return;
+  }
+  const result = spawnSync(process.execPath, ['--test',
+    '--test-name-pattern=^(inventory exposes|unreadable environment)', fileURLToPath(import.meta.url)], {
+    env: { ...process.env, NODE_TEST_CONTEXT: undefined, TMP: alias, TEMP: alias },
+    encoding: 'utf8', timeout: 60000, windowsHide: true,
+  });
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stdout, /tests 2(?:\r?\n|$)/, result.stdout + result.stderr);
 });

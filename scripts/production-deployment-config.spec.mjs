@@ -173,6 +173,18 @@ test('accepts normalized production config and rejects changes to its service or
   }
 });
 
+test('accepts Compose 2.38 omitting false create_host_path without accepting true or changing input', () => {
+  const normalized = normalizedFixture();
+  for (const mount of normalized.services.photolocal.volumes) {
+    if (mount.type === 'bind') delete mount.bind.create_host_path;
+  }
+  const before = structuredClone(normalized);
+  assert.doesNotThrow(() => verifyResolvedProductionConfiguration(normalized, input));
+  assert.deepEqual(normalized, before);
+  normalized.services.photolocal.volumes[0].bind.create_host_path = true;
+  assert.throws(() => verifyResolvedProductionConfiguration(normalized, input), { code: 'UNSAFE_PRODUCTION_CONFIGURATION' });
+});
+
 test('actual Docker Compose normalization preserves private literals without contacting an engine', context => {
   const tempRoot = resolve(tmpdir());
   const directory = mkdtempSync(join(tempRoot, 'photolocal-production-config-'));

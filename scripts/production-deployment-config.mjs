@@ -190,7 +190,11 @@ function normalizeResolved(value) {
   }
   if (Array.isArray(app.volumes)) for (const mount of app.volumes) {
     if (mount.read_only === undefined) mount.read_only = false;
-    if (mount.type === 'bind') mount.source = windowsPath(mount.source).toLowerCase();
+    if (mount.type === 'bind') {
+      mount.source = windowsPath(mount.source).toLowerCase();
+      // Compose 2.x omits this false boolean from its serialized bind options.
+      if (object(mount.bind) && mount.bind.create_host_path === undefined) mount.bind.create_host_path = false;
+    }
   }
   return config;
 }
