@@ -206,4 +206,29 @@ describe('private CDP browser adapter', () => {
     expect(evaluate).not.toHaveBeenCalled();
     expect(close).toHaveBeenCalledOnce();
   });
+
+  it.each([true, false])('never clicks a preview again after Join, with returned ID=%s', async (hasId) => {
+    const target: BrowserInviteTarget = { fingerprint: 'selected-preview', roomName: 'Zagłoby 40',
+      senderEmail: 'sender@example.test', textPreview: 'invitation', spaceName: null, canAccept: true };
+    const previewResult = { clicked: true, spaceName: hasId ? 'spaces/A' : null };
+    const evaluate = vi.fn(async (operation, input) => {
+      if (operation.name === 'clickBrowserPreviewJoin') return previewResult;
+      if (input) return { clicked: true, spaceName: null };
+      return { cards: [{ ...target, action: 'view' }], screenState: 'INVITES' };
+    });
+    const page = { goto: vi.fn(), url: () => 'https://chat.google.com/app/browse', setDefaultTimeout: vi.fn(),
+      waitForFunction: vi.fn(async () => undefined), waitForTimeout: vi.fn(async () => undefined), evaluate } as unknown as Page;
+    const close = vi.fn();
+    const adapter = new DockerBrowserInviteAdapter('http://chat-browser:9223', {
+      connect: vi.fn(async () => ({ contexts: () => [{ pages: () => [page] }], close }) as unknown as Browser),
+      fetch: vi.fn(async () => new Response(JSON.stringify({ webSocketDebuggerUrl: 'ws://localhost/devtools/browser/test' }))),
+    });
+    if (hasId) await expect(adapter.accept(target)).resolves.toEqual({ spaceName: 'spaces/A' });
+    else await expect(adapter.accept(target)).rejects.toMatchObject({ code: 'INVITE_ACCEPTANCE_UNCONFIRMED' });
+    const previewCalls = evaluate.mock.calls.filter(([operation]) => operation.name === 'clickBrowserPreviewJoin');
+    expect(previewCalls).toHaveLength(1);
+    expect(previewCalls[0][1]).toEqual({ roomName: target.roomName, expectedSpaceName: null,
+      expectedSenderEmail: target.senderEmail });
+    expect(close).toHaveBeenCalledOnce();
+  });
 });

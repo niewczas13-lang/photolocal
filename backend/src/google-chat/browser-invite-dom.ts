@@ -80,8 +80,10 @@ export function inspectBrowserInviteDom(input?: { fingerprint: string; action: '
   return { cards: found.map(row => row.card), clicked, spaceName, screenState: found.length ? 'INVITES' : empty ? 'EMPTY' : 'UNKNOWN' };
 }
 
-/** A preview may expose the room ID. Never use an arbitrary page-wide Join button. */
-export function clickBrowserPreviewJoin(input: { roomName: string | null; expectedSpaceName: string | null }): {
+/** Join only the selected preview, using its own room identity rather than conversation content. */
+export function clickBrowserPreviewJoin(input: {
+  roomName: string | null; expectedSpaceName: string | null; expectedSenderEmail?: string | null;
+}): {
   clicked: boolean; spaceName: string | null;
 } {
   const normalize = (value: string) => value.normalize('NFKD').replace(/[łŁ]/g, 'l').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
@@ -104,6 +106,48 @@ export function clickBrowserPreviewJoin(input: { roomName: string | null; expect
     return true;
   };
   const dialogs = Array.from(document.querySelectorAll('[role="dialog"]')).filter(visible);
+  const joinButtons = (scope: Element) => Array.from(scope.querySelectorAll('button, [role="button"]')).filter(visible).filter(button => {
+    if (button.hasAttribute('disabled') || button.getAttribute('aria-disabled') === 'true') return false;
+    return [button.textContent ?? '', button.getAttribute('aria-label') ?? ''].map(normalize)
+      .some(label => /^(join(?: space| room)?|dolacz(?: do (?:czatu|pokoju|grupy))?)$/.test(label));
+  });
+  const footers = Array.from(document.querySelectorAll('[role="alertdialog"]')).filter(visible);
+  if (footers.length) {
+    // Google places the full room name and inviter in an alertdialog footer.
+    // Conversation headings/links belong to messages and cannot identify it.
+    if (!input.roomName || !input.expectedSenderEmail) return { clicked: false, spaceName: null };
+    const identityText = (value: string) => value.normalize('NFC').replace(/\s+/g, ' ').trim();
+    const textWithoutButtons = (element: Element): string => {
+      if (!visible(element) || element.matches('button, [role="button"]')) return '';
+      return Array.from(element.childNodes).map(node => node.nodeType === 3 ? node.textContent ?? ''
+        : node.nodeType === 1 ? textWithoutButtons(node as Element) : '').join(' ');
+    };
+    const labelledElements = Array.from(document.querySelectorAll('[id]'));
+    const matches: Array<{ button: HTMLElement; spaceName: string }> = [];
+    for (const footer of footers) {
+      if (!dialogs.some(dialog => dialog.contains(footer))) continue;
+      // Observed Google invitation model: jUcABe;space/<room ID>;$<reference>.
+      // A deferred model reference, topic ID or another element's data is not a room identity.
+      const roomId = (footer.getAttribute('jsdata') ?? '').match(/^jUcABe;space\/([A-Za-z0-9_-]{1,128});\$[0-9]+$/)?.[1];
+      if (!roomId) continue;
+      const spaceName = `spaces/${roomId}`;
+      if (input.expectedSpaceName && input.expectedSpaceName !== spaceName) continue;
+      const labelIds = (footer.getAttribute('aria-labelledby') ?? '').trim().split(/\s+/).filter(Boolean);
+      if (!labelIds.length || labelIds.length > 8 || new Set(labelIds).size !== labelIds.length) continue;
+      const labels = labelIds.map(id => labelledElements.filter(element => element.id === id));
+      if (labels.some(elements => elements.length !== 1 || elements[0].closest('[role="alertdialog"]') !== footer || !visible(elements[0]))) continue;
+      const texts = labels.map(([element]) => identityText(textWithoutButtons(element))).filter(Boolean);
+      if (texts.some(text => text.length > 1_000) || texts.filter(text => text === identityText(input.roomName!)).length !== 1) continue;
+      const senders = texts.map(text => text.match(/^(?:Masz zaproszenie od:|Zaproszenie od:|You have an invitation from:|Invitation from:|Invited by:)\s*([a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,})$/i)?.[1]).filter(Boolean);
+      if (senders.length !== 1 || senders[0]!.toLowerCase() !== input.expectedSenderEmail.trim().toLowerCase()) continue;
+      const buttons = joinButtons(footer).filter(button => button.closest('[role="alertdialog"]') === footer);
+      if (buttons.length === 1) matches.push({ button: buttons[0] as HTMLElement, spaceName });
+    }
+    if (matches.length !== 1) return { clicked: false, spaceName: null };
+    const { button, spaceName } = matches[0];
+    button.click();
+    return { clicked: true, spaceName };
+  }
   const currentSpace = spaceFrom(location.href);
   const scopes = dialogs.length ? dialogs : currentSpace ? [document.body] : [];
   const eligible: Array<{ button: HTMLElement; spaceName: string }> = [];
@@ -115,11 +159,7 @@ export function clickBrowserPreviewJoin(input: { roomName: string | null; expect
     if (ids.size !== 1) continue;
     const spaceName = [...ids][0];
     if (input.expectedSpaceName && input.expectedSpaceName !== spaceName) continue;
-    const buttons = Array.from(scope.querySelectorAll('button, [role="button"]')).filter(visible).filter(button => {
-      if (button.hasAttribute('disabled') || button.getAttribute('aria-disabled') === 'true') return false;
-      return [button.textContent ?? '', button.getAttribute('aria-label') ?? ''].map(normalize)
-        .some(label => /^(join(?: space| room)?|dolacz(?: do (?:czatu|pokoju|grupy))?)$/.test(label));
-    });
+    const buttons = joinButtons(scope);
     if (buttons.length === 1) eligible.push({ button: buttons[0] as HTMLElement, spaceName });
   }
   if (eligible.length !== 1) return { clicked: false, spaceName: null };

@@ -145,8 +145,13 @@ export class DockerBrowserInviteAdapter implements BrowserInviteAdapter {
       if (!clicked.clicked) throw new BrowserInviteError('INVITE_CHANGED', 'Nie znaleziono dokładnie wybranego zaproszenia. Odśwież listę.');
       if (candidate.action === 'join' && clicked.spaceName) return { spaceName: clicked.spaceName };
       for (let attempt = 0; attempt < 20; attempt++) {
-        const preview = await page.evaluate(clickBrowserPreviewJoin, { roomName: target.roomName, expectedSpaceName: target.spaceName });
+        const preview = await page.evaluate(clickBrowserPreviewJoin, { roomName: target.roomName,
+          expectedSpaceName: target.spaceName, expectedSenderEmail: target.senderEmail });
         if (preview.clicked && preview.spaceName) return { spaceName: preview.spaceName };
+        if (preview.clicked) {
+          // Once Join was clicked, never retry the write even if its result is incomplete.
+          throw new BrowserInviteError('INVITE_ACCEPTANCE_UNCONFIRMED', 'Kliknięto Dołącz, ale nie potwierdzono przyjęcia zaproszenia. Odśwież czaty.');
+        }
         await page.waitForTimeout(500);
       }
       throw new BrowserInviteError('INVITE_ID_UNAVAILABLE', 'Nie można potwierdzić tożsamości czatu w podglądzie. Nie kliknięto Dołącz. Sprawdź zaproszenie w oknie Google.');

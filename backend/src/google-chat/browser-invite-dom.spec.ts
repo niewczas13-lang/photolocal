@@ -12,6 +12,14 @@ function page(html: string) {
   return { document, clicks: () => clicks };
 }
 const card = (name: string, id: string, action = 'Join') => `<article><a href="https://chat.google.com/room/${id}">${name}</a> Invitation from: sender@example.test <button>${action}</button></article>`;
+const previewFooter = (name = 'Radom OPP30 etap2 budowa Rzeszowska', sender = 'sender@example.test') => `
+  <div role="alertdialog" aria-labelledby="room-label sender-label join-label block-label" jsdata="jUcABe;space/ROOM_A;$148">
+    <div id="room-label">${name}</div><div id="sender-label">Masz zaproszenie od: ${sender}</div>
+    <div><button id="block-label">Zablokuj</button><button id="join-label">Dołącz</button></div>
+  </div>`;
+const googlePreview = (footer: string) => `<div role="dialog" aria-label="Wyświetl podgląd pokoju">
+  <h1>piątek, 11 wrz</h1><h2>Message sender</h2><a href="/room/OTHER">Room mentioned in a message</a>
+  ${footer}</div>`;
 afterEach(() => vi.unstubAllGlobals());
 describe('pending invitation DOM identity', () => {
   it('distinguishes an explicit empty-inbox message from a loading/error shell', () => {
@@ -72,5 +80,84 @@ describe('pending invitation DOM identity', () => {
     expect(clickBrowserPreviewJoin({ roomName: 'Alpha', expectedSpaceName: 'spaces/WRONG' }).clicked).toBe(false);
     expect(clickBrowserPreviewJoin({ roomName: 'Alpha', expectedSpaceName: null })).toEqual({ clicked: true, spaceName: 'spaces/A' });
     expect(preview.clicks()).toBe(1);
+  });
+
+  it('joins the matched Google invitation footer without borrowing IDs from conversation links', () => {
+    const fixture = page(googlePreview(previewFooter()) + '<button>Dołącz</button>');
+    const result = clickBrowserPreviewJoin({ roomName: 'Radom OPP30 etap2 budowa Rzeszowska',
+      expectedSpaceName: null, expectedSenderEmail: 'sender@example.test' });
+    expect(result).toEqual({ clicked: true, spaceName: 'spaces/ROOM_A' });
+    expect(fixture.clicks()).toBe(1);
+  });
+
+  it.each([
+    ['different room', previewFooter('Radom OPP31')],
+    ['different sender', previewFooter(undefined, 'other@example.test')],
+    ['duplicate footer', previewFooter() + previewFooter()],
+    ['duplicate join', previewFooter().replace('</div>\n  </div>', '<button>Dołącz</button></div>\n  </div>')],
+    ['hidden footer', `<section style="display:none">${previewFooter()}</section>`],
+    ['disabled join', previewFooter().replace('<button id="join-label">', '<button id="join-label" disabled>')],
+    ['missing room ID', previewFooter().replace('jUcABe;space/ROOM_A;$148', '')],
+    ['unknown metadata', previewFooter().replace('jUcABe;space/ROOM_A;$148', 'deferred-c65')],
+    ['unknown model', previewFooter().replace('jUcABe;', 'unknown;')],
+    ['topic ID instead of room', previewFooter().replace('space/ROOM_A', 'topic/ROOM_A')],
+    ['conflicting room metadata', previewFooter().replace('jUcABe;space/ROOM_A;$148', 'jUcABe;space/ROOM_A;$148 jUcABe;space/OTHER;$149')],
+  ])('does not join an invitation with %s', (_label, footer) => {
+    const fixture = page(googlePreview(footer));
+    expect(clickBrowserPreviewJoin({ roomName: 'Radom OPP30 etap2 budowa Rzeszowska',
+      expectedSpaceName: null, expectedSenderEmail: 'sender@example.test' }).clicked).toBe(false);
+    expect(fixture.clicks()).toBe(0);
+  });
+
+  it('does not use a room name from conversation headings when the invitation footer differs', () => {
+    const fixture = page(googlePreview(previewFooter('Different room')).replace('piątek, 11 wrz', 'Wanted room'));
+    expect(clickBrowserPreviewJoin({ roomName: 'Wanted room', expectedSpaceName: null,
+      expectedSenderEmail: 'sender@example.test' }).clicked).toBe(false);
+    expect(fixture.clicks()).toBe(0);
+  });
+
+  it('requires the selected sender and the same ID when it is already known', () => {
+    const fixture = page(googlePreview(previewFooter()));
+    for (const input of [
+      { roomName: 'Radom OPP30 etap2 budowa Rzeszowska', expectedSpaceName: null, expectedSenderEmail: null },
+      { roomName: 'Radom OPP30 etap2 budowa Rzeszowska', expectedSpaceName: 'spaces/OTHER', expectedSenderEmail: 'sender@example.test' },
+    ]) expect(clickBrowserPreviewJoin(input).clicked).toBe(false);
+    expect(fixture.clicks()).toBe(0);
+    expect(clickBrowserPreviewJoin({ roomName: 'Radom OPP30 etap2 budowa Rzeszowska',
+      expectedSpaceName: 'spaces/ROOM_A', expectedSenderEmail: 'sender@example.test' })).toEqual({ clicked: true, spaceName: 'spaces/ROOM_A' });
+  });
+
+  it('does not borrow an aria-labelledby target outside the invitation footer', () => {
+    const fixture = page('<div id="elsewhere">Radom OPP30 etap2 budowa Rzeszowska</div>'
+      + googlePreview(previewFooter().replace('room-label sender-label', 'elsewhere sender-label')));
+    expect(clickBrowserPreviewJoin({ roomName: 'Radom OPP30 etap2 budowa Rzeszowska',
+      expectedSpaceName: null, expectedSenderEmail: 'sender@example.test' }).clicked).toBe(false);
+    expect(fixture.clicks()).toBe(0);
+  });
+
+  it('refuses two matching footers even when their label IDs differ', () => {
+    const second = previewFooter().replace(/(room|sender|join|block)-label/g, '$1-second').replace('space/ROOM_A', 'space/ROOM_B');
+    const fixture = page(googlePreview(previewFooter() + second));
+    expect(clickBrowserPreviewJoin({ roomName: 'Radom OPP30 etap2 budowa Rzeszowska',
+      expectedSpaceName: null, expectedSenderEmail: 'sender@example.test' }).clicked).toBe(false);
+    expect(fixture.clicks()).toBe(0);
+  });
+
+  it('does not borrow labels and Join from a nested alertdialog', () => {
+    const child = previewFooter().replace('jUcABe;space/ROOM_A;$148', 'deferred-c65');
+    const fixture = page(googlePreview(`<div role="alertdialog" jsdata="jUcABe;space/WRONG_PARENT;$1"
+      aria-labelledby="room-label sender-label join-label block-label">${child}</div>`));
+    expect(clickBrowserPreviewJoin({ roomName: 'Radom OPP30 etap2 budowa Rzeszowska',
+      expectedSpaceName: null, expectedSenderEmail: 'sender@example.test' }).clicked).toBe(false);
+    expect(fixture.clicks()).toBe(0);
+  });
+
+  it('preserves diacritics and the complete room name when matching the footer', () => {
+    const fixture = page(googlePreview(previewFooter('Zagłoby 40')));
+    for (const roomName of ['Zagloby 40', 'Zagłoby', 'Zagłoby 4', 'ZAGŁOBY 40']) {
+      expect(clickBrowserPreviewJoin({ roomName, expectedSpaceName: null,
+        expectedSenderEmail: 'sender@example.test' }).clicked).toBe(false);
+    }
+    expect(fixture.clicks()).toBe(0);
   });
 });
