@@ -14,6 +14,7 @@ import {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
   delete process.env.OLLAMA_VISION_MODEL;
 });
 
@@ -105,6 +106,62 @@ describe('getDefaultVisionModel', () => {
 });
 
 describe('classifyChatFolder', () => {
+  it.each([
+    {
+      name: 'uses trimmed OLLAMA_URL when the runner provides only a folder',
+      environmentUrl: '  http://host.docker.internal:11434/  ',
+      explicitUrl: undefined,
+      expectedUrl: 'http://host.docker.internal:11434',
+    },
+    {
+      name: 'prefers an explicit URL over OLLAMA_URL',
+      environmentUrl: 'http://host.docker.internal:11434',
+      explicitUrl: 'http://explicit-ollama.test/',
+      expectedUrl: 'http://explicit-ollama.test',
+    },
+    {
+      name: 'keeps localhost when OLLAMA_URL is unset',
+      environmentUrl: undefined,
+      explicitUrl: undefined,
+      expectedUrl: 'http://localhost:11434',
+    },
+    {
+      name: 'keeps localhost when OLLAMA_URL is blank',
+      environmentUrl: ' \t ',
+      explicitUrl: undefined,
+      expectedUrl: 'http://localhost:11434',
+    },
+  ])('$name for both classification and retry requests', async ({
+    environmentUrl, explicitUrl, expectedUrl,
+  }) => {
+    vi.stubEnv('OLLAMA_URL', environmentUrl);
+    const dir = mkdtempSync(join(tmpdir(), 'photo-local-vision-url-'));
+    writeFileSync(join(dir, 'photo.png'), Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=',
+      'base64',
+    ));
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response('temporary model error', { status: 500 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ done: true }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        message: {
+          content: '{"reserveLocation":"W studni","confidence":0.91,"visualEvidence":[]}',
+        },
+      }), { status: 200 }));
+
+    const result = await classifyChatFolder({
+      folderPath: dir,
+      ...(explicitUrl === undefined ? {} : { ollamaUrl: explicitUrl }),
+    });
+
+    expect(result).toMatchObject({ reserveLocation: 'W studni', confidence: 0.91 });
+    expect(fetchMock.mock.calls.map(([url]) => String(url))).toEqual([
+      `${expectedUrl}/api/chat`,
+      `${expectedUrl}/api/generate`,
+      `${expectedUrl}/api/chat`,
+    ]);
+  });
+
   it('retries a degenerate Ollama response with a lighter request', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'photo-local-vision-retry-'));
     writeFileSync(

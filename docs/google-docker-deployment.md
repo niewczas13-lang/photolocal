@@ -655,3 +655,50 @@ Pełne wyniki procesów, kopia definicji starego zadania i szczegóły audytu po
 w prywatnym katalogu. Nie publikuj plików `*-child.json`, `docker-call-*.json`, tokenów
 ani Compose. Przełączenie nie zmienia autologowania Windows, blokady konsoli,
 routera, proxy ani innych aplikacji Docker i nie wymaga restartu komputera.
+
+### Poprawka adresu Ollamy po migracji
+
+Klasyfikacja uruchamiana z panelu musi korzystać z `OLLAMA_URL`, podobnie jak
+diagnostyka modelu. Starszy klasyfikator używał domyślnie `localhost:11434`, nawet
+gdy konfiguracja produkcji poprawnie wskazywała `host.docker.internal:11434`.
+Powodowało to pozostawienie paczek w `WAITING_FOR_CLASSIFICATION` z komunikatem
+`Blad odpowiedzi LLM - ponow klasyfikacje`. Nie jest to wynik sprawdzania duplikatów.
+Poprawka zachowuje pierwszeństwo jawnego argumentu `ollamaUrl`, potem uwzględnia
+niepustą zmienną `OLLAMA_URL`, a na końcu dotychczasowy domyślny adres lokalny.
+
+Po potwierdzeniu z kontenera odpowiedzi HTTP 200 z `/api/tags` i obecności modelu
+`qwen2.5vl:3b` można zaktualizować sam obraz. Zakończ bieżące operacje aplikacji
+przed wymianą kontenera. Budowanie odbywa się przy działającej produkcji; krótka
+przerwa przypada na końcowe `up`.
+
+Pobierz poprawioną gałąź i zbuduj obraz pod nowym tagiem. Odczytaj jego dokładne ID
+przez `docker image inspect --format '{{.Id}}' <tag>`. W istniejącym prywatnym
+`runDirectory` utwórz nowy plik `compose.ollama-fix-<id>.json` zawierający tylko:
+
+```json
+{"services":{"photolocal":{"image":"sha256:ID_NOWEGO_OBRAZU"}}}
+```
+
+Zachowaj bazowy `compose.production.json` i dołącz plik poprawki jako drugi `-f`.
+Nie używaj repozytoryjnego `compose.yaml`, który opisuje staging. Ten wariant
+aktualizacji zachowuje obecne katalogi bazy, pobrań, Google, zdjęć oraz wolumen NAS.
+Nie wykonuj ponownie migracji ani kopii z `C:\PhotoLocal`.
+
+```powershell
+$romekComposeArgs = @(
+    'compose', '-p', 'photolocal-production',
+    '--project-directory', $romekRun,
+    '--env-file', (Join-Path $romekRun 'empty.env'),
+    '-f', (Join-Path $romekRun 'compose.production.json'),
+    '-f', $romekOverride
+)
+docker @romekComposeArgs config --quiet
+if ($LASTEXITCODE -ne 0) { throw 'COMPOSE_INVALID' }
+docker @romekComposeArgs up --no-deps -d --no-build --pull never --wait --wait-timeout 120 photolocal
+if ($LASTEXITCODE -ne 0) { throw 'UPDATE_FAILED' }
+```
+
+Po uruchomieniu zdrowego kontenera użyj w istniejącym zleceniu **Weryfikuj Qwen**.
+Ponowi to klasyfikację oczekujących paczek. Sprawdź, czy zniknął błąd LLM i paczki
+trafiły do importu albo ręcznego review. Zachowaj nazwę pliku poprawki do kolejnych
+aktualizacji — wywołanie Compose tylko z plikiem bazowym wybierze poprzedni obraz.

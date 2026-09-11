@@ -96,7 +96,7 @@ export async function classifyChatFolder(
   input: ClassifyFolderInput,
 ): Promise<ChatFolderClassification> {
   const model = input.model ?? getDefaultVisionModel();
-  const ollamaUrl = input.ollamaUrl ?? DEFAULT_OLLAMA_URL;
+  const ollamaUrl = input.ollamaUrl ?? (process.env.OLLAMA_URL?.trim() || DEFAULT_OLLAMA_URL);
   const maxImages = input.maxImages ?? DEFAULT_MAX_IMAGES;
   const imageMaxSize = input.imageMaxSize ?? DEFAULT_IMAGE_MAX_SIZE;
   const requestTimeoutMs = input.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
