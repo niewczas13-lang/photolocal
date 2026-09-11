@@ -99,10 +99,21 @@ export class DockerBrowserInviteAdapter implements BrowserInviteAdapter {
       if (hostname === 'accounts.google.com') return { invites: [], state: 'NEEDS_LOGIN' as const };
       if (hostname !== 'chat.google.com') return { invites: [], state: 'UNKNOWN' as const };
       let result = await page.evaluate(inspectBrowserInviteDom);
-      for (let attempt = 0; result.screenState === 'UNKNOWN' && attempt < 20; attempt++) {
+      const snapshot = (scan: ReturnType<typeof inspectBrowserInviteDom>) => JSON.stringify([
+        scan.screenState, scan.cards.map(card => JSON.stringify([card.fingerprint, card.action, card.canAccept])).sort(),
+      ]);
+      let previous = snapshot(result);
+      let stableReadings = 0;
+      // Google can remove temporary card text after the first render. Require
+      // two seconds of unchanged identities before exposing them for acceptance.
+      for (let attempt = 0; stableReadings < 4 && attempt < 20; attempt++) {
         await page.waitForTimeout(500);
         result = await page.evaluate(inspectBrowserInviteDom);
+        const current = snapshot(result);
+        stableReadings = result.screenState !== 'UNKNOWN' && current === previous ? stableReadings + 1 : 0;
+        previous = current;
       }
+      if (stableReadings < 4) return { invites: [], state: 'UNKNOWN' as const };
       if (!result.cards.length && result.screenState !== 'EMPTY') return { invites: [], state: 'UNKNOWN' as const };
       const invites = result.cards.map((card): BrowserInviteTarget => {
         const display = mapRawInviteCandidates([{ buttonIndex: 0, text: card.text }])[0];
@@ -120,7 +131,13 @@ export class DockerBrowserInviteAdapter implements BrowserInviteAdapter {
       if (new URL(page.url()).hostname !== 'chat.google.com') {
         throw new BrowserInviteError('BROWSER_LOGIN_REQUIRED', 'Zaloguj Google w oknie przeglądarki aplikacji.');
       }
-      const scan = await page.evaluate(inspectBrowserInviteDom);
+      let scan = await page.evaluate(inspectBrowserInviteDom);
+      // Chat's navigation can be ready while invitation cards are still loading.
+      // Wait for the exact listed identity; never substitute a different card.
+      for (let attempt = 0; !scan.cards.some(card => card.fingerprint === target.fingerprint) && attempt < 20; attempt++) {
+        await page.waitForTimeout(500);
+        scan = await page.evaluate(inspectBrowserInviteDom);
+      }
       const candidates = scan.cards.filter(card => card.fingerprint === target.fingerprint && card.canAccept);
       if (candidates.length !== 1) throw new BrowserInviteError('INVITE_CHANGED', 'Zaproszenie zmieniło się lub jest niejednoznaczne. Odśwież listę.');
       const candidate = candidates[0];

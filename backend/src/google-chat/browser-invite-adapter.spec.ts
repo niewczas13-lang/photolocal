@@ -2,6 +2,7 @@ import { createServer, type RequestListener, type Server } from 'node:http';
 import type { Browser, Page } from 'playwright-core';
 import { describe, expect, it, vi } from 'vitest';
 import { DockerBrowserInviteAdapter, resolvePrivateCdpWebSocket } from './browser-invite-adapter.js';
+import type { BrowserInviteTarget } from './browser-invite-service.js';
 
 async function withCdpServer(handler: RequestListener, check: (url: string, server: Server) => Promise<void>): Promise<void> {
   const server = createServer(handler);
@@ -116,8 +117,8 @@ describe('private CDP browser adapter', () => {
   });
 
   it('discovery uses the persistent browser page and closes the CDP attachment, without clicking', async () => {
-    const evaluate = vi.fn(async () => ({ cards: [{ fingerprint: 'row', text: 'Alpha Invitation from: sender@example.test Join', spaceName: 'spaces/A', action: 'join', canAccept: true }], clicked: false }));
-    const page = { goto: vi.fn(), url: () => 'https://chat.google.com/app/browse', setDefaultTimeout: vi.fn(), waitForFunction: vi.fn(async () => undefined), evaluate } as unknown as Page;
+    const evaluate = vi.fn(async () => ({ cards: [{ fingerprint: 'row', text: 'Alpha Invitation from: sender@example.test Join', spaceName: 'spaces/A', action: 'join', canAccept: true }], clicked: false, screenState: 'INVITES' }));
+    const page = { goto: vi.fn(), url: () => 'https://chat.google.com/app/browse', setDefaultTimeout: vi.fn(), waitForFunction: vi.fn(async () => undefined), waitForTimeout: vi.fn(async () => undefined), evaluate } as unknown as Page;
     const close = vi.fn();
     const browser = { contexts: () => [{ pages: () => [page] }], close } as unknown as Browser;
     const adapter = new DockerBrowserInviteAdapter('http://chat-browser:9223', {
@@ -125,8 +126,71 @@ describe('private CDP browser adapter', () => {
     });
     const result = await adapter.list();
     expect(result.invites[0]).toMatchObject({ roomName: 'Alpha', spaceName: 'spaces/A' });
-    expect(evaluate).toHaveBeenCalledTimes(1);
-    expect(evaluate.mock.calls[0]).toHaveLength(1);
+    for (const call of evaluate.mock.calls) expect(call).toHaveLength(1);
+    expect(close).toHaveBeenCalledOnce();
+  });
+
+  it('lists the settled invitation identity after Google removes temporary comma placeholders', async () => {
+    let reads = 0;
+    const evaluate = vi.fn(async () => {
+      const text = ++reads <= 4 ? 'Alpha , , Invitation from: sender@example.test Preview' : 'Alpha Invitation from: sender@example.test Preview';
+      return { cards: [{ fingerprint: JSON.stringify([null, text]), text, spaceName: null, action: 'view', canAccept: true }], screenState: 'INVITES' };
+    });
+    const page = { goto: vi.fn(), url: () => 'https://chat.google.com/app/browse', setDefaultTimeout: vi.fn(),
+      waitForFunction: vi.fn(async () => undefined), waitForTimeout: vi.fn(async () => undefined), evaluate } as unknown as Page;
+    const adapter = new DockerBrowserInviteAdapter('http://chat-browser:9223', {
+      connect: vi.fn(async () => ({ contexts: () => [{ pages: () => [page] }], close: vi.fn() }) as unknown as Browser),
+      fetch: vi.fn(async () => new Response(JSON.stringify({ webSocketDebuggerUrl: 'ws://localhost/devtools/browser/test' }))),
+    });
+    const result = await adapter.list();
+    expect(result.state).toBe('ACTIVE');
+    expect(result.invites[0]).toMatchObject({
+      fingerprint: JSON.stringify([null, 'Alpha Invitation from: sender@example.test Preview']), roomName: 'Alpha',
+    });
+    for (const call of evaluate.mock.calls) expect(call).toHaveLength(1);
+  });
+
+  it('does not publish an invitation whose identity keeps changing throughout the loading limit', async () => {
+    let reads = 0;
+    const evaluate = vi.fn(async () => ({ cards: [{ fingerprint: `changing-${++reads}`, text: 'Alpha Invitation from: sender@example.test Preview',
+      spaceName: null, action: 'view', canAccept: true }], screenState: 'INVITES' }));
+    const wait = vi.fn(async () => undefined);
+    const page = { goto: vi.fn(), url: () => 'https://chat.google.com/app/browse', setDefaultTimeout: vi.fn(),
+      waitForFunction: vi.fn(async () => undefined), waitForTimeout: wait, evaluate } as unknown as Page;
+    const adapter = new DockerBrowserInviteAdapter('http://chat-browser:9223', {
+      connect: vi.fn(async () => ({ contexts: () => [{ pages: () => [page] }], close: vi.fn() }) as unknown as Browser),
+      fetch: vi.fn(async () => new Response(JSON.stringify({ webSocketDebuggerUrl: 'ws://localhost/devtools/browser/test' }))),
+    });
+    expect(await adapter.list()).toEqual({ invites: [], state: 'UNKNOWN' });
+    expect(wait.mock.calls.length).toBeLessThanOrEqual(20);
+    for (const call of evaluate.mock.calls) expect(call).toHaveLength(1);
+  });
+
+  it('waits for the exact selected invitation after reloading before clicking it once', async () => {
+    const target: BrowserInviteTarget = { fingerprint: 'selected', roomName: 'Alpha', senderEmail: null,
+      textPreview: 'Alpha invitation', spaceName: 'spaces/A', canAccept: true };
+    const selected = { ...target, text: 'Alpha invitation', action: 'join' };
+    const other = { ...selected, fingerprint: 'other', spaceName: 'spaces/B' };
+    const scans = [
+      { cards: [], screenState: 'UNKNOWN' },
+      { cards: [other], screenState: 'INVITES' },
+      { cards: [other, selected], screenState: 'INVITES' },
+    ];
+    const clicks: unknown[] = [];
+    const evaluate = vi.fn(async (_operation, input) => {
+      if (input) { clicks.push(input); return { clicked: true, spaceName: 'spaces/A' }; }
+      return scans.shift();
+    });
+    const page = { goto: vi.fn(), url: () => 'https://chat.google.com/app/browse',
+      setDefaultTimeout: vi.fn(), waitForFunction: vi.fn(async () => undefined),
+      waitForTimeout: vi.fn(async () => undefined), evaluate } as unknown as Page;
+    const close = vi.fn();
+    const adapter = new DockerBrowserInviteAdapter('http://chat-browser:9223', {
+      connect: vi.fn(async () => ({ contexts: () => [{ pages: () => [page] }], close }) as unknown as Browser),
+      fetch: vi.fn(async () => new Response(JSON.stringify({ webSocketDebuggerUrl: 'ws://localhost/devtools/browser/test' }))),
+    });
+    await expect(adapter.accept(target)).resolves.toEqual({ spaceName: 'spaces/A' });
+    expect(clicks).toEqual([{ fingerprint: 'selected', action: 'join' }]);
     expect(close).toHaveBeenCalledOnce();
   });
 
