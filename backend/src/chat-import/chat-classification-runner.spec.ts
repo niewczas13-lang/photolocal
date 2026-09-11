@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -565,7 +565,10 @@ describe('classifyWaitingChatBatches', () => {
     });
   });
 
-  it('keeps parser failures out of manual review so they can be retried', async () => {
+  it.each([
+    { reason: 'Nie udalo sie sparsowac odpowiedzi modelu: Unexpected token' },
+    { error: 'Ollama HTTP 503: model unavailable' },
+  ])('sends exhausted classifier failures to manual review without changing photos: %j', async (failure) => {
     const { db, projects, batches, projectId, dir } = createContext();
     const folderPath = join(dir, 'Maleniecka 5');
     const batch = batches.importManifest({
@@ -574,7 +577,8 @@ describe('classifyWaitingChatBatches', () => {
       status: 'WAITING_FOR_CLASSIFICATION',
     });
 
-    await classifyWaitingChatBatches({
+    const filesBefore = batches.listBatchFiles(projectId, batch.id);
+    const result = await classifyWaitingChatBatches({
       projectId,
       projectsRepository: projects,
       batchesRepository: batches,
@@ -586,7 +590,7 @@ describe('classifyWaitingChatBatches', () => {
         reserveLocation: 'Niepewne',
         confidence: 0,
         visualEvidence: [],
-        reason: 'Nie udalo sie sparsowac odpowiedzi modelu: Unexpected token',
+        ...failure,
         shouldReview: true,
         rawResponse: '{"!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!',
         durationMs: 123,
@@ -595,14 +599,97 @@ describe('classifyWaitingChatBatches', () => {
     });
 
     const updated = batches.getBatch(projectId, batch.id);
+    const filesAfter = batches.listBatchFiles(projectId, batch.id);
     db.close();
 
+    expect(result).toEqual({ processed: 1, readyForImport: 0, pendingReview: 1 });
     expect(updated).toMatchObject({
-      status: 'WAITING_FOR_CLASSIFICATION',
+      status: 'PENDING_REVIEW',
       checklistNodeId: null,
       reserveLocation: null,
-      reviewReason: 'Blad odpowiedzi LLM - ponow klasyfikacje',
+      confidence: 0,
+      reviewReason: expect.stringContaining('Blad klasyfikacji Qwen - przypisz zdjecia recznie.'),
+      llmRawResponse: '{"!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!',
     });
+    expect(updated?.reviewReason).toContain(failure.error ?? failure.reason);
+    expect(filesAfter).toEqual(filesBefore);
+    expect(readFileSync(join(folderPath, 'photo.jpeg'), 'utf8')).toBe('image');
+  });
+
+  it('sends a thrown classifier error to review and continues with the next batch', async () => {
+    const { db, projects, batches, projectId, dir } = createContext();
+    for (const name of ['Maleniecka 5 pierwsza', 'Maleniecka 5 druga']) {
+      batches.importManifest({
+        projectId,
+        manifest: createManifest(join(dir, name), name),
+        status: 'WAITING_FOR_CLASSIFICATION',
+      });
+    }
+    const [failedBatch, successfulBatch] = batches.listBatches(projectId, 'WAITING_FOR_CLASSIFICATION');
+    const filesBefore = batches.listBatchFiles(projectId, failedBatch.id);
+    const decisions: string[] = [];
+    let calls = 0;
+    const result = await classifyWaitingChatBatches({
+      projectId,
+      projectsRepository: projects,
+      batchesRepository: batches,
+      onProgress: (event) => {
+        if (event.lastDecision) decisions.push(event.lastDecision.status);
+      },
+      classifyFolder: async (input) => {
+        calls += 1;
+        if (calls === 1) throw new Error('Cannot decode image');
+        return {
+          folder: input.folderPath,
+          imageCount: 1,
+          sampledImages: [join(input.folderPath, 'photo.jpeg')],
+          model: 'qwen2.5vl:3b',
+          reserveLocation: 'W studni',
+          confidence: 0.94,
+          visualEvidence: ['widoczna studnia'],
+          shouldReview: false,
+          classifiedAt: new Date().toISOString(),
+        };
+      },
+    });
+
+    expect(result).toEqual({ processed: 2, readyForImport: 1, pendingReview: 1 });
+    expect(decisions).toEqual(['PENDING_REVIEW', 'READY_FOR_IMPORT']);
+    expect(batches.getBatch(projectId, failedBatch.id)).toMatchObject({
+      status: 'PENDING_REVIEW',
+      checklistNodeId: null,
+      reserveLocation: null,
+      confidence: 0,
+      reviewReason: expect.stringContaining('Cannot decode image'),
+    });
+    expect(batches.getBatch(projectId, successfulBatch.id)).toMatchObject({
+      status: 'READY_FOR_IMPORT',
+      checklistNodeId: 'node-maleniecka-5',
+      confidence: 0.94,
+    });
+    expect(batches.listBatchFiles(projectId, failedBatch.id)).toEqual(filesBefore);
+    expect(readFileSync(join(failedBatch.folderPath, 'photo.jpeg'), 'utf8')).toBe('image');
+    db.close();
+  });
+
+  it('propagates a database failure instead of claiming the fallback was saved', async () => {
+    const { db, projects, batches, projectId, dir } = createContext();
+    const batch = batches.importManifest({
+      projectId,
+      manifest: createManifest(join(dir, 'Maleniecka 5'), 'Maleniecka 5'),
+      status: 'WAITING_FOR_CLASSIFICATION',
+    });
+    db.exec(`CREATE TRIGGER fail_decision BEFORE UPDATE ON chat_photo_batches
+      BEGIN SELECT RAISE(FAIL, 'decision storage unavailable'); END`);
+
+    await expect(classifyWaitingChatBatches({
+      projectId,
+      projectsRepository: projects,
+      batchesRepository: batches,
+      classifyFolder: async () => { throw new Error('Cannot decode image'); },
+    })).rejects.toThrow('decision storage unavailable');
+    expect(batches.getBatch(projectId, batch.id)?.status).toBe('WAITING_FOR_CLASSIFICATION');
+    db.close();
   });
 
   it('reports progress before and after each classified batch', async () => {

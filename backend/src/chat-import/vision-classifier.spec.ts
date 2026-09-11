@@ -106,6 +106,76 @@ describe('getDefaultVisionModel', () => {
 });
 
 describe('classifyChatFolder', () => {
+  it('aborts stalled unload requests and returns review after exhausted classification attempts', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'photo-local-vision-unload-timeout-'));
+    writeFileSync(join(dir, 'photo.png'), Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=',
+      'base64',
+    ));
+    const unloadSignals: Array<AbortSignal | null | undefined> = [];
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, options) => {
+      if (String(url).endsWith('/api/chat')) {
+        return new Response('model unavailable', { status: 503 });
+      }
+      const signal = options?.signal;
+      unloadSignals.push(signal);
+      if (!signal) throw new Error('Unload request has no timeout signal');
+      return new Promise<Response>((_resolve, reject) => {
+        if (signal.aborted) reject(signal.reason);
+        else signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+      });
+    });
+
+    const result = await classifyChatFolder({
+      folderPath: dir,
+      ollamaUrl: 'http://ollama.test',
+      requestTimeoutMs: 20,
+    });
+
+    expect(unloadSignals).toHaveLength(2);
+    expect(unloadSignals.every((signal) => signal?.aborted === true)).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(5);
+    expect(result).toMatchObject({
+      shouldReview: true,
+      confidence: 0,
+      reserveLocation: 'Niepewne',
+      error: expect.stringContaining('Ollama HTTP 503'),
+      reason: expect.stringContaining('Ollama HTTP 503'),
+    });
+  });
+
+  it.each(['network failure', 'malformed response'])(
+    'returns review after all attempts fail with %s', async (failure) => {
+      const dir = mkdtempSync(join(tmpdir(), 'photo-local-vision-exhausted-'));
+      writeFileSync(join(dir, 'photo.png'), Buffer.from(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=',
+        'base64',
+      ));
+      const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+        if (String(url).endsWith('/api/generate')) return new Response('{}', { status: 200 });
+        if (failure === 'network failure') throw new TypeError('fetch failed');
+        return new Response(JSON.stringify({ message: { content: 'Not a JSON classification' } }), {
+          status: 200,
+        });
+      });
+      const timeoutMock = vi.spyOn(AbortSignal, 'timeout');
+
+      const result = await classifyChatFolder({ folderPath: dir, ollamaUrl: 'http://ollama.test' });
+
+      expect(fetchMock).toHaveBeenCalledTimes(5);
+      expect(timeoutMock.mock.calls.map(([milliseconds]) => milliseconds)).toEqual([
+        60_000, 5_000, 60_000, 5_000, 60_000,
+      ]);
+      expect(result).toMatchObject({
+        shouldReview: true,
+        confidence: 0,
+        reserveLocation: 'Niepewne',
+        error: failure === 'network failure'
+          ? 'fetch failed' : 'Model response does not contain a JSON object',
+      });
+    },
+  );
+
   it.each([
     {
       name: 'uses trimmed OLLAMA_URL when the runner provides only a folder',
