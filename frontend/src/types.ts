@@ -391,6 +391,7 @@ export interface GoogleChatSpace {
 export interface AppConfig {
   googleChatDownloadRoot: string;
   googleChatInviteProfileDir: string;
+  googleChatInviteMode?: 'DOCKER_BROWSER' | 'LEGACY_WINDOWS' | 'LINK_ONLY';
 }
 
 export interface GoogleChatDownloadStatus {
@@ -440,6 +441,14 @@ export interface GoogleChatInvite {
   roomName: string | null;
   senderEmail: string | null;
   textPreview: string;
+  canAccept?: boolean;
+  reason?: string;
+}
+
+export interface GoogleChatBrowserSession {
+  sessionId: string;
+  expiresAt: string;
+  websocketPath: string;
 }
 
 export interface GoogleChatInviteSessionStatus {

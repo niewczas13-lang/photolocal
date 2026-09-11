@@ -141,11 +141,13 @@ export class GoogleChatDownloadManager {
     this.save();
   }
 
-  async listSpaces(): Promise<GoogleChatSpace[]> {
+  async listSpaces(signal?: AbortSignal): Promise<GoogleChatSpace[]> {
     if (this.isClosing) throw new Error('Serwer jest zatrzymywany.');
     if (this.isRunning()) throw new Error('Trwa pobieranie. Poczekaj przed odświeżeniem listy czatów.');
     return this.queue.run(async () => {
-      const result = await this.runner(['--list-spaces-json'], this.config, () => undefined, this.abortController.signal);
+      signal?.throwIfAborted();
+      const operationSignal = signal ? AbortSignal.any([this.abortController.signal, signal]) : this.abortController.signal;
+      const result = await this.runner(['--list-spaces-json'], this.config, () => undefined, operationSignal);
       if (result.code === 3 || result.stderr.includes('PHOTO_LOCAL_AUTH_REQUIRED')) {
         this.authRequired = true;
         this.save();

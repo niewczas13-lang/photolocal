@@ -23,11 +23,35 @@ export interface AppConfig {
   googleChatInviteHeadless: boolean;
   googleChatInviteDebugPort: number;
   googleChatInviteLauncherPath: string;
+  googleChatInviteMode: 'DOCKER_BROWSER' | 'LEGACY_WINDOWS' | 'LINK_ONLY';
+  googleChatBrowserCdpUrl: string | null;
+  googleChatBrowserVncHost: string;
+  googleChatBrowserVncPort: number;
+  googleChatBrowserOrigin: string | null;
   adresyAppBaseUrl: string;
   adresyAppApiKey: string | null;
   adresyAppReverseRadiusMeters: number;
   nominatimBaseUrl: string;
   nominatimUserAgent: string;
+}
+
+export function resolveBrowserInviteConfig(environment: NodeJS.ProcessEnv = process.env, platform: string = process.platform): Pick<AppConfig,
+  'googleChatInviteMode' | 'googleChatBrowserCdpUrl' | 'googleChatBrowserVncHost' | 'googleChatBrowserVncPort' | 'googleChatBrowserOrigin'> {
+  const cdpUrl = environment.GOOGLE_CHAT_BROWSER_CDP_URL?.trim() || null;
+  const vncHost = environment.GOOGLE_CHAT_BROWSER_VNC_HOST?.trim() || 'chat-browser';
+  const vncPort = Number(environment.GOOGLE_CHAT_BROWSER_VNC_PORT ?? 5900);
+  if (!cdpUrl) return { googleChatInviteMode: platform === 'win32' ? 'LEGACY_WINDOWS' : 'LINK_ONLY',
+    googleChatBrowserCdpUrl: null, googleChatBrowserVncHost: vncHost, googleChatBrowserVncPort: 5900, googleChatBrowserOrigin: null };
+  try {
+    const endpoint = new URL(cdpUrl);
+    const publicUrl = new URL(environment.GOOGLE_CHAT_OAUTH_REDIRECT_URI ?? '');
+    if (endpoint.protocol !== 'http:' || endpoint.username || endpoint.password || endpoint.pathname !== '/' || endpoint.search || endpoint.hash
+      || !/^[A-Za-z0-9.-]+$/.test(vncHost) || !Number.isInteger(vncPort) || vncPort < 1 || vncPort > 65535
+      || publicUrl.username || publicUrl.password || (publicUrl.protocol !== 'https:'
+        && !(publicUrl.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(publicUrl.hostname)))) throw new Error();
+    return { googleChatInviteMode: 'DOCKER_BROWSER', googleChatBrowserCdpUrl: endpoint.origin,
+      googleChatBrowserVncHost: vncHost, googleChatBrowserVncPort: vncPort, googleChatBrowserOrigin: publicUrl.origin };
+  } catch { throw new Error('GOOGLE_CHAT_BROWSER_CONFIGURATION_INVALID'); }
 }
 
 export function loadConfig(): AppConfig {
@@ -74,6 +98,7 @@ export function loadConfig(): AppConfig {
   mkdirSync(dirname(logPath), { recursive: true });
 
   return {
+    ...resolveBrowserInviteConfig(),
     port,
     host,
     dbPath,

@@ -16,6 +16,7 @@ import type {
   ChecklistRecalculateResult,
   GoogleChatDownloadStatus,
   GoogleChatAuthStatus,
+  GoogleChatBrowserSession,
   GoogleChatInviteAcceptResult,
   GoogleChatInviteListResult,
   GoogleChatInviteSetupResult,
@@ -90,6 +91,11 @@ async function requestBlob(url: string, init?: RequestInit): Promise<Blob> {
   return response.blob();
 }
 
+function browserRequestSignal(signal?: AbortSignal): AbortSignal {
+  const deadline = AbortSignal.timeout(120_000);
+  return signal ? AbortSignal.any([signal, deadline]) : deadline;
+}
+
 export const api = {
   hasAuthToken: () => Boolean(getAuthToken()),
   login: async (username: string, password: string) => {
@@ -129,7 +135,9 @@ export const api = {
       body: JSON.stringify({ parentPath, folderName }),
     }),
   listProjects: () => request<ProjectSummary[]>('/api/projects'),
-  listGoogleChatSpaces: () => request<GoogleChatSpace[]>('/api/google-chat/spaces'),
+  listGoogleChatSpaces: () => request<GoogleChatSpace[]>('/api/google-chat/spaces', {
+    signal: browserRequestSignal(),
+  }),
   getGoogleChatAuthStatus: (signal?: AbortSignal) =>
     request<GoogleChatAuthStatus>('/api/google-chat/auth/status', { signal }),
   checkGoogleChatAuth: (signal?: AbortSignal) =>
@@ -141,19 +149,29 @@ export const api = {
       body: JSON.stringify({ returnPath }),
       signal,
     }),
-  listGoogleChatInvites: () =>
+  listGoogleChatInvites: (signal?: AbortSignal) =>
     request<GoogleChatInviteListResult>('/api/google-chat/invites/list', {
       method: 'POST',
+      signal: browserRequestSignal(signal),
     }),
   openGoogleChatInviteSetup: () =>
     request<GoogleChatInviteSetupResult>('/api/google-chat/invites/setup', {
       method: 'POST',
     }),
-  acceptGoogleChatInvite: (inviteKey: string) =>
+  acceptGoogleChatInvite: (inviteKey: string, signal?: AbortSignal) =>
     request<GoogleChatInviteAcceptResult>('/api/google-chat/invites/accept', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ inviteKey }),
+      signal: browserRequestSignal(signal),
+    }),
+  startGoogleChatBrowser: (signal?: AbortSignal) =>
+    request<GoogleChatBrowserSession>('/api/google-chat/invites/browser/start', {
+      method: 'POST', signal: browserRequestSignal(signal),
+    }),
+  closeGoogleChatBrowser: (sessionId: string) =>
+    request<{ released: boolean }>(`/api/google-chat/invites/browser/${encodeURIComponent(sessionId)}`, {
+      method: 'DELETE', keepalive: true, signal: AbortSignal.timeout(10_000),
     }),
   startGoogleChatDownload: (projectId: string, spaceName: string, spaceDisplayName: string) =>
     request<GoogleChatDownloadStatus>(`/api/projects/${projectId}/google-chat/download`, {

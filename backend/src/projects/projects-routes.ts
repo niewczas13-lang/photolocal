@@ -46,6 +46,7 @@ import { GoogleChatDownloadManager } from '../google-chat/google-chat-downloader
 import { GoogleChatAuth } from '../google-chat/google-chat-auth.js';
 import { GoogleChatOperationQueue } from '../google-chat/google-chat-files.js';
 import { registerGoogleChatRoutes } from '../google-chat/google-chat-routes.js';
+import { registerChatInviteRoutes } from '../google-chat/chat-invite-routes.js';
 import { generateChecklistNodes, markAerialAddressReserves } from '../checklist/checklist-generator.js';
 import type { ChecklistAddress, GeneratedChecklistNode } from '../checklist/checklist-generator.js';
 import { loadConfig } from '../config.js';
@@ -284,6 +285,7 @@ export async function registerProjectRoutes(
     stateFile: initialConfig.googleChatJobStateFile,
   }, googleQueue);
   registerGoogleChatRoutes(app, repository, googleAuth, googleDownloads);
+  registerChatInviteRoutes(app, db, initialConfig, googleDownloads);
   const addressGeocoder =
     options.addressGeocoder ??
     createFallbackAddressGeocoder([

@@ -19,6 +19,7 @@ import { Card, CardContent } from './ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog';
 import { getSuggestedGoogleChatSpaces } from './chat-space-suggestions';
 import { GoogleChatConnection, GoogleChatInvitesLink } from './google-chat-connection';
+import { GoogleChatInvitations } from './google-chat-invitations';
 import {
   canResumeGoogleChatDownload,
   canReplaceGoogleChatDownload,
@@ -94,6 +95,7 @@ function ChatImportPanelContent({ projectId, project, batches, onChanged, onOpen
   const [googleAuthRefreshKey, setGoogleAuthRefreshKey] = useState(0);
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const [defaultChatRoot, setDefaultChatRoot] = useState('');
+  const [usesDockerBrowser, setUsesDockerBrowser] = useState(false);
   const [assignedSpace, setAssignedSpace] = useState<GoogleChatSpace | null>(() =>
     project.googleChatSpaceName
       ? {
@@ -414,6 +416,7 @@ function ChatImportPanelContent({ projectId, project, batches, onChanged, onOpen
         const config = await api.getConfig();
         if (!cancelled) {
           setDefaultChatRoot(config.googleChatDownloadRoot);
+          setUsesDockerBrowser(config.googleChatInviteMode === 'DOCKER_BROWSER');
         }
       } catch (error) {
         console.error(error);
@@ -671,9 +674,10 @@ function ChatImportPanelContent({ projectId, project, batches, onChanged, onOpen
             refreshKey={googleAuthRefreshKey}
             isBusy={operationRunning || busyAction !== null}
           />
-          {googleAuthStatus?.inviteMode === 'GOOGLE_CHAT_LINK' && <GoogleChatInvitesLink />}
+          {usesDockerBrowser && <GoogleChatInvitations isBusy={operationRunning || busyAction !== null} onJoined={loadSpaces} />}
+          {!usesDockerBrowser && googleAuthStatus?.inviteMode === 'GOOGLE_CHAT_LINK' && <GoogleChatInvitesLink />}
 
-          {googleAuthStatus?.inviteMode === 'WINDOWS_BROWSER' && (
+          {!usesDockerBrowser && googleAuthStatus?.inviteMode === 'WINDOWS_BROWSER' && (
           <div className="rounded-md border p-3 flex flex-col gap-3">
             <div className="flex items-center justify-between gap-3">
               <div>
