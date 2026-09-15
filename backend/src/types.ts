@@ -239,6 +239,7 @@ export interface GpkgExtractionResult {
 export interface ProjectRecord {
   id: string;
   name: string;
+  cities: string[];
   projectDefinition: string | null;
   projectType: ProjectType;
   splitterTopology: SplitterTopology;

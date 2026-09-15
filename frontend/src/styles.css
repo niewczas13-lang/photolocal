@@ -110,6 +110,7 @@
 }
 
 .map-workspace__sidebar-header {
+  flex-shrink: 0;
   border-bottom: 1px solid var(--border);
   padding: 14px;
 }
@@ -182,12 +183,24 @@
   box-shadow: 0 1px 2px rgb(15 23 42 / 0.08);
 }
 
+@media (max-height: 600px) {
+  .map-workspace__sidebar {
+    overflow-y: auto;
+  }
+
+  .map-workspace__project-list {
+    flex: none;
+    overflow-y: visible;
+  }
+}
+
 .map-workspace__project-card--idle:hover {
   border-color: color-mix(in oklch, var(--primary), white 45%);
 }
 
 .map-workspace--collapsed .map-workspace__sidebar-title,
 .map-workspace--collapsed .map-workspace__search,
+.map-workspace--collapsed .map-workspace__filters,
 .map-workspace--collapsed .map-workspace__project-list {
   display: none;
 }

@@ -687,10 +687,30 @@ export class ProjectsRepository {
         GROUP BY project.id
         ORDER BY project.updated_at DESC`,
       )
-      .all() as Array<ProjectRecord & { progressDone: number; progressTotal: number }>;
+      .all() as Array<Omit<ProjectRecord, 'cities' | 'status'>>;
+
+    const cityRows = this.db
+      .prepare(
+        `SELECT project_id AS projectId, city
+         FROM addresses
+         GROUP BY project_id, city`,
+      )
+      .all() as Array<{ projectId: string; city: string }>;
+    const citiesByProject = new Map<string, Map<string, string>>();
+    for (const row of cityRows) {
+      const city = row.city.normalize('NFC').replace(/\s+/g, ' ').trim();
+      if (!city) continue;
+      const cities = citiesByProject.get(row.projectId) ?? new Map<string, string>();
+      const cityKey = city.toLocaleLowerCase('pl');
+      if (!cities.has(cityKey)) cities.set(cityKey, city);
+      citiesByProject.set(row.projectId, cities);
+    }
 
     return rows.map((row) => ({
       ...row,
+      cities: [...(citiesByProject.get(row.id)?.values() ?? [])].sort((first, second) =>
+        first.localeCompare(second, 'pl'),
+      ),
       progressDone: Number(row.progressDone),
       progressTotal: Number(row.progressTotal),
       status:

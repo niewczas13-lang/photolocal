@@ -17,6 +17,7 @@ const project: ProjectSummary = {
   googleChatSpaceDisplayName: null,
   googleChatLastDownloadAt: null,
   addressCount: 0,
+  cities: [],
   dacToAddressCableCount: 0,
   adssToAddressCableCount: 0,
   progressDone: 0,

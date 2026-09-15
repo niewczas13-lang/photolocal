@@ -25,6 +25,7 @@ export interface ProjectSummary {
   googleChatSpaceDisplayName: string | null;
   googleChatLastDownloadAt: string | null;
   addressCount: number;
+  cities: string[];
   dacToAddressCableCount: number;
   adssToAddressCableCount: number;
   progressDone: number;

@@ -81,6 +81,7 @@ interface ProjectMapProps {
   projectName: string;
   view: MapView;
   onViewChange: (view: MapView) => void;
+  onProjectsChanged?: () => Promise<void>;
 }
 
 interface CreateMapNoteInput {
@@ -898,7 +899,13 @@ function AddressCandidatePopup({
   );
 }
 
-export default function ProjectMap({ projectId, projectName, view, onViewChange }: ProjectMapProps) {
+export default function ProjectMap({
+  projectId,
+  projectName,
+  view,
+  onViewChange,
+  onProjectsChanged,
+}: ProjectMapProps) {
   const [data, setData] = useState<ProjectMapData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -910,17 +917,18 @@ export default function ProjectMap({ projectId, projectName, view, onViewChange 
   const [draftNotePosition, setDraftNotePosition] = useState<{ lat: number; lng: number } | null>(null);
   const [focusedNote, setFocusedNote] = useState<(MapNoteFocusPosition & { id: string }) | null>(null);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (refreshProjects = false) => {
     setLoading(true);
     setError(null);
     try {
       setData(await api.getProjectMap(projectId));
+      if (refreshProjects) await onProjectsChanged?.();
     } catch (err) {
       setError(getErrorMessage(err));
     } finally {
       setLoading(false);
     }
-  }, [projectId]);
+  }, [projectId, onProjectsChanged]);
 
   useEffect(() => {
     void refresh();
@@ -1006,6 +1014,7 @@ export default function ProjectMap({ projectId, projectName, view, onViewChange 
     setError(null);
     try {
       setData(await api.approveMapAddressCandidate(projectId, candidateId, input));
+      await onProjectsChanged?.();
     } catch (err) {
       setError(getErrorMessage(err));
     } finally {
@@ -1257,7 +1266,7 @@ export default function ProjectMap({ projectId, projectName, view, onViewChange 
               </Button>
             </>
           )}
-          <Button variant="outline" size="sm" onClick={() => void refresh()} disabled={loading}>
+          <Button variant="outline" size="sm" onClick={() => void refresh(true)} disabled={loading}>
             <RefreshCw size={14} className="mr-2" />
             Odswiez
           </Button>
