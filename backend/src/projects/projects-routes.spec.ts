@@ -1,7 +1,9 @@
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import Database from 'better-sqlite3';
 import Fastify from 'fastify';
+import wkx from 'wkx';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { buildApp } from '../app.js';
 import { ChatBatchesRepository } from '../chat-import/chat-batches-repository.js';
@@ -143,6 +145,112 @@ describe('projects routes', () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual([]);
+  });
+
+  it('preserves SI aerial address metadata on initial GPKG import without aerial reserve folders', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'photo-local-si-import-'));
+    process.env.PHOTO_LOCAL_DB = join(dir, 'test.sqlite');
+    process.env.PHOTO_BASE_DIR = join(dir, 'photos');
+    const gpkg = new Database(':memory:');
+    gpkg.exec(`
+      CREATE TABLE PA (
+        id_posesja_opl TEXT, nazwa_miejsc TEXT, nazwa_ul TEXT,
+        nr_domu TEXT, nr_dzialki TEXT, geom BLOB
+      );
+      CREATE TABLE Lokale (id_posesja_opl TEXT, opp_osd TEXT);
+      CREATE TABLE "Kable Swiatlowodowe" (typ_elementu TEXT, do TEXT);
+      CREATE TABLE npd_suite_metadane (klucz TEXT, wartosc TEXT);
+      INSERT INTO npd_suite_metadane VALUES ('sap_opis', 'Q_SI_IMPORT'), ('sap_definicja_projektu', 'X/04017463');
+      INSERT INTO Lokale VALUES
+        ('pa-osd', 'TEST/OSD0001'), ('pa-opp', 'TEST/OPP0005'), ('pa-ground', 'TEST/OSD0002');
+      INSERT INTO "Kable Swiatlowodowe" VALUES
+        ('Kabel napowietrzny', 'TESTOWO, POLNA, 1'),
+        ('Kabel napowietrzny', 'TESTOWO, POLNA, 2'),
+        ('Kabel napowietrzny', 'TEST/OSD0002'),
+        ('Kabel doziemny', 'TESTOWO, POLNA, 3');
+    `);
+    const geometryHeader = Buffer.alloc(8);
+    geometryHeader.write('GP');
+    geometryHeader.writeInt32LE(2180, 4);
+    const point = Buffer.concat([geometryHeader, new wkx.Point(574000, 424000).toWkb()]);
+    for (const [propertyId, buildingNo] of [['pa-osd', '1'], ['pa-opp', '2'], ['pa-ground', '3']]) {
+      gpkg.prepare('INSERT INTO PA VALUES (?, ?, ?, ?, ?, ?)').run(
+        propertyId, 'Testowo', 'Polna', buildingNo, '12/3', point,
+      );
+    }
+    const gpkgBuffer = gpkg.serialize();
+    gpkg.close();
+
+    const { app, db } = await buildApp();
+    try {
+      const boundary = '----photo-local-si-import';
+      const payload = Buffer.concat([
+        Buffer.from(
+          `--${boundary}\r\nContent-Disposition: form-data; name="projectType"\r\n\r\nSI\r\n` +
+          `--${boundary}\r\nContent-Disposition: form-data; name="splitterTopology"\r\n\r\nCASCADE\r\n` +
+          `--${boundary}\r\nContent-Disposition: form-data; name="photoRootPath"\r\n\r\n${join(dir, 'photos')}\r\n` +
+          `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="sample.gpkg"\r\nContent-Type: application/octet-stream\r\n\r\n`,
+        ),
+        gpkgBuffer,
+        Buffer.from(`\r\n--${boundary}--\r\n`),
+      ]);
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/projects',
+        headers: { 'content-type': `multipart/form-data; boundary=${boundary}` },
+        payload,
+      });
+      expect(response.statusCode).toBe(200);
+      const project = response.json();
+      expect(project).toMatchObject({
+        name: 'Q_SI_IMPORT',
+        projectDefinition: 'X04017463',
+        projectType: 'SI',
+        splitterTopology: 'CASCADE',
+        splitterTopologySource: 'MANUAL',
+        addressCount: 3,
+        dacToAddressCableCount: 1,
+        adssToAddressCableCount: 3,
+      });
+      const storedAddresses = db.prepare(`
+        SELECT property_id AS propertyId, has_aerial_reserve AS hasAerialReserve
+        FROM addresses WHERE project_id = ? ORDER BY building_no
+      `).all(project.id);
+      expect(storedAddresses).toEqual([
+        { propertyId: 'pa-osd', hasAerialReserve: 1 },
+        { propertyId: 'pa-opp', hasAerialReserve: 1 },
+        { propertyId: 'pa-ground', hasAerialReserve: 0 },
+      ]);
+      const mapResponse = await app.inject({ method: 'GET', url: `/api/projects/${project.id}/map` });
+      expect(mapResponse.statusCode).toBe(200);
+      expect(mapResponse.json().addresses).toEqual([
+        expect.objectContaining({
+          buildingNo: '1',
+          distributionPoint: 'TEST/OSD0001',
+          isAerialReserve: true,
+          usesDistributionPhotoForCompletion: true,
+        }),
+        expect.objectContaining({
+          buildingNo: '2',
+          distributionPoint: 'TEST/OPP0005',
+          isAerialReserve: true,
+          usesDistributionPhotoForCompletion: true,
+        }),
+        expect.objectContaining({
+          buildingNo: '3',
+          isAerialReserve: false,
+          usesDistributionPhotoForCompletion: false,
+        }),
+      ]);
+      const checklist = new ProjectsRepository(db).getChecklist(project.id) as Array<{ path: string; nodeType: string }>;
+      expect(checklist.some((node) => node.path.startsWith('Zapasy_kabli_napowietrznych'))).toBe(false);
+      expect(checklist.filter((node) => node.nodeType === 'CABLE_RESERVE')).toEqual([
+        expect.objectContaining({ path: 'Zapasy_kabli_instalacyjnych/TEST_OSD0002/POLNA_3' }),
+      ]);
+    } finally {
+      await app.close();
+      db.close();
+    }
   });
 
   it('deletes a project from the database without removing its photo folder', async () => {
@@ -679,7 +787,7 @@ describe('projects routes', () => {
     expect(existsSync(nodeDetail.json().photos[0].storagePath)).toBe(true);
   });
 
-  it('changes the reserve location for an entire address reserve folder', async () => {
+  it.each(['SI', 'KPO'] as const)('changes a reserve folder location and applies %s completion rules', async (projectType) => {
     const dir = mkdtempSync(join(tmpdir(), 'photo-local-change-reserve-folder-'));
     process.env.PHOTO_LOCAL_DB = join(dir, 'test.sqlite');
     process.env.PHOTO_BASE_DIR = join(dir, 'photos');
@@ -689,7 +797,7 @@ describe('projects routes', () => {
     const project = repository.createProject({
       name: 'PROJEKT',
       projectDefinition: null,
-      projectType: 'SI',
+      projectType,
       splitterTopology: 'SINGLE',
       splitterTopologySource: 'AUTO',
       splitterCount: 1,
@@ -810,7 +918,10 @@ describe('projects routes', () => {
     expect(mapResponse.json().addresses[0]).toMatchObject({
       id: 'address-1',
       isAerialReserve: true,
-      hasReservePhoto: true,
+      reservePhotoCount: 1,
+      usesDistributionPhotoForCompletion: projectType === 'SI',
+      hasReservePhoto: projectType === 'KPO',
+      status: projectType === 'KPO' ? 'COMPLETE' : 'PENDING',
     });
   });
 

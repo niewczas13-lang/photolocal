@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { openDatabase } from '../db/connection.js';
 import { runMigrations } from '../db/migrations.js';
 import { ProjectsRepository } from './projects-repository.js';
+import { safeFolderName } from '../utils/path-names.js';
 
 function createRepository() {
   const dir = mkdtempSync(join(tmpdir(), 'photo-local-repo-'));
@@ -939,7 +940,7 @@ describe('ProjectsRepository', () => {
     });
   });
 
-  it('treats aerial address reserves as complete when their distribution point has photos', () => {
+  it('completes SI aerial addresses only after their distribution point has photos and is welded', () => {
     const { db, repository } = createRepository();
 
     const project = repository.createProject({
@@ -1032,6 +1033,16 @@ describe('ProjectsRepository', () => {
     });
 
     repository.addPhoto({
+      id: 'old-reserve-photo', projectId: project.id, checklistNodeId: 'reserve-aerial-address-1',
+      sourceFileName: 'old.jpg', storedFileName: 'old.jpg', storagePath: 'C:/photos/MAPA_ADSS/old.jpg',
+      thumbnailPath: null, mimeType: 'image/jpeg', fileSize: 1,
+      lat: null, lng: null, capturedAt: null, reserveLocation: null,
+    });
+    expect(repository.getProjectMap(project.id).addresses[0]).toMatchObject({
+      reservePhotoCount: 1, hasReservePhoto: false, status: 'PENDING',
+    });
+
+    repository.addPhoto({
       id: 'photo-osd',
       projectId: project.id,
       checklistNodeId: 'node-osd-details',
@@ -1048,6 +1059,14 @@ describe('ProjectsRepository', () => {
     });
 
     map = repository.getProjectMap(project.id);
+    expect(map.addresses[0]).toMatchObject({
+      hasDistributionPhoto: true,
+      hasReservePhoto: false,
+      status: 'PENDING',
+    });
+    expect(map.polygons[0].addressWithReservePhoto).toBe(0);
+    repository.updateInfraNodeStatus(project.id, map.infraNodes[0].id, 'WELDED');
+    map = repository.getProjectMap(project.id);
     db.close();
 
     expect(map.addresses[0]).toMatchObject({
@@ -1055,7 +1074,7 @@ describe('ProjectsRepository', () => {
       hasDistributionPhoto: true,
       usesDistributionPhotoForCompletion: true,
       hasReservePhoto: true,
-      reservePhotoCount: 0,
+      reservePhotoCount: 1,
       status: 'COMPLETE',
     });
     expect(map.polygons[0]).toMatchObject({
@@ -1275,6 +1294,14 @@ describe('ProjectsRepository', () => {
     });
 
     map = repository.getProjectMap(project.id);
+    expect(map.addresses[0]).toMatchObject({
+      hasDistributionPhoto: true,
+      hasReservePhoto: false,
+      status: 'PENDING',
+    });
+    expect(map.polygons[0].addressWithReservePhoto).toBe(0);
+    repository.updateInfraNodeStatus(project.id, map.infraNodes[0].id, 'WELDED');
+    map = repository.getProjectMap(project.id);
     db.close();
 
     expect(map.addresses[0]).toMatchObject({
@@ -1287,6 +1314,106 @@ describe('ProjectsRepository', () => {
     expect(map.polygons[0]).toMatchObject({
       addressWithReservePhoto: 1,
     });
+  });
+
+  it.each([
+    { point: 'RADOM/OSD0001', node: 'RADOM/OSD0001', other: 'RADOM/OSD00010', type: 'OSD' as const, complete: true },
+    { point: 'RADOM/OSD0001', node: 'RADOM/OSD0001', other: 'BARANOWO/OSD0001', type: 'OSD' as const, complete: true },
+    { point: 'BARANOWO/OPP0005', node: 'BARANOWO/OPP0005', other: 'BARANOWO/OPP00050', type: 'OPP' as const, complete: true },
+    { point: 'OSTRO\u0141\u0118KA/OSD0001', node: 'OSTRO\u0141\u0118KA/OSD0001', other: 'RADOM/OSD0001', type: 'OSD' as const, complete: true },
+    { point: 'RADOM/OSD0001', node: 'OSD0001', other: 'OSD0002', type: 'OSD' as const, complete: true },
+    { point: 'OSD0001', node: 'RADOM/OSD0001', other: 'RADOM/OSD0002', type: 'OSD' as const, complete: true },
+    { point: 'OSD0001', node: 'RADOM/OSD0001', other: 'BARANOWO/OSD0001', type: 'OSD' as const, complete: false },
+  ])('requires photos and welding of the correct distribution point: $point / $other', ({ point, node, other, type, complete }) => {
+    const { db, repository } = createRepository();
+    try {
+      const project = repository.createProject({
+        name: 'SI aerial completion',
+        projectDefinition: null,
+        projectType: 'SI',
+        splitterTopology: 'SINGLE',
+        splitterTopologySource: 'AUTO',
+        splitterCount: 1,
+        gpkgFileName: 'test.gpkg',
+        baseFolder: 'C:/photos/test',
+        addresses: [true, false].map((hasAerialReserve, index) => ({
+          id: 'address-' + index, city: 'Test', street: 'Testowa', buildingNo: String(index + 1),
+          propertyId: null, parcelNumber: null, distributionPoint: point,
+          lat: 52, lng: 21, householdCount: 1, businessUnitCount: 0, hasAerialReserve,
+        })),
+        dacToAddressCableCount: 1,
+        adssToAddressCableCount: 1,
+        checklistNodes: [node, other].map((name, index) => ({
+          id: 'details-' + index, projectId: 'temp', parentId: null, name: 'Szczegoly_skrzynki',
+          path: safeFolderName(name) + '/Szczegoly_skrzynki', nodeType: 'DISTRIBUTION',
+          addressId: null, sortOrder: index, minPhotos: 1, acceptsPhotos: true,
+        })),
+        infraNodes: [node, other].map(name => ({ nodeType: type, name, label: name, lat: 52, lng: 21 })),
+      });
+      const addPhoto = (index: number) => repository.addPhoto({
+        id: 'photo-' + index, projectId: project.id, checklistNodeId: 'details-' + index,
+        sourceFileName: 'photo.jpg', storedFileName: 'photo.jpg', storagePath: 'C:/photos/test/photo.jpg',
+        thumbnailPath: null, mimeType: 'image/jpeg', fileSize: 1,
+        lat: null, lng: null, capturedAt: null, reserveLocation: null,
+      });
+      const infra = repository.getProjectMap(project.id).infraNodes;
+      const ownNode = infra.find(item => item.name === node)!;
+      const otherNode = infra.find(item => item.name === other)!;
+      addPhoto(1);
+      repository.updateInfraNodeStatus(project.id, otherNode.id, 'WELDED');
+      // Another OSD/OPP cannot complete this address, even with the same terminal name.
+      expect(repository.getProjectMap(project.id).addresses[0]).toMatchObject({
+        hasDistributionPhoto: false, hasReservePhoto: false, status: 'PENDING',
+      });
+      repository.updateInfraNodeStatus(project.id, ownNode.id, 'WELDED');
+      expect(repository.getProjectMap(project.id).addresses[0].status).toBe('PENDING');
+      addPhoto(0);
+      let map = repository.getProjectMap(project.id);
+      expect(map.addresses[0]).toMatchObject({
+        hasReservePhoto: complete, reservePhotoCount: 0, status: complete ? 'COMPLETE' : 'PENDING',
+      });
+      expect(map.addresses[1]).toMatchObject({
+        isAerialReserve: false, hasReservePhoto: false, status: 'PENDING',
+      });
+      expect(map.infraNodes.find(item => item.name === node)?.hasPhoto).toBe(true);
+      repository.updateInfraNodeStatus(project.id, ownNode.id, 'PENDING');
+      map = repository.getProjectMap(project.id);
+      expect(map.addresses[0].status).toBe('PENDING');
+    } finally {
+      db.close();
+    }
+  });
+
+  it('keeps splice photos visible in numbered ZS folders without matching a longer node name', () => {
+    const { db, repository } = createRepository();
+    try {
+      const project = repository.createProject({
+        name: 'ZS photos', projectDefinition: null, projectType: 'SI', splitterTopology: 'SINGLE',
+        splitterTopologySource: 'AUTO', splitterCount: 1, gpkgFileName: 'test.gpkg', baseFolder: 'C:/photos/test',
+        addresses: [], dacToAddressCableCount: 0, adssToAddressCableCount: 0,
+        checklistNodes: [{
+          id: 'zs-photos', projectId: 'temp', parentId: null, name: 'Zdjecia',
+          path: '01_RADOM_ZS0001/Zdjecia', nodeType: 'STATIC', addressId: null,
+          sortOrder: 0, minPhotos: 1, acceptsPhotos: true,
+        }],
+        infraNodes: ['RADOM/ZS0001', 'RADOM/ZS00010'].map(name => ({
+          nodeType: 'ZS', name, label: name, lat: 52, lng: 21,
+        })),
+      });
+      repository.addPhoto({
+        id: 'photo-zs', projectId: project.id, checklistNodeId: 'zs-photos',
+        sourceFileName: 'zs.jpg', storedFileName: 'zs.jpg', storagePath: 'C:/photos/test/zs.jpg',
+        thumbnailPath: null, mimeType: 'image/jpeg', fileSize: 1,
+        lat: null, lng: null, capturedAt: null, reserveLocation: null,
+      });
+      const nodes = repository.getProjectMap(project.id).infraNodes;
+      expect(nodes.find(node => node.name === 'RADOM/ZS0001')).toMatchObject({
+        hasPhoto: true, photos: [expect.objectContaining({ id: 'photo-zs' })],
+      });
+      expect(nodes.find(node => node.name === 'RADOM/ZS00010')).toMatchObject({ hasPhoto: false, photos: [] });
+    } finally {
+      db.close();
+    }
   });
 
   it('updates SI aerial address metadata during recalculation', () => {

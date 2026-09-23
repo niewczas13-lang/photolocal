@@ -139,6 +139,7 @@ function prepareChecklistFromGpkg(input: {
     })),
     extracted.adssToAddressCableEntries,
     extracted.passiveInfraNodes,
+    extracted.dacToAddressCableEntries,
   );
 
   return {
@@ -1431,10 +1432,15 @@ export async function registerProjectRoutes(
         manualTopology && manualTopology !== 'AUTO' ? manualTopology : extracted.suggestedSplitterTopology;
       mkdirSync(projectFolder, { recursive: true });
       
-      const checklistAddresses = extracted.addresses.map(addr => ({
-        ...addr,
-        id: randomUUID()
-      }));
+      const checklistAddresses = markAerialAddressReserves(
+        extracted.addresses.map((addr) => ({
+          ...addr,
+          id: randomUUID(),
+        })),
+        extracted.adssToAddressCableEntries,
+        extracted.passiveInfraNodes,
+        extracted.dacToAddressCableEntries,
+      );
 
       const checklistNodes = generateChecklistNodes({
         projectId,
