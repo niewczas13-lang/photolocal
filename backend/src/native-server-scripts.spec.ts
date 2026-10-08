@@ -11,15 +11,16 @@ interface ProcessFixture {
   hasChangedIdentity?: boolean;
 }
 
-const stopScript = realpathSync(new URL('../../scripts', import.meta.url)) + '/stop-native-server.ps1';
-const startScript = realpathSync(new URL('../../scripts', import.meta.url)) + '/start-native-server.ps1';
+const stopScript = realpathSync.native(new URL('../../scripts', import.meta.url)) + '/stop-native-server.ps1';
+const startScript = realpathSync.native(new URL('../../scripts', import.meta.url)) + '/start-native-server.ps1';
 
 function runFixture(action: 'stop' | 'start', processes: ProcessFixture[]): Record<string, unknown> {
-  const temporaryParent = realpathSync(tmpdir());
-  const fixturePath = mkdtempSync(join(temporaryParent, 'photolocal-native-test-'));
+  const temporaryParent = realpathSync.native(tmpdir());
+  const fixturePath = realpathSync.native(mkdtempSync(join(temporaryParent, 'photolocal-native-test-')));
   const root = join(fixturePath, 'PhotoLocal ! (test)');
   mkdirSync(join(root, 'backend', 'dist'), { recursive: true });
   writeFileSync(join(root, 'backend', 'dist', 'server.js'), '');
+  const serverPath = realpathSync.native(join(root, 'backend', 'dist', 'server.js'));
   const harness = [
     "$ErrorActionPreference = 'Stop'",
     '. $env:PHOTOLOCAL_STOP_HELPER',
@@ -27,7 +28,7 @@ function runFixture(action: 'stop' | 'start', processes: ProcessFixture[]): Reco
     '$events = [Collections.Generic.List[string]]::new()',
     '$fixtures = ConvertFrom-Json $env:PHOTOLOCAL_PROCESSES',
     '$root = $env:PHOTOLOCAL_FIXTURE_ROOT',
-    "$script:fixtureServerPath = Join-Path $root 'backend\\dist\\server.js'",
+    '$script:fixtureServerPath = $env:PHOTOLOCAL_FIXTURE_SERVER',
     '$stamp = [datetime]::Parse("2026-10-08T12:00:00Z").ToUniversalTime()',
     'function Get-NetTCPConnection { param($State, $LocalPort, $ErrorAction)',
     '  if ($LocalPort -ne 4873 -or $State -ne "Listen") { throw "Wrong listener query" }',
@@ -71,10 +72,11 @@ function runFixture(action: 'stop' | 'start', processes: ProcessFixture[]): Reco
     return JSON.parse(execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-File', harnessPath], {
       encoding: 'utf8', timeout: 15_000,
       env: { ...process.env, PHOTOLOCAL_STOP_HELPER: stopScript, PHOTOLOCAL_START_HELPER: startScript,
-        PHOTOLOCAL_FIXTURE_ROOT: root, PHOTOLOCAL_PROCESSES: JSON.stringify(processes) },
+        PHOTOLOCAL_FIXTURE_ROOT: root, PHOTOLOCAL_FIXTURE_SERVER: serverPath,
+        PHOTOLOCAL_PROCESSES: JSON.stringify(processes) },
     }).trim()) as Record<string, unknown>;
   } finally {
-    const resolvedFixture = realpathSync(fixturePath);
+    const resolvedFixture = realpathSync.native(fixturePath);
     if (dirname(resolvedFixture) !== temporaryParent || !basename(resolvedFixture).startsWith('photolocal-native-test-')) {
       throw new Error('Refusing to remove a path outside the native script fixture');
     }
@@ -144,5 +146,42 @@ describe.skipIf(process.platform !== 'win32')('native server scripts', () => {
     expect(result.failure).toBeNull();
     expect(result.started).toMatchObject({ argument: '"' + result.server + '"', windowStyle: 'Hidden' });
     expect(result.events).toEqual(['start']);
+  });
+
+  it('uses canonical fixture and process paths when Windows TEMP is an 8.3 alias', (context) => {
+    const temporaryParent = realpathSync.native(tmpdir());
+    const aliasRoot = realpathSync.native(mkdtempSync(join(temporaryParent, 'photolocal-native-alias-')));
+    const previousTmp = process.env.TMP;
+    const previousTemp = process.env.TEMP;
+    try {
+      const literal = "'" + aliasRoot.replaceAll("'", "''") + "'";
+      const alias = execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
+        `(New-Object -ComObject Scripting.FileSystemObject).GetFolder(${literal}).ShortPath`], {
+        encoding: 'utf8', timeout: 15_000, windowsHide: true,
+      }).trim();
+      expect(realpathSync.native(alias).toLowerCase()).toBe(aliasRoot.toLowerCase());
+      if (alias.toLowerCase() === aliasRoot.toLowerCase()) {
+        context.skip();
+        return;
+      }
+      process.env.TMP = alias;
+      process.env.TEMP = alias;
+      const stopped = runFixture('stop', [{ id: 10 }]);
+      expect(stopped.failure).toBeNull();
+      expect(stopped.events).toEqual(['inspect:10', 'stop:10']);
+      const started = runFixture('start', []);
+      expect(started.failure).toBeNull();
+      expect(started.started).toMatchObject({ argument: '"' + started.server + '"', windowStyle: 'Hidden' });
+      expect(started.events).toEqual(['start']);
+    } finally {
+      if (previousTmp === undefined) delete process.env.TMP;
+      else process.env.TMP = previousTmp;
+      if (previousTemp === undefined) delete process.env.TEMP;
+      else process.env.TEMP = previousTemp;
+      if (dirname(aliasRoot) !== temporaryParent || !basename(aliasRoot).startsWith('photolocal-native-alias-')) {
+        throw new Error('Refusing to remove a path outside the native alias fixture');
+      }
+      rmSync(aliasRoot, { recursive: true, force: true });
+    }
   });
 });

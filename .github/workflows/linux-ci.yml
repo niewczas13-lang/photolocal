@@ -36,7 +36,7 @@ jobs:
       - name: Test final cutover with synthetic files, SQLite and mocked system changes
         run: node --test scripts/production-file-copy.spec.mjs scripts/finalize-production-data.spec.mjs scripts/windows-native-cutover.spec.mjs scripts/switch-production-to-docker.spec.mjs
       - name: Test production app updater with mocked Docker and Git
-        run: node --test scripts/update-production-app.spec.mjs scripts/update-production-app.windows.spec.mjs
+        run: node --test scripts/update-production-app.spec.mjs scripts/update-production-app.windows.spec.mjs scripts/diagnose-production-app-update.spec.mjs
       - name: Test guarded native server scripts and batch self-update
         run: npm run test --workspace backend -- src/native-server-scripts.spec.ts src/update-bat.spec.ts
 
@@ -57,7 +57,7 @@ jobs:
       - name: Test backend and frontend on Linux
         run: npm test
       - name: Test production updater without live containers
-        run: node --test scripts/update-production-app.spec.mjs
+        run: node --test scripts/update-production-app.spec.mjs scripts/diagnose-production-app-update.spec.mjs
       - name: Test offline SQLite migration with synthetic databases
         run: npm run test:migration --workspace backend
       - name: Test isolated SMB diagnostics without real shares or credentials
