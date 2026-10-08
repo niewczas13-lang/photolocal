@@ -152,6 +152,7 @@ export default function CreateProjectDialog({ open, onClose, onCreated }: Create
                         <button
                           key={root.path}
                           type="button"
+                          disabled={loadingSharedFolders || creatingFolder}
                           onClick={() => void openSharedFolder(root.path)}
                           className="flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-muted"
                         >
@@ -173,13 +174,26 @@ export default function CreateProjectDialog({ open, onClose, onCreated }: Create
                         type="button"
                         size="sm"
                         variant="outline"
-                        disabled={!browserParentPath || loadingSharedFolders}
-                        onClick={() => browserParentPath && void openSharedFolder(browserParentPath)}
+                        disabled={loadingSharedFolders || creatingFolder}
+                        onClick={() => {
+                          if (browserParentPath) {
+                            void openSharedFolder(browserParentPath);
+                          } else {
+                            setBrowserPath('');
+                            setBrowserParentPath(null);
+                            setSharedEntries([]);
+                          }
+                        }}
                       >
                         <ArrowUp size={14} className="mr-1" />
                         W gore
                       </Button>
-                      <Button type="button" size="sm" onClick={() => setPhotoRootPath(browserPath)}>
+                      <Button
+                        type="button"
+                        size="sm"
+                        disabled={loadingSharedFolders || creatingFolder}
+                        onClick={() => setPhotoRootPath(browserPath)}
+                      >
                         Uzyj tego folderu
                       </Button>
                     </div>
@@ -189,12 +203,12 @@ export default function CreateProjectDialog({ open, onClose, onCreated }: Create
                         value={newFolderName}
                         onChange={(event) => setNewFolderName(event.target.value)}
                         placeholder="Nazwa nowego folderu"
-                        disabled={creatingFolder}
+                        disabled={creatingFolder || loadingSharedFolders}
                       />
                       <Button
                         type="button"
                         variant="outline"
-                        disabled={!newFolderName.trim() || creatingFolder}
+                        disabled={!newFolderName.trim() || creatingFolder || loadingSharedFolders}
                         onClick={() => void createFolder()}
                       >
                         {creatingFolder ? (
@@ -211,6 +225,7 @@ export default function CreateProjectDialog({ open, onClose, onCreated }: Create
                           <button
                             key={entry.path}
                             type="button"
+                            disabled={loadingSharedFolders || creatingFolder}
                             onClick={() => void openSharedFolder(entry.path)}
                             className="flex w-full items-center gap-2 border-b px-2 py-1.5 text-left text-sm last:border-b-0 hover:bg-muted"
                           >

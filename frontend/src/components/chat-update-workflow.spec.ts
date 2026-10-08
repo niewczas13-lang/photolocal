@@ -44,6 +44,27 @@ function classificationStatus(partial: Partial<ChatClassificationStatus>): ChatC
 }
 
 describe('getChatUpdateWorkflowSnapshot', () => {
+  it.each(['AUTH_REQUIRED', 'PAUSED', 'PARTIAL_FAILURE'] as const)(
+    'retains saved progress for %s and does not mark import or Qwen complete',
+    (state) => {
+      const snapshot = getChatUpdateWorkflowSnapshot({
+        phase: 'failed',
+        counts: { waiting: 0, ready: 0, review: 0 },
+        downloadStatus: downloadStatus({ state, totalFiles: 20, downloadedFiles: 8 }),
+        importStatus: importStatus({ state: 'FAILED' }),
+        classificationStatus: classificationStatus({ state: 'FAILED' }),
+        error: null,
+      });
+
+      expect(snapshot.progressPercent).toBe(40);
+      expect(snapshot.canClose).toBe(true);
+      expect(snapshot.steps.map((step) => `${step.id}:${step.state}`)).toEqual([
+        'download:failed', 'dedupe:waiting', 'qwen:waiting',
+      ]);
+      expect(snapshot.primaryAction).toBeNull();
+    },
+  );
+
   it('marks download as active and keeps the modal locked while photos are downloading', () => {
     const snapshot = getChatUpdateWorkflowSnapshot({
       phase: 'download',

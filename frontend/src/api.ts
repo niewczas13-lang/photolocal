@@ -15,6 +15,8 @@ import type {
   ChecklistNodeDetail,
   ChecklistRecalculateResult,
   GoogleChatDownloadStatus,
+  GoogleChatAuthStatus,
+  GoogleChatBrowserSession,
   GoogleChatInviteAcceptResult,
   GoogleChatInviteListResult,
   GoogleChatInviteSetupResult,
@@ -32,6 +34,13 @@ import type {
 } from './types';
 
 const AUTH_TOKEN_KEY = 'photo-local-auth-token';
+
+export class ApiError extends Error {
+  constructor(message: string, public readonly status: number, public readonly code?: string) {
+    super(message);
+    this.name = 'ApiError';
+  }
+}
 
 export function getAuthToken(): string | null {
   return window.localStorage.getItem(AUTH_TOKEN_KEY);
@@ -54,7 +63,16 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
   if (!response.ok) {
     if (response.status === 401) clearAuthToken();
     const text = await response.text();
-    throw new Error(parseApiErrorMessage(text, response.status));
+    let code: string | undefined;
+    try {
+      const parsed: unknown = JSON.parse(text);
+      if (parsed && typeof parsed === 'object' && 'code' in parsed && typeof parsed.code === 'string') {
+        code = parsed.code;
+      }
+    } catch {
+      // Error bodies without JSON have no machine-readable code.
+    }
+    throw new ApiError(parseApiErrorMessage(text, response.status), response.status, code);
   }
   return response.json() as Promise<T>;
 }
@@ -71,6 +89,11 @@ async function requestBlob(url: string, init?: RequestInit): Promise<Blob> {
     throw new Error(parseApiErrorMessage(text, response.status));
   }
   return response.blob();
+}
+
+function browserRequestSignal(signal?: AbortSignal): AbortSignal {
+  const deadline = AbortSignal.timeout(120_000);
+  return signal ? AbortSignal.any([signal, deadline]) : deadline;
 }
 
 export const api = {
@@ -112,20 +135,43 @@ export const api = {
       body: JSON.stringify({ parentPath, folderName }),
     }),
   listProjects: () => request<ProjectSummary[]>('/api/projects'),
-  listGoogleChatSpaces: () => request<GoogleChatSpace[]>('/api/google-chat/spaces'),
-  listGoogleChatInvites: () =>
+  listGoogleChatSpaces: () => request<GoogleChatSpace[]>('/api/google-chat/spaces', {
+    signal: browserRequestSignal(),
+  }),
+  getGoogleChatAuthStatus: (signal?: AbortSignal) =>
+    request<GoogleChatAuthStatus>('/api/google-chat/auth/status', { signal }),
+  checkGoogleChatAuth: (signal?: AbortSignal) =>
+    request<GoogleChatAuthStatus>('/api/google-chat/auth/check', { method: 'POST', signal }),
+  startGoogleChatAuth: (returnPath: string, signal?: AbortSignal) =>
+    request<{ authorizationUrl: string }>('/api/google-chat/auth/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ returnPath }),
+      signal,
+    }),
+  listGoogleChatInvites: (signal?: AbortSignal) =>
     request<GoogleChatInviteListResult>('/api/google-chat/invites/list', {
       method: 'POST',
+      signal: browserRequestSignal(signal),
     }),
   openGoogleChatInviteSetup: () =>
     request<GoogleChatInviteSetupResult>('/api/google-chat/invites/setup', {
       method: 'POST',
     }),
-  acceptGoogleChatInvite: (inviteKey: string) =>
+  acceptGoogleChatInvite: (inviteKey: string, signal?: AbortSignal) =>
     request<GoogleChatInviteAcceptResult>('/api/google-chat/invites/accept', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ inviteKey }),
+      signal: browserRequestSignal(signal),
+    }),
+  startGoogleChatBrowser: (signal?: AbortSignal) =>
+    request<GoogleChatBrowserSession>('/api/google-chat/invites/browser/start', {
+      method: 'POST', signal: browserRequestSignal(signal),
+    }),
+  closeGoogleChatBrowser: (sessionId: string) =>
+    request<{ released: boolean }>(`/api/google-chat/invites/browser/${encodeURIComponent(sessionId)}`, {
+      method: 'DELETE', keepalive: true, signal: AbortSignal.timeout(10_000),
     }),
   startGoogleChatDownload: (projectId: string, spaceName: string, spaceDisplayName: string) =>
     request<GoogleChatDownloadStatus>(`/api/projects/${projectId}/google-chat/download`, {
@@ -135,6 +181,10 @@ export const api = {
     }),
   getGoogleChatDownloadStatus: (projectId: string) =>
     request<GoogleChatDownloadStatus>(`/api/projects/${projectId}/google-chat/download/status`),
+  resumeGoogleChatDownload: (projectId: string) =>
+    request<GoogleChatDownloadStatus>(`/api/projects/${projectId}/google-chat/download/resume`, {
+      method: 'POST',
+    }),
   renameProject: (projectId: string, newName: string) =>
     request<ProjectSummary>(`/api/projects/${projectId}`, {
       method: 'PATCH',

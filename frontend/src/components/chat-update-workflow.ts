@@ -69,6 +69,9 @@ function stepState(
   input: GetChatUpdateWorkflowSnapshotInput,
 ): ChatUpdateWorkflowStepState {
   if (input.phase === 'failed') {
+    if (input.downloadStatus && input.downloadStatus.state !== 'COMPLETED') {
+      return step === 'download' ? 'failed' : 'waiting';
+    }
     if (input.classificationStatus?.state === 'FAILED') return step === 'qwen' ? 'failed' : 'complete';
     if (input.importStatus?.state === 'FAILED') {
       if (step === 'download') return 'complete';
@@ -111,7 +114,8 @@ function getDescription(phase: ChatUpdateWorkflowPhase): string {
 
 function getProgressPercent(input: GetChatUpdateWorkflowSnapshotInput): number {
   if (input.phase === 'done') return 100;
-  if (input.phase === 'download') {
+  if (input.phase === 'download' ||
+      (input.phase === 'failed' && input.downloadStatus?.state !== 'COMPLETED')) {
     const total = input.downloadStatus?.totalFiles ?? 0;
     const done = (input.downloadStatus?.downloadedFiles ?? 0) + (input.downloadStatus?.skippedFiles ?? 0);
     return percent(done, total);

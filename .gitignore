@@ -1,4 +1,12 @@
 node_modules/
+.worktrees/
+docker-data/
+.env.docker
+*.migration.json
+baseline-tests.log
+*.log
+**/__pycache__/
+*.pyc
 backend/dist/
 frontend/dist/
 frontend/*.tsbuildinfo
@@ -9,6 +17,12 @@ logs/
 data/
 *.pid
 .env
+.env.*
+!.env.example
+!.env.docker.example
+**/credentials*.json
+**/token*.json
+**/*client_secret*.json
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal

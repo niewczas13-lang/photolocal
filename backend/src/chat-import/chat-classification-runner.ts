@@ -8,6 +8,7 @@ import {
 } from './chat-batches-repository.js';
 import {
   classifyChatFolder,
+  getDefaultVisionModel,
   type ClassifyFolderInput,
   type ChatFolderClassification,
   type ReserveClassification,
@@ -67,10 +68,15 @@ function decideStatus(
   classification: ChatFolderClassification,
   candidate: { id: string } | null,
 ): { status: ChatBatchStatus; reviewReason: string | null; checklistNodeId: string | null; reserveLocation: ReserveClassification | null } {
-  if (classification.reason?.startsWith('Nie udalo sie sparsowac odpowiedzi modelu')) {
+  const classificationError = classification.error || (
+    classification.reason?.startsWith('Nie udalo sie sparsowac odpowiedzi modelu')
+      ? classification.reason : undefined
+  );
+  if (classificationError) {
     return {
-      status: 'WAITING_FOR_CLASSIFICATION',
-      reviewReason: 'Blad odpowiedzi LLM - ponow klasyfikacje',
+      status: 'PENDING_REVIEW',
+      reviewReason: `Blad klasyfikacji Qwen - przypisz zdjecia recznie. ${classificationError}`
+        .slice(0, 500),
       checklistNodeId: null,
       reserveLocation: null,
     };
@@ -181,9 +187,24 @@ export async function classifyWaitingChatBatches(
       continue;
     }
 
-    const classification = await classifier({
-      folderPath: batch.folderPath,
-    });
+    let classification: ChatFolderClassification;
+    try {
+      classification = await classifier({ folderPath: batch.folderPath });
+    } catch (error) {
+      // A failed batch remains available for manual assignment; later batches can continue.
+      classification = {
+        folder: batch.folderName,
+        imageCount: batch.fileCount,
+        sampledImages: [],
+        model: getDefaultVisionModel(),
+        classifiedAt: new Date().toISOString(),
+        reserveLocation: 'Niepewne',
+        confidence: 0,
+        visualEvidence: [],
+        shouldReview: true,
+        error: error instanceof Error ? error.message || error.name : 'Nieznany blad klasyfikacji',
+      };
+    }
     const match = findBestChecklistCandidate(
       `${batch.messageText} ${batch.folderName}`,
       checklistRows,

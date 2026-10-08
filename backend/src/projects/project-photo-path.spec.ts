@@ -1,10 +1,11 @@
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { describe, expect, it } from 'vitest';
 import { resolveProjectPhotoFolder } from './project-photo-path.js';
 
 describe('resolveProjectPhotoFolder', () => {
   it('creates a fixed zdjecia folder inside the selected task folder', () => {
-    const selectedFolder = join('D:', 'projekty', 'opp13', 'pw', 'sap');
+    const selectedFolder = join(tmpdir(), 'projekty', 'opp13', 'pw', 'sap');
 
     expect(resolveProjectPhotoFolder(selectedFolder)).toBe(join(selectedFolder, 'zdjecia'));
   });

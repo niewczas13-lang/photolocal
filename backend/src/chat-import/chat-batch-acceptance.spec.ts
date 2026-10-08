@@ -1,13 +1,15 @@
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import sharp from 'sharp';
 import { openDatabase } from '../db/connection.js';
 import { runMigrations } from '../db/migrations.js';
 import { ProjectsRepository } from '../projects/projects-repository.js';
 import { ChatBatchesRepository } from './chat-batches-repository.js';
 import { acceptChatBatch } from './chat-batch-acceptance.js';
+import { classifyWaitingChatBatches } from './chat-classification-runner.js';
 import type { ChatManifest } from './chat-manifest.js';
 
 function createContext() {
@@ -101,6 +103,73 @@ function createManifest(folderPath: string): ChatManifest {
 }
 
 describe('acceptChatBatch', () => {
+  it('manually imports preserved photos after a Qwen exception sends the batch to review', async () => {
+    const { db, projects, batches, projectId, dir } = createContext();
+    try {
+      const manifest = createManifest(join(dir, 'Qwen failure manual review'));
+      manifest.files = [manifest.files[0]];
+      const sourcePath = join(manifest.folderPath, 'photo.jpeg');
+      const sourceBytes = await sharp({
+        create: { width: 24, height: 18, channels: 3, background: '#c48535' },
+      }).jpeg().toBuffer();
+      writeFileSync(sourcePath, sourceBytes);
+      const batch = batches.importManifest({
+        projectId,
+        manifest,
+        status: 'WAITING_FOR_CLASSIFICATION',
+      });
+      const filesBeforeClassification = batches.listBatchFiles(projectId, batch.id);
+
+      const classified = await classifyWaitingChatBatches({
+        projectId,
+        projectsRepository: projects,
+        batchesRepository: batches,
+        classifyFolder: async () => { throw new Error('Synthetic Qwen connection failure'); },
+      });
+
+      expect(classified).toEqual({ processed: 1, readyForImport: 0, pendingReview: 1 });
+      expect(batches.getBatch(projectId, batch.id)).toMatchObject({
+        status: 'PENDING_REVIEW',
+        checklistNodeId: null,
+        reserveLocation: null,
+        confidence: 0,
+      });
+      expect(batches.listBatchFiles(projectId, batch.id)).toEqual(filesBeforeClassification);
+      expect(readFileSync(sourcePath)).toEqual(sourceBytes);
+      expect(projects.getNodePhotos(projectId, 'node-maleniecka-5')).toHaveLength(0);
+
+      const accepted = await acceptChatBatch({
+        projectId,
+        batchId: batch.id,
+        checklistNodeIds: ['node-maleniecka-5'],
+        fileIds: filesBeforeClassification.map((file) => file.id),
+        reserveLocation: 'W studni',
+        projectsRepository: projects,
+        batchesRepository: batches,
+      });
+
+      expect(accepted).toEqual({ importedPhotos: 1, checklistNodeCount: 1, sourceFileCount: 1 });
+      expect(batches.getBatch(projectId, batch.id)).toMatchObject({
+        status: 'IMPORTED',
+        checklistNodeId: 'node-maleniecka-5',
+        reserveLocation: 'W studni',
+      });
+      expect(batches.listBatchFiles(projectId, batch.id)).toHaveLength(0);
+      expect(readFileSync(sourcePath)).toEqual(sourceBytes);
+      const photos = projects.getNodePhotos(projectId, 'node-maleniecka-5');
+      expect(photos).toHaveLength(1);
+      expect(photos[0].reserveLocation).toBe('W studni');
+      expect(photos[0].storagePath).not.toBe(sourcePath);
+      expect(await sharp(readFileSync(photos[0].storagePath)).metadata()).toMatchObject({
+        format: 'jpeg', width: 24, height: 18,
+      });
+      expect(photos[0].thumbnailPath).not.toBeNull();
+      expect(await sharp(readFileSync(photos[0].thumbnailPath!)).metadata()).toMatchObject({ format: 'webp' });
+    } finally {
+      db.close();
+    }
+  });
+
   it('passes the Google Chat message date as photo metadata fallback', async () => {
     const { db, projects, batches, projectId, dir } = createContext();
     const batch = batches.importManifest({

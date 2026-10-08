@@ -41,6 +41,7 @@ const DEFAULT_OLLAMA_URL = 'http://localhost:11434';
 const DEFAULT_MAX_IMAGES = 5;
 const DEFAULT_IMAGE_MAX_SIZE = 768;
 const DEFAULT_REQUEST_TIMEOUT_MS = 60_000;
+const MAX_UNLOAD_TIMEOUT_MS = 5_000;
 const REVIEW_CONFIDENCE_THRESHOLD = 0.85;
 
 export function getDefaultVisionModel(): string {
@@ -96,7 +97,7 @@ export async function classifyChatFolder(
   input: ClassifyFolderInput,
 ): Promise<ChatFolderClassification> {
   const model = input.model ?? getDefaultVisionModel();
-  const ollamaUrl = input.ollamaUrl ?? DEFAULT_OLLAMA_URL;
+  const ollamaUrl = input.ollamaUrl ?? (process.env.OLLAMA_URL?.trim() || DEFAULT_OLLAMA_URL);
   const maxImages = input.maxImages ?? DEFAULT_MAX_IMAGES;
   const imageMaxSize = input.imageMaxSize ?? DEFAULT_IMAGE_MAX_SIZE;
   const requestTimeoutMs = input.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
@@ -129,7 +130,7 @@ export async function classifyChatFolder(
 
   for (const attempt of attempts) {
     if (attempt.resetModel) {
-      await unloadOllamaModel({ ollamaUrl, model });
+      await unloadOllamaModel({ ollamaUrl, model, requestTimeoutMs });
     }
 
     sampledPaths = imagePaths.slice(0, attempt.maxImages);
@@ -163,6 +164,7 @@ export async function classifyChatFolder(
     }
   }
 
+  const error = lastError instanceof Error ? lastError.message : String(lastError);
   return {
     folder: basename(folderPath),
     imageCount: imagePaths.length,
@@ -173,9 +175,8 @@ export async function classifyChatFolder(
     reserveLocation: 'Niepewne',
     confidence: 0,
     visualEvidence: [],
-    reason: `Nie udalo sie sparsowac odpowiedzi modelu: ${
-      lastError instanceof Error ? lastError.message : String(lastError)
-    }`,
+    error,
+    reason: `Nie udalo sie sparsowac odpowiedzi modelu: ${error}`,
     shouldReview: true,
   };
 }
@@ -245,11 +246,16 @@ async function callOllamaVision(input: {
   return content;
 }
 
-async function unloadOllamaModel(input: { ollamaUrl: string; model: string }): Promise<void> {
+async function unloadOllamaModel(input: {
+  ollamaUrl: string;
+  model: string;
+  requestTimeoutMs: number;
+}): Promise<void> {
   try {
     await fetch(`${input.ollamaUrl.replace(/\/$/, '')}/api/generate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      signal: AbortSignal.timeout(Math.min(input.requestTimeoutMs, MAX_UNLOAD_TIMEOUT_MS)),
       body: JSON.stringify({
         model: input.model,
         keep_alive: 0,

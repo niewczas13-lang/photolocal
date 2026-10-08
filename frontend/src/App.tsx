@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { api } from './api';
 import {
   mapProjectRoute,
@@ -77,6 +77,9 @@ export default function App() {
       current.map((project) => (project.id === updatedProject.id ? updatedProject : project)),
     );
   };
+  const handleProjectsChanged = useCallback(async (): Promise<void> => {
+    setProjects(await api.listProjects());
+  }, []);
   const logout = async () => {
     await api.logout();
     setAuthUser(null);
@@ -136,6 +139,7 @@ export default function App() {
             projects={projects}
             selectedProjectId={selectedProjectId}
             mapView={mapView}
+            onProjectsChanged={handleProjectsChanged}
             onSelectProject={(projectId) => {
               window.location.hash = mapProjectRoute(projectId, mapView);
             }}

@@ -29,7 +29,19 @@ describe('ProjectsRepository', () => {
       splitterCount: 1,
       gpkgFileName: 'projekt.gpkg',
       baseFolder: 'C:/photos/PROJEKT',
-      addresses: [],
+      addresses: ['Radom', 'Olsztyn', 'Radom'].map((city, index) => ({
+        id: `address-progress-${index}`,
+        city,
+        street: 'Testowa',
+        buildingNo: String(index + 1),
+        propertyId: null,
+        parcelNumber: null,
+        distributionPoint: null,
+        lat: null,
+        lng: null,
+        householdCount: 1,
+        businessUnitCount: 0,
+      })),
       dacToAddressCableCount: 0,
       adssToAddressCableCount: 0,
       checklistNodes: [
@@ -94,10 +106,70 @@ describe('ProjectsRepository', () => {
 
     expect(summary).toMatchObject({
       id: project.id,
+      cities: ['Olsztyn', 'Radom'],
       progressDone: 2,
       progressTotal: 3,
       status: 'W trakcie',
     });
+  });
+
+  it('derives normalized Polish-sorted cities only from each project address list', () => {
+    const { db, repository } = createRepository();
+    const createProject = (name: string, cities: string[]) => repository.createProject({
+      name,
+      projectDefinition: 'Warszawa',
+      projectType: 'SI',
+      splitterTopology: 'SINGLE',
+      splitterTopologySource: 'AUTO',
+      splitterCount: 1,
+      gpkgFileName: 'Gdansk.gpkg',
+      baseFolder: `C:/photos/${name}`,
+      addresses: cities.map((city, index) => ({
+        id: `${name}-address-${index}`,
+        city,
+        street: 'Testowa',
+        buildingNo: String(index + 1),
+        propertyId: null,
+        parcelNumber: null,
+        distributionPoint: null,
+        lat: null,
+        lng: null,
+        householdCount: 1,
+        businessUnitCount: 0,
+      })),
+      dacToAddressCableCount: 0,
+      adssToAddressCableCount: 0,
+      checklistNodes: [],
+    });
+
+    try {
+      const multiCity = createProject('Krakow', [
+        ' Żory ', 'Łódź', 'Lublin', '  Nowy\t  Sącz ', 'łÓDŹ', 'nowy sącz', '', ' \t ',
+      ]);
+      const otherCity = createProject('Poznan', ['Radom']);
+      const withoutCities = createProject('Wroclaw', ['', ' \t ']);
+      const withoutAddresses = createProject('Szczecin', []);
+      const projects = repository.listProjects();
+
+      expect(projects.find((project) => project.id === multiCity.id)).toMatchObject({
+        cities: expect.arrayContaining([
+          expect.stringMatching(/^lublin$/iu),
+          expect.stringMatching(/^łódź$/iu),
+          expect.stringMatching(/^nowy sącz$/iu),
+          expect.stringMatching(/^żory$/iu),
+        ]),
+      });
+      const cities = projects.find((project) => project.id === multiCity.id)?.cities;
+      expect(cities?.map((city) => city.toLocaleLowerCase('pl'))).toEqual([
+        'lublin', 'łódź', 'nowy sącz', 'żory',
+      ]);
+      expect(repository.getProject(multiCity.id)?.cities).toEqual(cities);
+      expect(otherCity).toMatchObject({ cities: ['Radom'] });
+      expect(withoutCities).toMatchObject({ cities: [] });
+      expect(withoutAddresses).toMatchObject({ cities: [] });
+    } finally {
+      db.close();
+    }
   });
 
   it('stores an assigned Google Chat room on the project summary', () => {

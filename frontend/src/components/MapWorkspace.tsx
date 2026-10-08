@@ -1,8 +1,14 @@
-import { useMemo, useState } from 'react';
+import { useId, useMemo, useState } from 'react';
 import { Camera, Map, PanelLeftClose, PanelLeftOpen, Search, Settings } from 'lucide-react';
 
 import type { MapView } from '../app-routing';
 import { cn } from '../lib/utils';
+import {
+  filterAndSortProjects,
+  getProjectCityOptions,
+  PROJECT_SORT_OPTIONS,
+  type ProjectSortOrder,
+} from '../map-project-list';
 import type { ProjectSummary } from '../types';
 import ProjectMap from './ProjectMap';
 import { Badge } from './ui/badge';
@@ -17,10 +23,7 @@ interface MapWorkspaceProps {
   onMapViewChange: (view: MapView) => void;
   onOpenPhotos: (projectId: string) => void;
   onOpenSettings: (projectId: string) => void;
-}
-
-function normalize(value: string): string {
-  return value.toLowerCase().replace(/\s+/g, ' ').trim();
+  onProjectsChanged?: () => Promise<void>;
 }
 
 export default function MapWorkspace({
@@ -31,21 +34,26 @@ export default function MapWorkspace({
   onMapViewChange,
   onOpenPhotos,
   onOpenSettings,
+  onProjectsChanged,
 }: MapWorkspaceProps) {
   const [query, setQuery] = useState('');
+  const [city, setCity] = useState('');
+  const [sortOrder, setSortOrder] = useState<ProjectSortOrder>('updated-desc');
   const [projectPanelOpen, setProjectPanelOpen] = useState(true);
+  const filterId = useId();
   const selectedProject = selectedProjectId
     ? projects.find((project) => project.id === selectedProjectId) ?? null
     : null;
-  const filteredProjects = useMemo(() => {
-    const normalizedQuery = normalize(query);
-    if (!normalizedQuery) return projects;
-    return projects.filter((project) =>
-      normalize([project.name, project.projectDefinition, project.gpkgFileName].filter(Boolean).join(' ')).includes(
-        normalizedQuery,
-      ),
-    );
-  }, [projects, query]);
+  const cityOptions = useMemo(() => getProjectCityOptions(projects), [projects]);
+  const filteredProjects = useMemo(
+    () => filterAndSortProjects(projects, { query, city, sortOrder }),
+    [projects, query, city, sortOrder],
+  );
+  const hasFilters = Boolean(query.trim() || city);
+  const clearFilters = () => {
+    setQuery('');
+    setCity('');
+  };
 
   return (
     <div className={cn('map-workspace', !projectPanelOpen && 'map-workspace--collapsed')}>
@@ -76,8 +84,57 @@ export default function MapWorkspace({
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               placeholder="Szukaj projektu..."
+              aria-label="Szukaj projektu lub miejscowości"
               className="h-9 pl-9"
             />
+          </div>
+          <div className="map-workspace__filters mt-3 space-y-3">
+            <div className="space-y-1">
+              <label htmlFor={`${filterId}-city`} className="block text-xs text-muted-foreground">
+                Miejscowość
+              </label>
+              <select
+                id={`${filterId}-city`}
+                value={city}
+                onChange={(event) => setCity(event.target.value)}
+                className="h-9 w-full min-w-0 rounded-lg border border-input bg-background px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
+              >
+                <option value="">Wszystkie miejscowości</option>
+                {city && !cityOptions.some((option) => option.value === city) && (
+                  <option value={city}>Wybrana miejscowość (0)</option>
+                )}
+                {cityOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label} ({option.count})
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-1">
+              <label htmlFor={`${filterId}-sort`} className="block text-xs text-muted-foreground">
+                Sortowanie
+              </label>
+              <select
+                id={`${filterId}-sort`}
+                value={sortOrder}
+                onChange={(event) => setSortOrder(event.target.value as ProjectSortOrder)}
+                className="h-9 w-full min-w-0 rounded-lg border border-input bg-background px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
+              >
+                {PROJECT_SORT_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </div>
+            <div className="flex min-h-7 items-center justify-between gap-2">
+              <p role="status" className="text-xs text-muted-foreground">
+                Projekty: {filteredProjects.length} z {projects.length}
+              </p>
+              {hasFilters && (
+                <Button type="button" variant="ghost" size="sm" onClick={clearFilters}>
+                  Wyczyść filtry
+                </Button>
+              )}
+            </div>
           </div>
         </div>
 
@@ -99,6 +156,12 @@ export default function MapWorkspace({
                   <div className="min-w-0">
                     <p className="truncate text-sm font-semibold">{project.name}</p>
                     <p className="mt-1 truncate text-xs text-muted-foreground">{project.gpkgFileName}</p>
+                    <p
+                      className="mt-1 truncate text-xs text-muted-foreground"
+                      title={project.cities?.join(', ') || 'Brak miejscowości'}
+                    >
+                      {project.cities?.join(', ') || 'Brak miejscowości'}
+                    </p>
                   </div>
                   <Badge variant={project.status === 'Kompletne' ? 'default' : 'outline'}>
                     {project.projectType}
@@ -116,7 +179,9 @@ export default function MapWorkspace({
 
           {filteredProjects.length === 0 && (
             <div className="rounded-md border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
-              Brak projektow dla tego wyszukiwania.
+              {projects.length === 0
+                ? 'Brak projektów w bazie.'
+                : 'Brak projektów spełniających wybrane filtry.'}
             </div>
           )}
         </div>
@@ -158,6 +223,7 @@ export default function MapWorkspace({
               projectName={selectedProject.name}
               view={mapView}
               onViewChange={onMapViewChange}
+              onProjectsChanged={onProjectsChanged}
             />
           </>
         ) : (

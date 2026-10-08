@@ -52,6 +52,11 @@ D:\projekty\opp13\pw\sap\
 
 ## Google Chat i Qwen/Ollama
 
+Logowanie Google przez przeglądarkę, wznawianie pobierania i wdrożenie w Dockerze opisuje
+[instrukcja Google i Docker](docs/google-docker-deployment.md). Wersja testowa kontenera
+korzysta z osobnych danych i portu 4874. Przełączenie istniejącej instalacji wymaga kopii
+bazy, zdjęć i mapowania ścieżek Windows na katalogi kontenera.
+
 Klasyfikacja paczek z Google Chat uzywa lokalnej Ollamy.
 
 Minimalnie potrzebujesz:

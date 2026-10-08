@@ -9,6 +9,7 @@ import {
 const project: ProjectRecord = {
   id: 'project-1',
   name: 'Projekt testowy',
+  cities: [],
   projectDefinition: null,
   projectType: 'SI',
   splitterTopology: 'SINGLE',

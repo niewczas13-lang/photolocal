@@ -1,5 +1,6 @@
 import multipart from '@fastify/multipart';
 import fastifyStatic from '@fastify/static';
+import websocket from '@fastify/websocket';
 import Fastify from 'fastify';
 import { existsSync } from 'node:fs';
 import { registerAuthGuard, registerAuthRoutes } from './auth/app-auth.js';
@@ -12,7 +13,6 @@ import {
   listSharedFolderChildren,
   listSharedFolderRoots,
 } from './filesystem/shared-folder-browser.js';
-import { acceptChatInvite, listChatInvites, openChatInvitesSetup } from './google-chat/chat-invites.js';
 import { registerProjectRoutes } from './projects/projects-routes.js';
 
 function shouldEnableAuth(): boolean {
@@ -26,6 +26,8 @@ export async function buildApp() {
   const config = loadConfig();
   const db = openDatabase(config.dbPath);
   runMigrations(db);
+
+  await app.register(websocket, { options: { maxPayload: 1024 * 1024 } });
 
   await app.register(multipart, {
     limits: {
@@ -41,6 +43,7 @@ export async function buildApp() {
   app.get('/api/config', async () => ({
     googleChatDownloadRoot: config.googleChatDownloadRoot,
     googleChatInviteProfileDir: config.googleChatInviteProfileDir,
+    googleChatInviteMode: config.googleChatInviteMode,
   }));
   app.post('/api/folders/pick', async (request, reply) => {
     const { initialPath } = (request.body ?? {}) as { initialPath?: string };
@@ -87,59 +90,6 @@ export async function buildApp() {
     } catch (error) {
       return reply.status(400).send({
         error: error instanceof Error ? error.message : 'Unable to create folder',
-      });
-    }
-  });
-
-  app.post('/api/google-chat/invites/list', async (_request, reply) => {
-    try {
-      return await listChatInvites({
-        config: {
-          profileDir: config.googleChatInviteProfileDir,
-          headless: config.googleChatInviteHeadless,
-          debugPort: config.googleChatInviteDebugPort,
-        },
-      });
-    } catch (error) {
-      return reply.status(500).send({
-        error: error instanceof Error ? error.message : 'Unable to load Google Chat invites',
-      });
-    }
-  });
-
-  app.post('/api/google-chat/invites/setup', async (_request, reply) => {
-    try {
-      return await openChatInvitesSetup({
-        config: {
-          profileDir: config.googleChatInviteProfileDir,
-          headless: false,
-          debugPort: config.googleChatInviteDebugPort,
-          launcherPath: config.googleChatInviteLauncherPath,
-        },
-      });
-    } catch (error) {
-      return reply.status(500).send({
-        error: error instanceof Error ? error.message : 'Unable to open Google Chat invite setup',
-      });
-    }
-  });
-
-  app.post('/api/google-chat/invites/accept', async (request, reply) => {
-    const body = (request.body ?? {}) as { inviteKey?: string };
-    if (!body.inviteKey) return reply.status(400).send({ error: 'inviteKey is required' });
-
-    try {
-      return await acceptChatInvite({
-        config: {
-          profileDir: config.googleChatInviteProfileDir,
-          headless: config.googleChatInviteHeadless,
-          debugPort: config.googleChatInviteDebugPort,
-        },
-        inviteKey: body.inviteKey,
-      });
-    } catch (error) {
-      return reply.status(500).send({
-        error: error instanceof Error ? error.message : 'Unable to accept Google Chat invite',
       });
     }
   });
