@@ -1194,6 +1194,9 @@ export async function registerProjectRoutes(
       return reply.status(400).send({ error: 'Only cable reserve folders can change reserve location' });
     }
     if (!reserveLocation) return reply.status(400).send({ error: 'reserveLocation is required' });
+    if (project.projectType === 'SI' && reserveLocation === 'Napowietrzny') {
+      return reply.status(400).send({ error: 'W projekcie SI nie tworzy sie folderow zapasow napowietrznych' });
+    }
 
     const address = repository.getAddressForReserveNode(projectId, nodeId);
     if (!address) return reply.status(400).send({ error: 'Reserve folder is not connected to an address' });

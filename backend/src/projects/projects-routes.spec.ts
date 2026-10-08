@@ -787,7 +787,7 @@ describe('projects routes', () => {
     expect(existsSync(nodeDetail.json().photos[0].storagePath)).toBe(true);
   });
 
-  it.each(['SI', 'KPO'] as const)('changes a reserve folder location and applies %s completion rules', async (projectType) => {
+  it.each(['SI', 'KPO'] as const)('handles aerial reserve relocation according to %s requirements', async (projectType) => {
     const dir = mkdtempSync(join(tmpdir(), 'photo-local-change-reserve-folder-'));
     process.env.PHOTO_LOCAL_DB = join(dir, 'test.sqlite');
     process.env.PHOTO_BASE_DIR = join(dir, 'photos');
@@ -891,6 +891,15 @@ describe('projects routes', () => {
       headers: { 'content-type': 'application/json' },
       payload: JSON.stringify({ reserveLocation: 'Napowietrzny' }),
     });
+    if (projectType === 'SI') {
+      expect(changeResponse.statusCode).toBe(400);
+      expect(existsSync(originalPath)).toBe(true);
+      expect(repository.getNodePhotos(project.id, 'reserve-address')).toHaveLength(1);
+      expect((repository.getChecklist(project.id) as Array<{ path: string }>)
+        .some(node => node.path.startsWith('Zapasy_kabli_napowietrznych'))).toBe(false);
+      await app.close();
+      return;
+    }
     const targetNodeId = changeResponse.json().targetNodeId as string;
     const targetDetail = await app.inject({
       method: 'GET',
@@ -919,9 +928,9 @@ describe('projects routes', () => {
       id: 'address-1',
       isAerialReserve: true,
       reservePhotoCount: 1,
-      usesDistributionPhotoForCompletion: projectType === 'SI',
-      hasReservePhoto: projectType === 'KPO',
-      status: projectType === 'KPO' ? 'COMPLETE' : 'PENDING',
+      usesDistributionPhotoForCompletion: false,
+      hasReservePhoto: true,
+      status: 'COMPLETE',
     });
   });
 
@@ -935,7 +944,7 @@ describe('projects routes', () => {
     const project = repository.createProject({
       name: 'BARTAG',
       projectDefinition: null,
-      projectType: 'SI',
+      projectType: 'KPO',
       splitterTopology: 'SINGLE',
       splitterTopologySource: 'AUTO',
       splitterCount: 1,

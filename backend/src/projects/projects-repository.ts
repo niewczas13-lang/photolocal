@@ -32,6 +32,11 @@ import type { ReserveLocation } from '../photos/photo-processor.js';
 import { safeFolderName, toAddressFolderName } from '../utils/path-names.js';
 
 const STALE_GPKG_NODE_REASON = 'Nie wystepuje w ostatnio przeliczonym GPKG';
+const SI_AERIAL_RESERVE_REASON = 'Zapasy napowietrzne nie dotycza projektu SI';
+
+function isAerialReserveChecklistPath(path: string): boolean {
+  return /^Zapasy_kabli_napowietrznych(?:\/|$)/i.test(path);
+}
 
 export interface AddPhotoInput {
   id: string;
@@ -1074,7 +1079,13 @@ export class ProjectsRepository {
     street: string;
     buildingNo: string | null;
     reserveLocation: ReserveLocation;
-  }): string {
+  }): string | null {
+    if (input.reserveLocation === 'Napowietrzny') {
+      const project = this.db
+        .prepare('SELECT project_type AS projectType FROM projects WHERE id = ?')
+        .get(input.projectId) as { projectType: ProjectType } | undefined;
+      if (project?.projectType === 'SI') return null;
+    }
     const rootPath =
       input.reserveLocation === 'Napowietrzny' ? 'Zapasy_kabli_napowietrznych' : 'Zapasy_kabli_instalacyjnych';
     const rootSort = input.reserveLocation === 'Napowietrzny' ? 8 : 7;
@@ -1105,7 +1116,7 @@ export class ProjectsRepository {
     });
 
     const addressName = toAddressFolderName(input.street, input.buildingNo);
-    return this.upsertManualChecklistNode({
+    const addressNodeId = this.upsertManualChecklistNode({
       projectId: input.projectId,
       parentId: distributionId,
       name: addressName,
@@ -1116,6 +1127,22 @@ export class ProjectsRepository {
       minPhotos: 1,
       acceptsPhotos: true,
     });
+
+    this.db
+      .prepare(
+        `UPDATE checklist_nodes
+         SET status = CASE
+               WHEN accepts_photos = 1 AND min_photos > 0
+                 AND (SELECT COUNT(*) FROM photos
+                      WHERE checklist_node_id = checklist_nodes.id) >= min_photos THEN 'COMPLETE'
+               ELSE 'OPEN'
+             END,
+             not_applicable_reason = NULL,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE project_id = ? AND id IN (?, ?, ?) AND not_applicable_reason = ?`,
+      )
+      .run(input.projectId, rootId, distributionId, addressNodeId, SI_AERIAL_RESERVE_REASON);
+    return addressNodeId;
   }
 
   getAddressForReserveNode(projectId: string, nodeId: string): ReserveNodeAddressRecord | null {
@@ -1159,7 +1186,7 @@ export class ProjectsRepository {
     address: ReserveNodeAddressRecord,
     reserveLocation: ReserveLocation,
   ): string {
-    return this.ensureReserveChecklistPath({
+    const nodeId = this.ensureReserveChecklistPath({
       projectId,
       distributionPoint: address.distributionPoint,
       addressId: address.id,
@@ -1167,6 +1194,8 @@ export class ProjectsRepository {
       buildingNo: address.buildingNo,
       reserveLocation,
     });
+    if (!nodeId) throw new Error('Aerial reserve folders are not applicable to SI projects');
+    return nodeId;
   }
 
   updateAddressReserveLocation(projectId: string, addressId: string, reserveLocation: ReserveLocation): void {
@@ -1471,6 +1500,11 @@ export class ProjectsRepository {
         LEFT JOIN checklist_nodes node
           ON node.address_id = address.id
           AND node.node_type = 'CABLE_RESERVE'
+          AND COALESCE(node.not_applicable_reason, '') != ?
+          AND NOT (? = 'SI' AND node.min_photos = 0 AND (
+            node.path = 'Zapasy_kabli_napowietrznych' COLLATE NOCASE
+            OR node.path LIKE 'Zapasy_kabli_napowietrznych/%'
+          ))
         LEFT JOIN photos photo ON photo.checklist_node_id = node.id
         WHERE address.project_id = ?
           AND address.lat IS NOT NULL
@@ -1480,7 +1514,7 @@ export class ProjectsRepository {
           address.street COLLATE NOCASE ASC,
           address.building_no COLLATE NOCASE ASC`,
       )
-      .all(projectId) as Array<{
+      .all(SI_AERIAL_RESERVE_REASON, projectType, projectId) as Array<{
       id: string;
       city: string;
       street: string;
@@ -1532,6 +1566,7 @@ export class ProjectsRepository {
         `SELECT
           node.name,
           node.path,
+          node.not_applicable_reason AS notApplicableReason,
           photo.id,
           photo.checklist_node_id AS checklistNodeId,
           photo.stored_file_name AS storedFileName,
@@ -1546,6 +1581,7 @@ export class ProjectsRepository {
       .all(projectId) as Array<{
       name: string;
       path: string;
+      notApplicableReason: string | null;
       id: string;
       checklistNodeId: string;
       storedFileName: string;
@@ -1591,7 +1627,10 @@ export class ProjectsRepository {
     }
     const hasUniqueTerminal = (name: string | null): boolean =>
       (scopedKeysByTerminal.get(distributionKey(normalizeMapNodeTerminalKey(name)))?.size ?? 0) <= 1;
-    const distributionPhotoKeys = photoNodeRows.map(photo => ({
+    const distributionPhotoKeys = photoNodeRows.filter((photo) =>
+      photo.notApplicableReason !== SI_AERIAL_RESERVE_REASON &&
+      !(projectType === 'SI' && isAerialReserveChecklistPath(photo.path)),
+    ).map(photo => ({
       photo,
       nameKey: distributionKey(photo.name),
       pathKeys: photo.path.split(/[\\/]/).map(distributionKey),
@@ -2184,7 +2223,7 @@ export class ProjectsRepository {
              accepts_photos = ?,
              status = CASE
                WHEN status = 'NOT_APPLICABLE'
-                 AND COALESCE(not_applicable_reason, '') != ? THEN status
+                 AND COALESCE(not_applicable_reason, '') NOT IN (?, ?) THEN status
                WHEN ? = 1
                  AND ? > 0
                  AND (
@@ -2196,7 +2235,7 @@ export class ProjectsRepository {
              END,
              not_applicable_reason = CASE
                WHEN status = 'NOT_APPLICABLE'
-                 AND COALESCE(not_applicable_reason, '') != ? THEN not_applicable_reason
+                 AND COALESCE(not_applicable_reason, '') NOT IN (?, ?) THEN not_applicable_reason
                ELSE NULL
              END,
              updated_at = CURRENT_TIMESTAMP
@@ -2223,10 +2262,12 @@ export class ProjectsRepository {
             node.minPhotos,
             node.acceptsPhotos ? 1 : 0,
             STALE_GPKG_NODE_REASON,
+            SI_AERIAL_RESERVE_REASON,
             node.acceptsPhotos ? 1 : 0,
             node.minPhotos,
             node.minPhotos,
             STALE_GPKG_NODE_REASON,
+            SI_AERIAL_RESERVE_REASON,
             existingId,
             input.projectId,
           );
@@ -2277,7 +2318,12 @@ export class ProjectsRepository {
         return (childIdsByParentId.get(nodeId) ?? []).some((childId) => hasPhotoInSubtree(childId));
       };
 
-      const staleNodes = existingNodeRows.filter((node) => node.source === 'GPKG' && !generatedPaths.has(node.path));
+      const staleNodes = existingNodeRows.filter(
+        (node) => !generatedPaths.has(node.path) && (
+          node.source === 'GPKG' ||
+          (input.projectType === 'SI' && isAerialReserveChecklistPath(node.path))
+        ),
+      );
       const staleNodeIds = new Set(staleNodes.map((node) => node.id));
       const staleNodeIdsWithPhotos = new Set(
         staleNodes.filter((node) => hasPhotoInSubtree(node.id)).map((node) => node.id),
@@ -2310,8 +2356,31 @@ export class ProjectsRepository {
              updated_at = CURRENT_TIMESTAMP
          WHERE id = ? AND project_id = ?`,
       );
-      for (const nodeId of staleNodeIdsWithPhotos) {
-        updateStaleNode.run(STALE_GPKG_NODE_REASON, STALE_GPKG_NODE_REASON, nodeId, input.projectId);
+      const archiveSiAerialNode = this.db.prepare(
+        `UPDATE checklist_nodes
+         SET min_photos = 0,
+             status = 'NOT_APPLICABLE',
+             not_applicable_reason = CASE
+               WHEN status = 'NOT_APPLICABLE'
+                 AND COALESCE(not_applicable_reason, '') NOT IN (?, ?) THEN not_applicable_reason
+               ELSE ?
+             END,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = ? AND project_id = ?`,
+      );
+      for (const node of staleNodes) {
+        if (!staleNodeIdsWithPhotos.has(node.id)) continue;
+        if (input.projectType === 'SI' && isAerialReserveChecklistPath(node.path)) {
+          archiveSiAerialNode.run(
+            STALE_GPKG_NODE_REASON,
+            SI_AERIAL_RESERVE_REASON,
+            SI_AERIAL_RESERVE_REASON,
+            node.id,
+            input.projectId,
+          );
+        } else {
+          updateStaleNode.run(STALE_GPKG_NODE_REASON, STALE_GPKG_NODE_REASON, node.id, input.projectId);
+        }
       }
       result.preservedAssignedStaleNodes = staleNodeIdsWithPhotos.size;
 
@@ -2348,6 +2417,37 @@ export class ProjectsRepository {
           input.adssToAddressCableCount,
           input.projectId,
         );
+
+      if (input.projectType === 'KPO') {
+        const manualAerialAddresses = this.db
+          .prepare(
+            `SELECT id, distribution_point AS distributionPoint, street, building_no AS buildingNo
+             FROM addresses
+             WHERE project_id = ? AND source = 'MANUAL_MAP' AND has_aerial_reserve = 1`,
+          )
+          .all(input.projectId) as Array<{
+          id: string;
+          distributionPoint: string | null;
+          street: string;
+          buildingNo: string | null;
+        }>;
+        const countNodes = this.db.prepare(
+          'SELECT COUNT(*) AS count FROM checklist_nodes WHERE project_id = ?',
+        );
+        const before = countNodes.get(input.projectId) as { count: number };
+        for (const address of manualAerialAddresses) {
+          this.ensureReserveChecklistPath({
+            projectId: input.projectId,
+            distributionPoint: address.distributionPoint || 'BEZ_PUNKTU',
+            addressId: address.id,
+            street: address.street,
+            buildingNo: address.buildingNo,
+            reserveLocation: 'Napowietrzny',
+          });
+        }
+        const after = countNodes.get(input.projectId) as { count: number };
+        result.addedNodes += after.count - before.count;
+      }
 
       this.replaceMapFeatures(
         input.projectId,
@@ -2414,6 +2514,14 @@ export class ProjectsRepository {
     const id = randomUUID();
     const pathPart = safeFolderName(name);
     const path = parent ? `${parent.path}/${pathPart}` : pathPart;
+    if (isAerialReserveChecklistPath(path)) {
+      const project = this.db
+        .prepare('SELECT project_type AS projectType FROM projects WHERE id = ?')
+        .get(input.projectId) as { projectType: ProjectType } | undefined;
+      if (project?.projectType === 'SI') {
+        throw new Error('Aerial reserve folders are not applicable to SI projects');
+      }
+    }
     const existing = this.db
       .prepare(`SELECT id FROM checklist_nodes WHERE project_id = ? AND path = ?`)
       .get(input.projectId, path);
