@@ -32,14 +32,16 @@ describe('update-native.bat', () => {
         const remotePath = join(fixturePath, 'remote.git');
         const clientPath = join(fixturePath, 'client');
         const hooksPath = join(fixturePath, 'disabled-hooks');
+        const globalConfigPath = join(fixturePath, 'empty.gitconfig');
         mkdirSync(hooksPath);
+        writeFileSync(globalConfigPath, '');
         const fixtureEnv = {
           ...process.env,
           GIT_CONFIG_COUNT: '1',
           GIT_CONFIG_KEY_0: 'core.hooksPath',
           GIT_CONFIG_VALUE_0: hooksPath,
           GIT_CONFIG_NOSYSTEM: '1',
-          GIT_CONFIG_GLOBAL: 'NUL',
+          GIT_CONFIG_GLOBAL: globalConfigPath,
           GIT_TERMINAL_PROMPT: '0',
         };
         const git = (args: string[], cwd: string): string =>
