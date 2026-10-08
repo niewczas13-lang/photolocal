@@ -1,53 +1,23 @@
 @echo off
-setlocal
-cd /d "%~dp0"
-if errorlevel 1 goto error
+setlocal DisableDelayedExpansion
 
-echo Aktualizacja Photo Local...
-echo Katalog aplikacji: %CD%
-git remote get-url origin
-if errorlevel 1 goto error
-git branch --show-current
-if errorlevel 1 goto error
-
-echo.
-echo [1/6] Zatrzymywanie aplikacji...
-call "%~dp0stop.bat"
-
-echo.
-echo [2/6] Pobieranie zmian z GitHub...
-git pull --ff-only
-if errorlevel 1 goto error
-git log -1 --format=oneline
-if errorlevel 1 goto error
-
-echo.
-echo [3/6] Instalacja paczek Node...
-call npm.cmd install --workspaces
-if errorlevel 1 goto error
-
-echo.
-echo [4/6] Instalacja paczek Python...
-python -m pip install -r "%~dp0pobierzchat\requirements.txt"
-if errorlevel 1 goto error
-
-echo.
-echo [5/6] Build aplikacji...
-call npm.cmd run build
-if errorlevel 1 goto error
-
-echo.
-echo [6/6] Start aplikacji...
-call "%~dp0start.bat"
-if errorlevel 1 goto error
-
-echo.
-echo Aktualizacja zakonczona.
-pause
-exit /b 0
-
-:error
-echo.
-echo Aktualizacja przerwana. Sprawdz blad powyzej.
-pause
-exit /b 1
+rem Parse the complete continuation before git pull can replace this batch file.
+(
+  cd /d "%~dp0"
+  if errorlevel 1 exit /b 1
+  echo Aktualizacja produkcyjnego Photo Local w Dockerze...
+  powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\update-production-app.ps1"
+  if errorlevel 2 (
+    echo Nie znaleziono produkcyjnej aplikacji Docker. Nie zatrzymano zadnej aplikacji.
+    pause
+    exit /b 2
+  )
+  if errorlevel 1 (
+    echo Aktualizacja przerwana. Sprawdz kod bledu powyzej.
+    pause
+    exit /b 1
+  )
+  echo Aktualizacja zakonczona.
+  pause
+  exit /b 0
+)

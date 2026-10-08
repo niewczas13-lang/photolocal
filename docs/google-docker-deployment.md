@@ -1,5 +1,38 @@
 # Google i Docker — wdrożenie istniejącego PhotoLocal
 
+## Aktualizacja działającej produkcji z main
+
+Gałąź produkcyjna Docker została scalona z `main`. Repozytorium na serwerze pozostaje
+w `C:\PhotoLocal-staging`, a dane w obecnym `docker-data\production-...`.
+Do aktualizacji używaj `update.bat` z tego katalogu. `C:\PhotoLocal` to wcześniejsza
+instalacja natywna i pobieranie do niej kodu nie zmienia obrazu działającej produkcji.
+
+Przy pierwszym przejściu uruchom kolejno w PowerShell poniższe polecenia, przerywając,
+jeśli którekolwiek zwróci błąd:
+
+```powershell
+git -C C:\PhotoLocal-staging fetch origin main:refs/remotes/origin/main
+git -C C:\PhotoLocal-staging switch main
+git -C C:\PhotoLocal-staging merge --ff-only origin/main
+git -C C:\PhotoLocal-staging branch --set-upstream-to=origin/main main
+git -C C:\PhotoLocal-staging config --replace-all remote.origin.fetch +refs/heads/main:refs/remotes/origin/main
+& C:\PhotoLocal-staging\update.bat
+```
+
+Następne aktualizacje wymagają tylko uruchomienia tego BAT-a. Nie używaj starego BAT-a
+przed pobraniem nowej wersji: zatrzymywał proces po numerze portu, co mogło zamknąć Docker.
+
+Aktualizator odczytuje pełną listę plików Compose z działającego kontenera produkcji,
+zachowuje ich kolejność i dodaje plik zawierający wyłącznie ID nowego obrazu PhotoLocal.
+Nie uruchamia repozytoryjnego `compose.yaml`, który opisuje osobny staging. Buduje obraz
+przy działającej produkcji i wymienia tylko usługę `photolocal` przez `up --no-deps`.
+Konfiguracja NAS, bazy, zdjęć, tokenów Google i przeglądarki pozostaje w obecnym wdrożeniu.
+Pozostałe kontenery pozostają uruchomione. Błąd budowania lub lokalne zmiany kodu
+zatrzymują aktualizację przed wymianą kontenera. Błąd startu wywołuje próbę przywrócenia
+poprzedniego obrazu na obecnych danych.
+
+## Pierwsza migracja instalacji natywnej do Docker
+
 Zmiany można wdrożyć najpierw na Windows, a Docker uruchomić równolegle na kopii danych.
 Przełączenie produkcji wymaga krótkiej przerwy na końcową, spójną kopię. Nie należy
 uruchamiać dwóch instancji zapisujących do tej samej bazy, zdjęć ani tokenu Google.
@@ -78,7 +111,7 @@ Zbuduj zatwierdzoną wersję w osobnym katalogu, np. `C:\PhotoLocal-staging`.
 Do próby tej gałęzi można pobrać osobny checkout (katalog docelowy musi być nowy):
 
 ```powershell
-git clone --branch codex/google-auth-docker --single-branch https://github.com/niewczas13-lang/photolocal.git C:\PhotoLocal-staging
+git clone --branch main --single-branch https://github.com/niewczas13-lang/photolocal.git C:\PhotoLocal-staging
 ```
 
 Przy testowaniu wariantu Windows potrzebne są Node.js 24 oraz Python 3.11 lub nowszy.

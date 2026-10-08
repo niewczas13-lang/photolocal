@@ -2,7 +2,21 @@
 
 Lokalna aplikacja do pilnowania zdjec projektowych. Dziala na jednym komputerze, zapisuje baze SQLite lokalnie i tworzy strukture zdjec w folderze wskazanym przy tworzeniu zadania.
 
-## Uruchomienie
+## Produkcja Docker i aktualizacje
+
+Kod produkcyjny jest na gałęzi `main`. Istniejąca instalacja Docker pozostaje
+w swoim katalogu, np. `C:\PhotoLocal-staging`; jego nazwa nie oznacza wersji testowej.
+
+Uruchom `update.bat` z tego katalogu. Aktualizator sprawdza lokalne zmiany, pobiera
+kod i buduje obraz przy działającej aplikacji. Następnie wymienia tylko kontener
+`photolocal-production-photolocal-1`. Zachowuje wszystkie obecne pliki Compose,
+bazę, zdjęcia, NAS i konfigurację Google; pozostałe kontenery pozostają uruchomione.
+Jeśli nowy obraz nie wystartuje, próbuje przywrócić poprzedni obraz na obecnych danych.
+
+Pierwsze przejście z gałęzi Docker na `main` opisuje
+[instrukcja wdrożenia](docs/google-docker-deployment.md).
+
+## Uruchomienie natywne
 
 1. Kliknij `start.bat`.
 2. Poczekaj kilka sekund.
@@ -13,6 +27,10 @@ Jesli aplikacja juz dziala, `start.bat` tylko otworzy strone.
 ## Zatrzymanie
 
 Kliknij `stop.bat`.
+
+Te skrypty obsługują wyłącznie natywny proces Node PhotoLocal. Odmawiają zatrzymania
+Dockera lub nieznanego właściciela portu. Natywną instalację aktualizuje
+`update-native.bat`.
 
 ## Konfiguracja
 

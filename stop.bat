@@ -1,14 +1,16 @@
 @echo off
+setlocal DisableDelayedExpansion
 echo Zatrzymywanie procesow Photo Local...
 
-:: Backend
-FOR /F "tokens=5" %%T IN ('netstat -a -n -o ^| findstr :4873 ^| findstr LISTENING') DO (
-    if not "%%T"=="0" (
-        echo Zamykanie serwera na PID %%T ...
-        TaskKill.exe /PID %%T /F >nul 2>&1
-    )
-)
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\stop-native-server.ps1"
+if errorlevel 1 goto error
 
 echo.
 echo Operacja zakonczona. Serwer Photo Local zostal zatrzymany.
 pause
+exit /b 0
+
+:error
+echo Zatrzymanie przerwane. Docker i niepotwierdzone procesy nie sa zatrzymywane.
+pause
+exit /b 1

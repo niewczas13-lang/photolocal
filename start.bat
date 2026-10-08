@@ -1,6 +1,9 @@
 @echo off
-setlocal
+setlocal DisableDelayedExpansion
 cd /d "%~dp0"
+if errorlevel 1 goto error
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\start-native-server.ps1" -CheckOnly
+if errorlevel 1 goto error
 echo Budowanie i uruchamianie aplikacji Photo Local...
 
 echo [1/2] Budowanie Frontend...
@@ -16,8 +19,7 @@ if errorlevel 1 goto error
 cd /d "%~dp0"
 
 echo Uruchamianie serwera w tle...
-if not exist "%~dp0logs" mkdir "%~dp0logs"
-powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process node -ArgumentList 'dist/server.js' -WorkingDirectory '%~dp0backend' -WindowStyle Hidden -RedirectStandardOutput '%~dp0logs\server.out.log' -RedirectStandardError '%~dp0logs\server.err.log'"
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\start-native-server.ps1"
 if errorlevel 1 goto error
 
 echo ----------------------------------------------------
