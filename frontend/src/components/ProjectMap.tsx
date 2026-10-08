@@ -804,12 +804,14 @@ function AddressPopup({
   const addressReady = address.hasReservePhoto || address.isNotApplicable;
   const statusLabel = address.isNotApplicable
     ? 'Nie dotyczy'
-    : address.usesDistributionPhotoForCompletion && address.hasDistributionPhoto && address.reservePhotoCount === 0
-      ? 'OSD/OPP ze zdjeciem'
+    : address.usesDistributionPhotoForCompletion && address.hasDistributionPhoto && address.hasReservePhoto
+      ? 'OSD/OPP wyspawane ze zdjeciem'
       : address.hasReservePhoto
         ? 'Zapas ze zdjeciem'
         : address.usesDistributionPhotoForCompletion
-          ? 'Napowietrzny'
+          ? address.hasDistributionPhoto
+            ? 'OSD/OPP do wyspawania'
+            : 'Brak zdjecia OSD/OPP'
           : 'Brak zdjecia zapasu';
 
   return (

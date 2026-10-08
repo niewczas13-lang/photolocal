@@ -319,7 +319,7 @@ describe('map task list', () => {
     );
   });
 
-  it('describes aerial address reserves as complete when a distribution photo covers them', () => {
+  it.each([0, 1])('describes aerial completion from a photo and welded point even with %i old reserve photos', (reservePhotoCount) => {
     const rows = getMapTaskRows(
       mapData({
         addresses: [
@@ -332,7 +332,7 @@ describe('map task list', () => {
             distributionPoint: 'RADOM/OSD0001',
             lat: 51.4,
             lng: 21.1,
-            reservePhotoCount: 0,
+            reservePhotoCount,
             hasReservePhoto: true,
             isAerialReserve: true,
             hasDistributionPhoto: true,
@@ -351,12 +351,74 @@ describe('map task list', () => {
       expect.arrayContaining([
         expect.objectContaining({
           id: 'address-address-aerial',
-          statusLabel: 'OSD/OPP jest',
-          summary: 'Adres napowietrzny potwierdzony zdjeciem punktu',
+          statusLabel: 'OSD/OPP gotowe',
+          summary: 'Adres napowietrzny potwierdzony zdjeciem i wyspawaniem OSD/OPP',
           stage: 'done',
         }),
       ]),
     );
+  });
+
+  it.each([
+    { nodeType: 'OSD', reservePhotoCount: 0 },
+    { nodeType: 'OPP', reservePhotoCount: 0 },
+    { nodeType: 'OSD', reservePhotoCount: 1 },
+    { nodeType: 'OPP', reservePhotoCount: 1 },
+  ])('keeps aerial reserves pending until $nodeType welding with $reservePhotoCount old reserve photos', ({ nodeType, reservePhotoCount }) => {
+    const rows = getMapTaskRows(
+      mapData({
+        addresses: [
+          {
+            ...mapData().addresses[0],
+            distributionPoint: `BARANOWO/${nodeType}0001`,
+            isAerialReserve: true,
+            usesDistributionPhotoForCompletion: true,
+            hasDistributionPhoto: true,
+            hasReservePhoto: false,
+            reservePhotoCount,
+            status: 'PENDING',
+          },
+        ],
+        infraNodes: [],
+        trunkCables: [],
+      }),
+    );
+
+    expect(rows).toEqual([
+      expect.objectContaining({
+        statusLabel: 'OSD/OPP do wyspawania',
+        summary: 'Zdjecie OSD/OPP dodane, adres napowietrzny czeka na wyspawanie punktu',
+        stage: 'todo',
+      }),
+    ]);
+  });
+
+  it('describes the missing distribution point photo for an incomplete aerial reserve', () => {
+    const rows = getMapTaskRows(
+      mapData({
+        addresses: [
+          {
+            ...mapData().addresses[0],
+            isAerialReserve: true,
+            usesDistributionPhotoForCompletion: true,
+            hasDistributionPhoto: false,
+            hasReservePhoto: false,
+            reservePhotoCount: 0,
+            status: 'PENDING',
+          },
+        ],
+        infraNodes: [],
+        trunkCables: [],
+      }),
+    );
+
+    expect(rows).toEqual([
+      expect.objectContaining({
+        statusLabel: 'Brak zdjecia OSD/OPP',
+        summary: 'Adres napowietrzny czeka na zdjecie OSD/OPP',
+        stage: 'todo',
+      }),
+    ]);
   });
 
   it('keeps KPO aerial address reserves as missing reserve work', () => {

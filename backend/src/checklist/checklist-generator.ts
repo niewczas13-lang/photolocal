@@ -61,7 +61,8 @@ function isOsd(name: string): boolean {
 }
 
 function getAddressKey(address: ChecklistAddress): string {
-  const parts = [address.street, address.buildingNo].filter(Boolean);
+  const streetOrCity = address.street.trim() || address.city.trim();
+  const parts = [streetOrCity, address.buildingNo].filter(Boolean);
   if (parts.length === 0) {
     parts.push(address.city);
   }
@@ -72,26 +73,34 @@ function normalizeCableEntry(value: string): string {
   return value.replace(/[^A-Z0-9]+/gi, ' ').replace(/\s+/g, ' ').trim().toUpperCase();
 }
 
-function cableEntryMatchesAddress(
-  entry: string,
+function cableEntriesMatchAddress(
+  entries: string[],
   address: ChecklistAddress,
+  allCableEntries: string[],
   allowTerminalDistributionPointMatch: boolean,
 ): boolean {
-  const normalizedEntry = normalizeCableEntry(entry);
+  const normalizedEntries = entries.map(normalizeCableEntry);
   const addressKey = normalizeCableEntry(getAddressKey(address));
+  // An explicit service cable determines the address type before a feeder to its OSD/OPP.
+  const hasExplicitAddressCable = addressKey.length > 0 && allCableEntries.some((entry) =>
+    normalizeCableEntry(entry) === addressKey,
+  );
+  if (hasExplicitAddressCable) return normalizedEntries.includes(addressKey);
+
   const distributionPoint = normalizeDistributionPointName(address.distributionPoint);
   const distributionPointKey = normalizeCableEntry(distributionPoint);
   const terminalPointKey = normalizeCableEntry(getDistributionPointTerminalName(distributionPoint));
 
-  if (addressKey.length > 0 && normalizedEntry.includes(addressKey)) return true;
-  if (distributionPointKey.length > 0 && normalizedEntry.includes(distributionPointKey)) return true;
-
-  return (
-    allowTerminalDistributionPointMatch &&
-    terminalPointKey.length > 0 &&
-    terminalPointKey !== distributionPointKey &&
-    normalizedEntry.includes(terminalPointKey)
-  );
+  return entries.some((entry) => {
+    const pointKey = normalizeCableEntry(normalizeDistributionPointName(entry));
+    return (distributionPointKey.length > 0 && pointKey === distributionPointKey) ||
+      (
+        allowTerminalDistributionPointMatch &&
+        terminalPointKey.length > 0 &&
+        terminalPointKey !== distributionPointKey &&
+        pointKey === terminalPointKey
+      );
+  });
 }
 
 function getTerminalPointCounts(
@@ -126,12 +135,17 @@ export function markAerialAddressReserves(
   addresses: ChecklistAddress[],
   adssToAddressCableEntries: string[],
   passiveInfraNodes: MapInfraNodeInput[] = [],
+  dacToAddressCableEntries: string[] = [],
 ): ChecklistAddress[] {
   const terminalPointCounts = getTerminalPointCounts(addresses, passiveInfraNodes);
+  const allCableEntries = [...dacToAddressCableEntries, ...adssToAddressCableEntries];
   return addresses.map((address) => {
     const dp = normalizeDistributionPointName(address.distributionPoint);
-    const hasAerialReserve = adssToAddressCableEntries.some((entry) =>
-      cableEntryMatchesAddress(entry, address, canUseTerminalDistributionPoint(dp, terminalPointCounts)),
+    const hasAerialReserve = cableEntriesMatchAddress(
+      adssToAddressCableEntries,
+      address,
+      allCableEntries,
+      canUseTerminalDistributionPoint(dp, terminalPointCounts),
     );
     return { ...address, hasAerialReserve };
   });
@@ -210,6 +224,7 @@ export function generateChecklistNodes(input: GenerateChecklistInput): Generated
     if (!dpGroups.has(dp)) dpGroups.set(dp, []);
   }
   const terminalPointCounts = getTerminalPointCounts(input.addresses, input.passiveInfraNodes);
+  const allCableEntries = [...input.dacToAddressCableEntries, ...input.adssToAddressCableEntries];
 
   let dpSort = 100;
   for (const dp of dpGroups.keys()) {
@@ -250,8 +265,11 @@ export function generateChecklistNodes(input: GenerateChecklistInput): Generated
     let addrSort = 0;
     const allowTerminalDistributionPointMatch = canUseTerminalDistributionPoint(dp, terminalPointCounts);
     for (const address of addresses) {
-      const isDac = input.dacToAddressCableEntries.some((entry) =>
-        cableEntryMatchesAddress(entry, address, allowTerminalDistributionPointMatch),
+      const isDac = cableEntriesMatchAddress(
+        input.dacToAddressCableEntries,
+        address,
+        allCableEntries,
+        allowTerminalDistributionPointMatch,
       );
       if (!isDac) continue;
 
@@ -279,8 +297,11 @@ export function generateChecklistNodes(input: GenerateChecklistInput): Generated
       let addrSort = 0;
       const allowTerminalDistributionPointMatch = canUseTerminalDistributionPoint(dp, terminalPointCounts);
       for (const address of addresses) {
-        const isAdss = input.adssToAddressCableEntries.some((entry) =>
-          cableEntryMatchesAddress(entry, address, allowTerminalDistributionPointMatch),
+        const isAdss = cableEntriesMatchAddress(
+          input.adssToAddressCableEntries,
+          address,
+          allCableEntries,
+          allowTerminalDistributionPointMatch,
         );
         if (!isAdss) continue;
 

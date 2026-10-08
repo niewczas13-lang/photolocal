@@ -112,6 +112,173 @@ describe('generateChecklistNodes', () => {
     expect(nodes.some((node) => node.path.startsWith('Zapasy_kabli_napowietrznych'))).toBe(false);
   });
 
+  it('keeps SI aerial drops out of reserve folders while preserving explicit DAC at the same OSD', () => {
+    const addresses = ['13', '14', '15'].map((buildingNo) => ({
+      ...baseAddress,
+      id: `address-${buildingNo}`,
+      buildingNo,
+    }));
+    const dacEntries = ['OSD2640', 'WRONCKIEJ 14', 'WRONCKIEJ 15'];
+    const adssEntries = ['WRONCKIEJ 13', 'WRONCKIEJ 15'];
+    const markedAddresses = markAerialAddressReserves(addresses, adssEntries, [], dacEntries);
+    expect(markedAddresses.map((address) => address.hasAerialReserve)).toEqual([true, false, true]);
+
+    const nodes = generateChecklistNodes({
+      projectId: 'project-1',
+      projectName: 'Projekt',
+      projectType: 'SI',
+      splitterTopology: 'CASCADE',
+      addresses: markedAddresses,
+      dacToAddressCableEntries: dacEntries,
+      adssToAddressCableEntries: adssEntries,
+    });
+
+    expect(nodes.filter((node) => node.nodeType === 'CABLE_RESERVE').map((node) => node.addressId))
+      .toEqual(['address-14', 'address-15']);
+    expect(nodes.some((node) => node.path.startsWith('Zapasy_kabli_napowietrznych'))).toBe(false);
+  });
+
+  it('does not classify building 13 as aerial when only building 135 has an ADSS drop', () => {
+    const addresses = ['13', '135'].map((buildingNo) => ({
+      ...baseAddress,
+      id: `address-${buildingNo}`,
+      buildingNo,
+    }));
+    const dacEntries = ['WRONCKIEJ 13'];
+    const adssEntries = ['WRONCKIEJ 135'];
+    expect(markAerialAddressReserves(addresses, adssEntries, [], dacEntries)
+      .map((address) => address.hasAerialReserve)).toEqual([false, true]);
+  });
+
+  it.each(['', '  '])('uses the city for cable matching when the street is blank (%j)', (street) => {
+    const addresses = ['22', '220'].map((buildingNo) => ({
+      ...baseAddress,
+      id: `address-${buildingNo}`,
+      city: 'Ostrzeszewo',
+      street,
+      buildingNo,
+      distributionPoint: 'OSTRZESZEWO/OSD0001',
+    }));
+    const dacEntries = ['OSTRZESZEWO 22'];
+    const adssEntries = ['OSTRZESZEWO 220'];
+    const markedAddresses = markAerialAddressReserves(addresses, adssEntries, [], dacEntries);
+    expect(markedAddresses.map((address) => address.hasAerialReserve)).toEqual([false, true]);
+
+    const nodes = generateChecklistNodes({
+      projectId: 'project-1',
+      projectName: 'Projekt',
+      projectType: 'SI',
+      splitterTopology: 'CASCADE',
+      addresses: markedAddresses,
+      dacToAddressCableEntries: dacEntries,
+      adssToAddressCableEntries: adssEntries,
+    });
+    expect(nodes.filter((node) => node.nodeType === 'CABLE_RESERVE').map((node) => node.addressId))
+      .toEqual(['address-22']);
+    expect(nodes.some((node) => node.path.startsWith('Zapasy_kabli_napowietrznych'))).toBe(false);
+  });
+
+  it('matches the whole building number for aerial flags and reserve folders', () => {
+    const addresses = ['2', '20', '21A', '2A', '2/1'].map((buildingNo) => ({
+      ...baseAddress,
+      id: `address-${buildingNo}`,
+      street: 'Antoniego Madalinskiego',
+      buildingNo,
+      distributionPoint: 'BARANOWO/OPP0005',
+    }));
+    const adssEntries = ['20', '21A', '2A', '2/1'].map((number) => `ANTONIEGO MADALINSKIEGO ${number}`);
+    expect(markAerialAddressReserves(addresses, adssEntries).map((address) => address.hasAerialReserve))
+      .toEqual([false, true, true, true, true]);
+
+    const nodes = generateChecklistNodes({
+      projectId: 'project-1',
+      projectName: 'Projekt',
+      projectType: 'KPO',
+      splitterTopology: 'CASCADE',
+      addresses,
+      dacToAddressCableEntries: ['ANTONIEGO MADALINSKIEGO 2'],
+      adssToAddressCableEntries: adssEntries,
+    });
+    expect(nodes.filter((node) => node.nodeType === 'CABLE_RESERVE').map((node) => [node.addressId, node.path.split('/')[0]]))
+      .toEqual([
+        ['address-2', 'Zapasy_kabli_instalacyjnych'],
+        ['address-20', 'Zapasy_kabli_napowietrznych'],
+        ['address-21A', 'Zapasy_kabli_napowietrznych'],
+        ['address-2A', 'Zapasy_kabli_napowietrznych'],
+        ['address-2/1', 'Zapasy_kabli_napowietrznych'],
+      ]);
+  });
+
+  it('prefers explicit address cables over distribution point fallback in both routing types', () => {
+    const addresses = ['1A', '1B', '1C'].map((buildingNo) => ({
+      ...baseAddress,
+      id: `address-${buildingNo}`,
+      street: 'Juranda ze Spychowa',
+      buildingNo,
+      distributionPoint: 'BARANOWO/OSD0052',
+    }));
+    const dacEntries = ['JURANDA ZE SPYCHOWA 1A', 'BARANOWO/OSD0052'];
+    const adssEntries = ['JURANDA ZE SPYCHOWA 1B', 'BARANOWO/OSD0052'];
+    expect(markAerialAddressReserves(addresses, adssEntries, [], dacEntries).map((address) => address.hasAerialReserve))
+      .toEqual([false, true, true]);
+
+    const nodes = generateChecklistNodes({
+      projectId: 'project-1',
+      projectName: 'Projekt',
+      projectType: 'KPO',
+      splitterTopology: 'CASCADE',
+      addresses,
+      dacToAddressCableEntries: dacEntries,
+      adssToAddressCableEntries: adssEntries,
+    });
+    expect(nodes.filter((node) => node.nodeType === 'CABLE_RESERVE').map((node) => [node.addressId, node.path.split('/')[0]]))
+      .toEqual([
+        ['address-1A', 'Zapasy_kabli_instalacyjnych'],
+        ['address-1C', 'Zapasy_kabli_instalacyjnych'],
+        ['address-1B', 'Zapasy_kabli_napowietrznych'],
+        ['address-1C', 'Zapasy_kabli_napowietrznych'],
+      ]);
+  });
+
+  it.each(['OSD00010', 'BARANOWO/OSD00010'])(
+    'matches the full distribution point number for cable entry %s',
+    (entry) => {
+      const addresses = ['OSD0001', 'OSD00010'].map((point, index) => ({
+        ...baseAddress,
+        id: point,
+        buildingNo: String(index + 1),
+        distributionPoint: `BARANOWO/${point}`,
+      }));
+      expect(markAerialAddressReserves(addresses, [entry]).map((address) => address.hasAerialReserve))
+        .toEqual([false, true]);
+
+      const nodes = generateChecklistNodes({
+        projectId: 'project-1',
+        projectName: 'Projekt',
+        projectType: 'KPO',
+        splitterTopology: 'CASCADE',
+        addresses,
+        dacToAddressCableEntries: [entry],
+        adssToAddressCableEntries: [entry],
+      });
+      expect(nodes.filter((node) => node.nodeType === 'CABLE_RESERVE').map((node) => node.addressId))
+        .toEqual(['OSD00010', 'OSD00010']);
+    },
+  );
+
+  it('does not match a qualified distribution point in another locality through its terminal name', () => {
+    const addresses = [{ ...baseAddress, distributionPoint: 'BARANOWO/OSD0001' }];
+    expect(markAerialAddressReserves(addresses, ['OTHER/OSD0001'])[0].hasAerialReserve).toBe(false);
+  });
+
+  it.each(['OSD0001', 'BARANOWO/OSD0001', 'O_OSD0001', 'O_BARANOWO/OSD0001'])(
+    'preserves exact distribution point fallback for %s',
+    (entry) => {
+      const addresses = [{ ...baseAddress, distributionPoint: 'BARANOWO/OSD0001' }];
+      expect(markAerialAddressReserves(addresses, [entry])[0].hasAerialReserve).toBe(true);
+    },
+  );
+
   it('generates aerial cable reserves for KPO projects', () => {
     const nodes = generateChecklistNodes({
       projectId: 'project-1',

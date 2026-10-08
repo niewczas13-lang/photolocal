@@ -1533,30 +1533,99 @@ export class ProjectsRepository {
       uploadedAt: string;
     }>;
 
-    const distributionPhotoKeys = photoNodeRows.map((photoNode) => ({
-      nameKey: normalizeSearchKey(photoNode.name),
-      pathKey: normalizeSearchKey(photoNode.path),
-    }));
-    const hasDistributionPhoto = (distributionPoint: string | null): boolean => {
-      const nodeKey = normalizeSearchKey(distributionPoint);
-      const terminalKey = normalizeSearchKey(normalizeMapNodeTerminalKey(distributionPoint));
-      if (!nodeKey && !terminalKey) return false;
+    const infraRows = this.db
+      .prepare(
+        `SELECT
+          id,
+          node_type AS nodeType,
+          name,
+          label,
+          lat,
+          lng,
+          status
+        FROM map_infra_nodes
+        WHERE project_id = ?
+        ORDER BY node_type ASC, name COLLATE NOCASE ASC`,
+      )
+      .all(projectId) as Array<{
+      id: string;
+      nodeType: 'OSD' | 'OPP' | 'ZS';
+      name: string;
+      label: string | null;
+      lat: number;
+      lng: number;
+      status: MapNodeStatus;
+    }>;
 
-      return distributionPhotoKeys.some(({ nameKey, pathKey }) => {
-        const matchesNode = Boolean(nodeKey) && (nameKey === nodeKey || pathKey.includes(nodeKey));
-        const matchesTerminal =
-          Boolean(terminalKey) && (nameKey === terminalKey || pathKey.includes(terminalKey));
-        return matchesNode || matchesTerminal;
-      });
+    // Match complete folder names, not substrings (OSD0001 is not OSD00010).
+    const distributionKey = (value: string | null): string =>
+      value?.trim() ? normalizeSearchKey(safeFolderName(normalizeMapNodeKey(value))) : '';
+    const scopedKeysByTerminal = new Map<string, Set<string>>();
+    for (const name of [...addressRows.map(address => address.distributionPoint), ...infraRows.map(node => node.name)]) {
+      const key = distributionKey(name);
+      const terminalKey = distributionKey(normalizeMapNodeTerminalKey(name));
+      if (!key || key === terminalKey) continue;
+      const scopedKeys = scopedKeysByTerminal.get(terminalKey) ?? new Set<string>();
+      scopedKeys.add(key);
+      scopedKeysByTerminal.set(terminalKey, scopedKeys);
+    }
+    const hasUniqueTerminal = (name: string | null): boolean =>
+      (scopedKeysByTerminal.get(distributionKey(normalizeMapNodeTerminalKey(name)))?.size ?? 0) <= 1;
+    const distributionPhotoKeys = photoNodeRows.map(photo => ({
+      photo,
+      nameKey: distributionKey(photo.name),
+      pathKeys: photo.path.split(/[\\/]/).map(distributionKey),
+    }));
+    const getDistributionPhotos = (name: string | null, isSplice = false) => {
+      const key = distributionKey(name);
+      const terminalKey = distributionKey(normalizeMapNodeTerminalKey(name));
+      if (!key || (key === terminalKey && !hasUniqueTerminal(name))) return [];
+      const keys = new Set([key]);
+      if (hasUniqueTerminal(name)) {
+        keys.add(terminalKey);
+        for (const scopedKey of scopedKeysByTerminal.get(terminalKey) ?? []) keys.add(scopedKey);
+      }
+      // Splice photo folders use the generated 01_ prefix.
+      if (isSplice) for (const photoKey of [...keys]) keys.add('01' + photoKey);
+      return distributionPhotoKeys
+        .filter(({ nameKey, pathKeys }) => keys.has(nameKey) || pathKeys.some(pathKey => keys.has(pathKey)))
+        .map(({ photo }) => photo);
+    };
+    const infraNodes = infraRows.map(node => {
+      const photos = getDistributionPhotos(node.name, node.nodeType === 'ZS');
+      return {
+        id: node.id,
+        nodeType: node.nodeType,
+        name: node.name,
+        label: node.label,
+        lat: Number(node.lat),
+        lng: Number(node.lng),
+        status: node.status,
+        hasPhoto: photos.length > 0,
+        photos: photos.map(mapProjectPhotoRow),
+      };
+    });
+    const findDistributionNode = (name: string | null) => {
+      const key = distributionKey(name);
+      if (!key) return undefined;
+      const nodes = infraNodes.filter(node => node.nodeType === 'OSD' || node.nodeType === 'OPP');
+      const exact = nodes.find(node => distributionKey(node.name) === key);
+      if (exact) return exact;
+      if (!hasUniqueTerminal(name)) return undefined;
+      const terminalKey = distributionKey(normalizeMapNodeTerminalKey(name));
+      const matches = nodes.filter(node => distributionKey(normalizeMapNodeTerminalKey(node.name)) === terminalKey);
+      return matches.length === 1 ? matches[0] : undefined;
     };
 
     const addresses = addressRows.map((address) => {
       const reservePhotoCount = Number(address.reservePhotoCount);
       const isAerialReserve = Number(address.hasAerialReserve) === 1 || Number(address.aerialReserveNodeCount) > 0;
       const usesDistributionPhotoForCompletion = projectType === 'SI' && isAerialReserve;
-      const hasDistributionPointPhoto = isAerialReserve && hasDistributionPhoto(address.distributionPoint);
-      const hasEffectiveReservePhoto =
-        reservePhotoCount > 0 || (usesDistributionPhotoForCompletion && hasDistributionPointPhoto);
+      const distributionNode = isAerialReserve ? findDistributionNode(address.distributionPoint) : undefined;
+      const hasDistributionPointPhoto = isAerialReserve && getDistributionPhotos(address.distributionPoint).length > 0;
+      const hasEffectiveReservePhoto = usesDistributionPhotoForCompletion
+        ? hasDistributionPointPhoto && distributionNode?.status === 'WELDED'
+        : reservePhotoCount > 0;
       const isNotApplicable = !hasEffectiveReservePhoto && Number(address.notApplicableReserveNodeCount) > 0;
       const status: ProjectMapAddressStatus = hasEffectiveReservePhoto
         ? 'COMPLETE'
@@ -1701,51 +1770,6 @@ export class ProjectsRepository {
         : Number(cable.installationLengthMeters),
       status: cable.status,
     }));
-
-    const infraRows = this.db
-      .prepare(
-        `SELECT
-          id,
-          node_type AS nodeType,
-          name,
-          label,
-          lat,
-          lng,
-          status
-        FROM map_infra_nodes
-        WHERE project_id = ?
-        ORDER BY node_type ASC, name COLLATE NOCASE ASC`,
-      )
-      .all(projectId) as Array<{
-      id: string;
-      nodeType: 'OSD' | 'OPP' | 'ZS';
-      name: string;
-      label: string | null;
-      lat: number;
-      lng: number;
-      status: MapNodeStatus;
-    }>;
-
-    const infraNodes = infraRows.map((node) => {
-      const nodeKey = normalizeSearchKey(node.name);
-      const photos = photoNodeRows.filter((photoNode) => {
-        const nameKey = normalizeSearchKey(photoNode.name);
-        const pathKey = normalizeSearchKey(photoNode.path);
-        return nameKey === nodeKey || pathKey.includes(nodeKey);
-      });
-      const hasPhoto = photos.length > 0;
-      return {
-        id: node.id,
-        nodeType: node.nodeType,
-        name: node.name,
-        label: node.label,
-        lat: Number(node.lat),
-        lng: Number(node.lng),
-        status: node.status,
-        hasPhoto,
-        photos: photos.map(mapProjectPhotoRow),
-      };
-    });
 
     const infrastructureRows = this.db
       .prepare(

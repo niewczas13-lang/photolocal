@@ -1,7 +1,14 @@
 @echo off
 setlocal
+cd /d "%~dp0"
+if errorlevel 1 goto error
 
 echo Aktualizacja Photo Local...
+echo Katalog aplikacji: %CD%
+git remote get-url origin
+if errorlevel 1 goto error
+git branch --show-current
+if errorlevel 1 goto error
 
 echo.
 echo [1/6] Zatrzymywanie aplikacji...
@@ -10,6 +17,8 @@ call "%~dp0stop.bat"
 echo.
 echo [2/6] Pobieranie zmian z GitHub...
 git pull --ff-only
+if errorlevel 1 goto error
+git log -1 --format=oneline
 if errorlevel 1 goto error
 
 echo.
