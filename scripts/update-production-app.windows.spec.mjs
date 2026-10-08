@@ -23,11 +23,11 @@ function powershellLiteral(value) {
 }
 
 function runWrapper(context, scenario = {}) {
-  const temporaryParent = realpathSync(tmpdir());
+  const temporaryParent = realpathSync.native(tmpdir());
   const prefix = 'photolocal app updater ';
-  const directory = mkdtempSync(join(temporaryParent, prefix));
+  const directory = realpathSync.native(mkdtempSync(join(temporaryParent, prefix)));
   context.after(() => {
-    const resolved = realpathSync(directory);
+    const resolved = realpathSync.native(directory);
     assert.equal(dirname(resolved), temporaryParent);
     assert.ok(basename(resolved).startsWith(prefix));
     rmSync(resolved, { recursive: true, force: true });
@@ -170,6 +170,61 @@ function runWrapper(context, scenario = {}) {
 }
 
 const windowsOnly = { skip: process.platform !== 'win32' };
+
+test('Windows updater fixtures work with an actual 8.3 TEMP path', windowsOnly, (context) => {
+  const temporaryParent = realpathSync.native(tmpdir());
+  const prefix = 'photolocal short temp regression ';
+  const directory = realpathSync.native(mkdtempSync(join(temporaryParent, prefix)));
+  context.after(() => {
+    const resolved = realpathSync.native(directory);
+    assert.equal(dirname(resolved), temporaryParent);
+    assert.ok(basename(resolved).startsWith(prefix));
+    rmSync(resolved, { recursive: true, force: true });
+  });
+  const shortPathResult = spawnSync(
+    'powershell.exe',
+    [
+      '-NoProfile',
+      '-Command',
+      '(New-Object -ComObject Scripting.FileSystemObject).GetFolder(' +
+        powershellLiteral(directory) +
+        ').ShortPath',
+    ],
+    { encoding: 'utf8', windowsHide: true, timeout: 30_000 },
+  );
+  assert.ok(!shortPathResult.error, 'Short-path query must finish within its timeout');
+  assert.equal(shortPathResult.status, 0, shortPathResult.stderr);
+  const shortDirectory = shortPathResult.stdout.trim();
+  if (shortDirectory.toLowerCase() === directory.toLowerCase()) {
+    context.diagnostic('Short-path query returned ' + shortDirectory + ' on ' + process.version);
+    context.skip('The temporary volume does not provide an 8.3 directory alias');
+    return;
+  }
+  assert.equal(realpathSync.native(shortDirectory), directory);
+  const child = spawnSync(
+    process.execPath,
+    [
+      '--test',
+      '--test-name-pattern',
+      'runs the freshly pulled MJS|batch bootstrap survives',
+      fileURLToPath(import.meta.url),
+    ],
+    {
+      encoding: 'utf8',
+      timeout: 30_000,
+      windowsHide: true,
+      env: {
+        ...process.env,
+        NODE_TEST_CONTEXT: undefined,
+        TEMP: shortDirectory,
+        TMP: shortDirectory,
+      },
+    },
+  );
+  assert.ok(!child.error, 'Updater fixtures under a short TEMP must finish within their timeout');
+  assert.equal(child.status, 0, child.stdout + child.stderr);
+  assert.match(child.stdout, /tests 2(?:\r?\n|$)/);
+});
 
 test(
   'Windows production updater runs the freshly pulled MJS with the selected deployment paths',
@@ -370,11 +425,11 @@ test(
   'Windows batch bootstrap survives inherited delayed expansion and a replaced batch file',
   windowsOnly,
   (context) => {
-    const temporaryParent = realpathSync(tmpdir());
+    const temporaryParent = realpathSync.native(tmpdir());
     const prefix = 'photolocal ! updater bootstrap ';
-    const directory = mkdtempSync(join(temporaryParent, prefix));
+    const directory = realpathSync.native(mkdtempSync(join(temporaryParent, prefix)));
     context.after(() => {
-      const resolved = realpathSync(directory);
+      const resolved = realpathSync.native(directory);
       assert.equal(dirname(resolved), temporaryParent);
       assert.ok(basename(resolved).startsWith(prefix));
       rmSync(resolved, { recursive: true, force: true });
