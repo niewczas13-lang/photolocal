@@ -21,7 +21,7 @@ const key = value => {
 };
 const decode = value => String(value).replaceAll('$$', '$');
 const hash = value => createHash('sha256').update(value).digest('hex');
-const bindKey = value => key(decode(value).replaceAll('\\', '/')
+const bindKey = value => key(value.replaceAll('\\', '/')
   .replace(/^\/(?:run\/desktop\/mnt\/host|host_mnt)\/([a-z])\//i, '$1:/'));
 const validKey = value => /^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(value);
 const entries = values => {
@@ -135,7 +135,7 @@ export async function diagnoseProductionAppUpdate(input, { run = nativeRun } = {
         propagation: ['rprivate', 'private', 'rshared', 'shared', 'rslave', 'slave', ''].includes(actual?.Propagation) ? actual.Propagation : 'unknown',
         typeMatches: actual?.Type === mount.type, readWriteMatches: actual?.RW === !Boolean(mount.read_only),
         sourceMatches: mount.type !== 'bind' || (typeof actual?.Source === 'string' && typeof mount.source === 'string' &&
-          mount.bind?.create_host_path === false && bindKey(actual.Source) === bindKey(mount.source)),
+          mount.bind?.create_host_path === false && bindKey(actual.Source) === bindKey(decode(mount.source))),
         nameMatches: mount.type !== 'volume' || (typeof after.volumes?.[mount.source]?.name === 'string' && actual?.Name === decode(after.volumes[mount.source].name)) };
     });
     const expectedConfig = structuredClone(before);

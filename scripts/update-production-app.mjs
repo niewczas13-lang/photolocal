@@ -92,9 +92,33 @@ function environmentValues(values) {
 }
 
 function bindKey(value) {
-  const translated = decode(value).replaceAll('\\', '/')
+  const translated = value.replaceAll('\\', '/')
     .replace(/^\/(?:run\/desktop\/mnt\/host|host_mnt)\/([a-z])\//i, '$1:/');
   return pathKey(translated);
+}
+
+function mountIdentities(mounts) {
+  return orderedMounts(mounts).map(mount => {
+    if (!['bind', 'volume'].includes(mount.Type) || typeof mount.Source !== 'string' ||
+        !mount.Source || typeof mount.RW !== 'boolean' ||
+        (mount.Mode !== undefined && typeof mount.Mode !== 'string') ||
+        (mount.Type === 'volume' && (typeof mount.Name !== 'string' || !mount.Name))) {
+      fail('CONTAINER_IDENTITY_INVALID');
+    }
+    // RW and Propagation describe effective access. Their duplicate Mode tokens
+    // and the Engine's default z for named volumes depend on the creation API.
+    const propagation = mount.Propagation || 'rprivate';
+    const options = [...new Set((mount.Mode ?? '').split(',').filter(option =>
+      !['', 'rw', 'ro'].includes(option) && !(mount.Type === 'volume' && option === 'z') &&
+      !(mount.Type === 'bind' && option === propagation &&
+        ['private', 'rprivate', 'shared', 'rshared', 'slave', 'rslave'].includes(option))))].sort();
+    return {
+      Type: mount.Type, Destination: mount.Destination, RW: mount.RW,
+      Source: mount.Type === 'bind' ? bindKey(mount.Source) : mount.Source.replace(/\/+$/, '') || '/',
+      Name: mount.Name ?? '', Driver: mount.Driver ?? '',
+      Propagation: propagation, options,
+    };
+  });
 }
 
 function verifyApp(config, app, directory, files) {
@@ -119,7 +143,7 @@ function verifyApp(config, app, directory, files) {
     const actual = mounts.find(value => value.Destination === mount.target);
     if (!actual || actual.Type !== mount.type || actual.RW !== !Boolean(mount.read_only)) fail('APP_VERIFICATION_FAILED');
     if (mount.type === 'bind') {
-      if (mount.bind?.create_host_path !== false || bindKey(actual.Source) !== bindKey(mount.source)) fail('APP_VERIFICATION_FAILED');
+      if (mount.bind?.create_host_path !== false || bindKey(actual.Source) !== bindKey(decode(mount.source))) fail('APP_VERIFICATION_FAILED');
     } else if (mount.type === 'volume') {
       const volume = config.volumes?.[mount.source];
       if (!volume || typeof volume.name !== 'string' || actual.Name !== decode(volume.name)) fail('APP_VERIFICATION_FAILED');
@@ -271,14 +295,14 @@ export async function updateProductionApp(input, { run = nativeRun } = {}) {
           pathKey(current.labels['com.docker.compose.project.working_dir']) !== pathKey(directory) ||
           ![files.join(','), updatedFiles.join(',')].includes(current.labels['com.docker.compose.project.config_files']) ||
           !isDeepStrictEqual(current.ports, original.ports) ||
-          !isDeepStrictEqual(orderedMounts(current.mounts), orderedMounts(original.mounts)) ||
+          !isDeepStrictEqual(mountIdentities(current.mounts), mountIdentities(original.mounts)) ||
           !isDeepStrictEqual(environmentValues(current.environment), current.image === original.image
             ? environmentValues(original.environment) : replacementEnvironment))) fail('ACTIVE_CONFIGURATION_CHANGED');
       if (await call(['image', 'inspect', '--format', '{{.Id}}', original.image], 'ROLLBACK_FAILED') !== original.image) fail('ROLLBACK_FAILED');
       await call([...compose([]), ...UP], 'ROLLBACK_FAILED', 150000);
       const restored = await inspect();
       verifyApp(before, restored, directory, files);
-      if (!isDeepStrictEqual(orderedMounts(restored.mounts), orderedMounts(original.mounts)) ||
+      if (!isDeepStrictEqual(mountIdentities(restored.mounts), mountIdentities(original.mounts)) ||
           !isDeepStrictEqual(environmentValues(restored.environment), environmentValues(original.environment))) fail('ROLLBACK_FAILED');
     };
     await assertActiveUnchanged();
@@ -287,7 +311,7 @@ export async function updateProductionApp(input, { run = nativeRun } = {}) {
     await call([...args, ...UP], 'APP_START_FAILED', 150000);
     const current = await inspect();
     verifyApp(after, current, directory, updatedFiles);
-    if (!isDeepStrictEqual(orderedMounts(current.mounts), orderedMounts(original.mounts)) ||
+    if (!isDeepStrictEqual(mountIdentities(current.mounts), mountIdentities(original.mounts)) ||
         !isDeepStrictEqual(environmentValues(current.environment), replacementEnvironment)) fail('APP_VERIFICATION_FAILED');
     return { ...result, status: 'PRODUCTION_APP_UPDATED', applicationUpdated: true, overridePath, rollbackReport };
   } catch (error) {

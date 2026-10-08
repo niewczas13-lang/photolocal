@@ -139,6 +139,25 @@ test('diagnostic distinguishes semantic mount mismatch from safe mode metadata',
   assert.equal(JSON.stringify(result).includes(f.input.stagingRoot), false);
 });
 
+test('diagnostic accepts literal dollars in bind paths after decoding only Compose values', async t => {
+  const f = await fixture(t);
+  f.app.mounts[0].Source += '$$literal';
+  f.before.services.photolocal.volumes[0].source += '$$$$literal';
+  f.after.services.photolocal.volumes[0].source = f.before.services.photolocal.volumes[0].source;
+  const result = await diagnose(f.input, { run: f.run });
+  assert.equal(result.checks.mounts, true);
+});
+
+test('diagnostic distinguishes a different actual dollar directory from Compose escaping', async t => {
+  const f = await fixture(t);
+  f.app.mounts[0].Source += '$$literal';
+  f.before.services.photolocal.volumes[0].source += '$$literal';
+  f.after.services.photolocal.volumes[0].source = f.before.services.photolocal.volumes[0].source;
+  const result = await diagnose(f.input, { run: f.run });
+  assert.equal(result.checks.mounts, false);
+  assert.equal(result.mounts[0].sourceMatches, false);
+});
+
 test('diagnostic detects saved file drift and supports latest report selection', async t => {
   const f = await fixture(t);
   await writeFile(f.files[7], SECRET);

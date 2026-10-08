@@ -233,6 +233,139 @@ test('new image defaults may change while Compose environment remains authoritat
   assert.equal(f.app().environment.some(value => value.startsWith('OLD_BASE_ONLY=')), false);
 });
 
+function recreatedMountModes(app) {
+  for (const mount of app.mounts) mount.Mode = mount.Type === 'bind' ? '' : 'z';
+}
+
+test('Docker mount API metadata does not reject a healthy update with unchanged data', async t => {
+  const f = await fixture(t, { newAppMutate: recreatedMountModes });
+  const result = await updateProductionApp(f.input, { run: f.run });
+  assert.equal(result.status, 'PRODUCTION_APP_UPDATED');
+  assert.equal(f.calls.filter(call => call.args.includes('up')).length, 1);
+  assert.equal(f.app().mounts.find(mount => mount.Destination === '/data').Mode, '');
+  assert.equal(f.app().mounts.find(mount => mount.Destination === '/nas').Mode, 'z');
+});
+
+test('health failure still restores the old image when Docker reformats mount modes', async t => {
+  const f = await fixture(t, {
+    newAppMutate: recreatedMountModes, restoredAppMutate: recreatedMountModes, healthFailure: true,
+  });
+  await assert.rejects(updateProductionApp(f.input, { run: f.run }), {
+    code: 'PRODUCTION_APP_UPDATE_APP_VERIFICATION_FAILED', rollbackStatus: 'RESTORED',
+  });
+  assert.equal(f.calls.filter(call => call.args.includes('up')).length, 2);
+  assert.equal(f.app().image, ORIGINAL_IMAGE);
+  assert.equal(f.app().health, 'healthy');
+});
+
+for (const propagation of ['rprivate', 'rshared']) {
+  const preflightMutate = (app, config) => {
+    for (const mount of app.mounts.filter(mount => mount.Type === 'bind')) {
+      mount.Mode = 'rw,' + propagation;
+      mount.Propagation = propagation;
+      config.services.photolocal.volumes.find(value => value.target === mount.Destination)
+        .bind.propagation = propagation;
+    }
+  };
+  test(`equivalent ${propagation} metadata allows a healthy application update`, async t => {
+    const f = await fixture(t, { preflightMutate, newAppMutate: recreatedMountModes });
+    assert.equal((await updateProductionApp(f.input, { run: f.run })).status, 'PRODUCTION_APP_UPDATED');
+    assert.equal(f.calls.filter(call => call.args.includes('up')).length, 1);
+  });
+  test(`equivalent ${propagation} metadata allows rollback after a health failure`, async t => {
+    const f = await fixture(t, {
+      preflightMutate, newAppMutate: recreatedMountModes,
+      restoredAppMutate: recreatedMountModes, healthFailure: true,
+    });
+    await assert.rejects(updateProductionApp(f.input, { run: f.run }), {
+      code: 'PRODUCTION_APP_UPDATE_APP_VERIFICATION_FAILED', rollbackStatus: 'RESTORED',
+    });
+    assert.equal(f.calls.filter(call => call.args.includes('up')).length, 2);
+    assert.equal(f.app().image, ORIGINAL_IMAGE);
+    assert.equal(f.app().health, 'healthy');
+  });
+}
+
+test('equivalent Docker Desktop bind path representations preserve data identity', {
+  skip: process.platform !== 'win32',
+}, async t => {
+  const f = await fixture(t, { newAppMutate: app => {
+    for (const mount of app.mounts.filter(mount => mount.Type === 'bind')) {
+      const source = mount.Source.replaceAll('\\', '/');
+      mount.Source = '/run/desktop/mnt/host/' + source[0].toLowerCase() + source.slice(2).toUpperCase();
+    }
+  } });
+  assert.equal((await updateProductionApp(f.input, { run: f.run })).status, 'PRODUCTION_APP_UPDATED');
+  assert.equal(f.calls.filter(call => call.args.includes('up')).length, 1);
+});
+
+test('a trailing slash on the same named volume source does not replace its data', async t => {
+  const f = await fixture(t, { newAppMutate: app => {
+    app.mounts.find(mount => mount.Type === 'volume').Source += '/';
+  } });
+  assert.equal((await updateProductionApp(f.input, { run: f.run })).status, 'PRODUCTION_APP_UPDATED');
+});
+
+test('literal dollar signs in actual bind paths remain distinct from Compose escaping', async t => {
+  const f = await fixture(t, { preflightMutate: (app, before) => {
+    app.mounts.find(mount => mount.Destination === '/data').Source += '$$literal';
+    before.services.photolocal.volumes.find(mount => mount.target === '/data').source += '$$$$literal';
+  } });
+  assert.equal((await updateProductionApp(f.input, { run: f.run })).status, 'PRODUCTION_APP_UPDATED');
+});
+
+test('changing a literal dollar bind directory cannot be hidden by path normalization', async t => {
+  const f = await fixture(t, {
+    preflightMutate: (app, before) => {
+      app.mounts.find(mount => mount.Destination === '/data').Source += '$literal';
+      before.services.photolocal.volumes.find(mount => mount.target === '/data').source += '$$literal';
+    },
+    newAppMutate: app => {
+      const mount = app.mounts.find(mount => mount.Destination === '/data');
+      mount.Source = mount.Source.replace('$literal', () => '$$literal');
+    },
+  });
+  await assert.rejects(updateProductionApp(f.input, { run: f.run }), {
+    code: 'PRODUCTION_APP_UPDATE_APP_VERIFICATION_FAILED', rollbackStatus: 'FAILED',
+    rollbackCode: 'PRODUCTION_APP_UPDATE_ACTIVE_CONFIGURATION_CHANGED',
+  });
+  assert.equal(f.calls.filter(call => call.args.includes('up')).length, 1);
+});
+
+for (const [description, mutate] of [
+  ['another bind directory', app => { app.mounts.find(mount => mount.Destination === '/data').Source += '-other'; }],
+  ['another named volume directory', app => { app.mounts.find(mount => mount.Type === 'volume').Source += '/other'; }],
+  ['another volume driver', app => { app.mounts.find(mount => mount.Type === 'volume').Driver = 'another-driver'; }],
+  ['read-only data', app => { app.mounts.find(mount => mount.Destination === '/data').RW = false; }],
+  ['changed bind propagation', app => { app.mounts.find(mount => mount.Destination === '/data').Propagation = 'rshared'; }],
+  ['conflicting propagation metadata', app => {
+    const mount = app.mounts.find(mount => mount.Destination === '/data');
+    mount.Mode = 'rw,rshared';
+    mount.Propagation = 'rprivate';
+  }],
+  ['changed bind SELinux labeling', app => { app.mounts.find(mount => mount.Destination === '/data').Mode = 'rw,Z'; }],
+]) {
+  test(`${description} after cutover refuses verification and unsafe rollback`, async t => {
+    const f = await fixture(t, { newAppMutate: mutate });
+    await assert.rejects(updateProductionApp(f.input, { run: f.run }), {
+      code: 'PRODUCTION_APP_UPDATE_APP_VERIFICATION_FAILED', rollbackStatus: 'FAILED',
+      rollbackCode: 'PRODUCTION_APP_UPDATE_ACTIVE_CONFIGURATION_CHANGED',
+    });
+    assert.equal(f.calls.filter(call => call.args.includes('up')).length, 1);
+  });
+}
+
+test('mount metadata changes on the original container during build still abort before cutover', async t => {
+  let f;
+  f = await fixture(t, { onBuild: () => {
+    f.app().mounts.find(mount => mount.Destination === '/data').Mode = '';
+  } });
+  await assert.rejects(updateProductionApp(f.input, { run: f.run }), {
+    code: 'PRODUCTION_APP_UPDATE_ACTIVE_CONFIGURATION_CHANGED', applicationMayHaveChanged: false,
+  });
+  assert.equal(f.calls.filter(call => call.args.includes('up')).length, 0);
+});
+
 test('a failed health check restores original full environment after image defaults change', async t => {
   const f = await fixture(t, {
     originalImageEnvironment: ['NODE_VERSION=24.0.0', 'PATH=/old/bin'],
