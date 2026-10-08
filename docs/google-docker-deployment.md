@@ -11,13 +11,15 @@ Przy pierwszym przejściu uruchom kolejno w PowerShell poniższe polecenia, prze
 jeśli którekolwiek zwróci błąd:
 
 ```powershell
-git -C C:\PhotoLocal-staging fetch origin main:refs/remotes/origin/main
-git -C C:\PhotoLocal-staging switch main
-git -C C:\PhotoLocal-staging merge --ff-only origin/main
-git -C C:\PhotoLocal-staging branch --set-upstream-to=origin/main main
 git -C C:\PhotoLocal-staging config --replace-all remote.origin.fetch +refs/heads/main:refs/remotes/origin/main
+git -C C:\PhotoLocal-staging fetch origin main:refs/remotes/origin/main
+git -C C:\PhotoLocal-staging switch -c main origin/main
+git -C C:\PhotoLocal-staging branch --set-upstream-to=origin/main main
 & C:\PhotoLocal-staging\update.bat
 ```
+
+Jeśli lokalna gałąź `main` już istnieje, zamiast `switch -c main origin/main` użyj
+`switch main`, a następnie `merge --ff-only origin/main`.
 
 Następne aktualizacje wymagają tylko uruchomienia tego BAT-a. Nie używaj starego BAT-a
 przed pobraniem nowej wersji: zatrzymywał proces po numerze portu, co mogło zamknąć Docker.

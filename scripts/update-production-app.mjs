@@ -10,7 +10,7 @@ const SERVICE = 'photolocal';
 const CONTAINER = '/' + PROJECT + '-' + SERVICE + '-1';
 const IMAGE = /^sha256:[a-f0-9]{64}$/;
 const INSPECT = '{"id":{{json .Id}},"name":{{json .Name}},"image":{{json .Image}},"labels":{"com.docker.compose.project":{{json (index .Config.Labels "com.docker.compose.project")}},"com.docker.compose.service":{{json (index .Config.Labels "com.docker.compose.service")}},"com.docker.compose.project.working_dir":{{json (index .Config.Labels "com.docker.compose.project.working_dir")}},"com.docker.compose.project.config_files":{{json (index .Config.Labels "com.docker.compose.project.config_files")}}},"running":{{json .State.Running}},"health":{{if .State.Health}}{{json .State.Health.Status}}{{else}}"none"{{end}},"mounts":{{json .Mounts}},"ports":{{json .HostConfig.PortBindings}},"environment":{{json .Config.Env}}}';
-const IMAGE_INSPECT = '{"id":{{json .Id}},"revision":{{json (index .Config.Labels "org.opencontainers.image.revision")}}}';
+const IMAGE_INSPECT = '{"id":{{json .Id}},"revision":{{json (index .Config.Labels "org.opencontainers.image.revision")}},"environment":{{json .Config.Env}}}';
 const UP = ['up', '--no-deps', '-d', '--no-build', '--pull', 'never', '--wait', '--wait-timeout', '120', SERVICE];
 // Root repair tools and runtime data are outside the Docker build input allowlist.
 const BUILD_INPUT_PATHS = [
@@ -231,7 +231,15 @@ export async function updateProductionApp(input, { run = nativeRun } = {}) {
     await call(['build', '--label', 'org.opencontainers.image.revision=' + input.revision,
       '-t', tag, '-f', join(staging, 'Dockerfile'), staging], 'BUILD_FAILED', 20 * 60 * 1000);
     const image = json(await call(['image', 'inspect', '--format', IMAGE_INSPECT, tag], 'INVALID_IMAGE'), 'INVALID_IMAGE');
-    if (!IMAGE.test(image.id) || image.revision !== input.revision) fail('INVALID_IMAGE');
+    if (!IMAGE.test(image.id) || image.revision !== input.revision ||
+        (image.environment !== null && !Array.isArray(image.environment))) fail('INVALID_IMAGE');
+    // Docker overlays Compose settings onto the replacement image's own defaults.
+    // Base-image NODE_VERSION, PATH and other defaults may legitimately change.
+    const replacementEnvironment = {
+      ...environmentValues(image.environment ?? []),
+      ...Object.fromEntries(Object.entries(before.services[SERVICE].environment)
+        .map(([key, value]) => [key, decode(value)])),
+    };
     await assertActiveUnchanged();
     const result = {
       runDirectory: directory, previousImageId: original.image, imageId: image.id,
@@ -262,8 +270,10 @@ export async function updateProductionApp(input, { run = nativeRun } = {}) {
       if (current && (![original.image, image.id].includes(current.image) ||
           pathKey(current.labels['com.docker.compose.project.working_dir']) !== pathKey(directory) ||
           ![files.join(','), updatedFiles.join(',')].includes(current.labels['com.docker.compose.project.config_files']) ||
+          !isDeepStrictEqual(current.ports, original.ports) ||
           !isDeepStrictEqual(orderedMounts(current.mounts), orderedMounts(original.mounts)) ||
-          !isDeepStrictEqual(environmentValues(current.environment), environmentValues(original.environment)))) fail('ACTIVE_CONFIGURATION_CHANGED');
+          !isDeepStrictEqual(environmentValues(current.environment), current.image === original.image
+            ? environmentValues(original.environment) : replacementEnvironment))) fail('ACTIVE_CONFIGURATION_CHANGED');
       if (await call(['image', 'inspect', '--format', '{{.Id}}', original.image], 'ROLLBACK_FAILED') !== original.image) fail('ROLLBACK_FAILED');
       await call([...compose([]), ...UP], 'ROLLBACK_FAILED', 150000);
       const restored = await inspect();
@@ -278,7 +288,7 @@ export async function updateProductionApp(input, { run = nativeRun } = {}) {
     const current = await inspect();
     verifyApp(after, current, directory, updatedFiles);
     if (!isDeepStrictEqual(orderedMounts(current.mounts), orderedMounts(original.mounts)) ||
-        !isDeepStrictEqual(environmentValues(current.environment), environmentValues(original.environment))) fail('APP_VERIFICATION_FAILED');
+        !isDeepStrictEqual(environmentValues(current.environment), replacementEnvironment)) fail('APP_VERIFICATION_FAILED');
     return { ...result, status: 'PRODUCTION_APP_UPDATED', applicationUpdated: true, overridePath, rollbackReport };
   } catch (error) {
     if (applicationMayHaveChanged && rollback) {

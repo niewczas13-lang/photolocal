@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { basename, join } from 'node:path';
+import { basename, join, resolve, sep } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
@@ -15,7 +15,7 @@ const REVISION = 'c'.repeat(40);
 const SECRET = 'private-env-value-for-regression';
 
 async function fixture(t, options = {}) {
-  const root = await mkdtemp(join(tmpdir(), 'photolocal-app-update-'));
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'photolocal-app-update-')));
   t.after(async () => {
     assert.match(basename(root), /^photolocal-app-update-/);
     await rm(root, { recursive: true, force: true });
@@ -45,6 +45,16 @@ async function fixture(t, options = {}) {
     GOOGLE_CHAT_BROWSER_CDP_URL: 'http://chat-browser:9223', PRIVATE_SETTING: SECRET,
     LITERAL_DOLLARS: 'keep$$this$literal',
   };
+  const imageEnvironment = options.imageEnvironment ?? [];
+  const configuredEnvironment = Object.entries(environment)
+    .map(([key, value]) => [key, value.replaceAll('$$', '$')]);
+  const mergedEnvironment = defaults => Object.entries({
+    ...Object.fromEntries(defaults.map(value => {
+      const equals = value.indexOf('=');
+      return [value.slice(0, equals), value.slice(equals + 1)];
+    })),
+    ...Object.fromEntries(configuredEnvironment),
+  }).map(([key, value]) => `${key}=${value}`);
   const before = {
     name: PROJECT,
     services: {
@@ -78,7 +88,7 @@ async function fixture(t, options = {}) {
     },
     running: true, health: 'healthy', mounts,
     ports: { '4873/tcp': [{ HostIp: '0.0.0.0', HostPort: '4873' }] },
-    environment: Object.entries(environment).map(([key, value]) => `${key}=${value.replaceAll('$$', '$')}`),
+    environment: mergedEnvironment(options.originalImageEnvironment ?? []),
   };
   options.preflightMutate?.(app, before, files);
   const original = structuredClone(app);
@@ -131,7 +141,8 @@ async function fixture(t, options = {}) {
       }
       return {
         code: 0,
-        stdout: JSON.stringify({ id, revision: options.wrongRevision ? 'f'.repeat(40) : REVISION }),
+        stdout: JSON.stringify({ id, revision: options.wrongRevision ? 'f'.repeat(40) : REVISION,
+          environment: imageEnvironment }),
         stderr: '',
       };
     }
@@ -161,6 +172,12 @@ async function fixture(t, options = {}) {
         app.image = applyingNew ? NEW_IMAGE : ORIGINAL_IMAGE;
         app.labels['com.docker.compose.project.config_files'] = selected.join(',');
         app.mounts.reverse();
+        if (applyingNew) {
+          app.environment = mergedEnvironment(imageEnvironment);
+          options.newAppMutate?.(app);
+        } else {
+          options.restoredAppMutate?.(app);
+        }
         if (applyingNew && (options.startFailure || options.startAbsent)) {
           app.health = 'unhealthy';
           if (options.startAbsent) app = undefined;
@@ -197,6 +214,97 @@ test('updates only the application while retaining every active override and dat
   assert.equal(f.calls.some(call => call.args.includes('down') || call.args.includes('restart')), false);
   assert.deepEqual(f.app().mounts.sort((a, b) => a.Destination.localeCompare(b.Destination)),
     f.original.mounts.sort((a, b) => a.Destination.localeCompare(b.Destination)));
+});
+
+test('new image defaults may change while Compose environment remains authoritative', async t => {
+  const f = await fixture(t, {
+    originalImageEnvironment: ['NODE_VERSION=24.0.0', 'PATH=/old/bin', 'OLD_BASE_ONLY=old'],
+    imageEnvironment: ['NODE_VERSION=24.1.0', 'PATH=/new/bin', 'YARN_VERSION=1.22.22',
+      'PRIVATE_SETTING=image-default'],
+  });
+  const result = await updateProductionApp(f.input, { run: f.run });
+  assert.equal(result.status, 'PRODUCTION_APP_UPDATED');
+  assert.equal(f.calls.filter(call => call.args.includes('up')).length, 1);
+  assert.ok(f.app().environment.includes('NODE_VERSION=24.1.0'));
+  assert.ok(f.app().environment.includes('PATH=/new/bin'));
+  assert.ok(f.app().environment.includes('YARN_VERSION=1.22.22'));
+  assert.ok(f.app().environment.includes('PRIVATE_SETTING=' + SECRET));
+  assert.ok(f.app().environment.includes('LITERAL_DOLLARS=keep$this$literal'));
+  assert.equal(f.app().environment.some(value => value.startsWith('OLD_BASE_ONLY=')), false);
+});
+
+test('a failed health check restores original full environment after image defaults change', async t => {
+  const f = await fixture(t, {
+    originalImageEnvironment: ['NODE_VERSION=24.0.0', 'PATH=/old/bin'],
+    imageEnvironment: ['NODE_VERSION=24.1.0', 'PATH=/new/bin', 'YARN_VERSION=1.22.22'],
+    healthFailure: true,
+  });
+  await assert.rejects(updateProductionApp(f.input, { run: f.run }), {
+    code: 'PRODUCTION_APP_UPDATE_APP_VERIFICATION_FAILED', rollbackStatus: 'RESTORED',
+  });
+  assert.equal(f.calls.filter(call => call.args.includes('up')).length, 2);
+  assert.equal(f.app().image, ORIGINAL_IMAGE);
+  assert.equal(f.app().health, 'healthy');
+  assert.deepEqual(f.app().environment, f.original.environment);
+});
+
+test('an unexplained runtime default change is rejected instead of accepting arbitrary environment', async t => {
+  const f = await fixture(t, {
+    imageEnvironment: ['NODE_VERSION=24.1.0', 'PATH=/new/bin'],
+    newAppMutate: app => {
+      app.environment = app.environment.map(value => value.startsWith('NODE_VERSION=')
+        ? 'NODE_VERSION=unexpected' : value);
+    },
+  });
+  await assert.rejects(updateProductionApp(f.input, { run: f.run }), {
+    code: 'PRODUCTION_APP_UPDATE_APP_VERIFICATION_FAILED', rollbackStatus: 'FAILED',
+    rollbackCode: 'PRODUCTION_APP_UPDATE_ACTIVE_CONFIGURATION_CHANGED',
+  });
+  assert.equal(f.calls.filter(call => call.args.includes('up')).length, 1);
+});
+
+test('configured environment drift after cutover blocks verification and unsafe rollback', async t => {
+  const f = await fixture(t, {
+    imageEnvironment: ['NODE_VERSION=24.1.0'],
+    newAppMutate: app => {
+      app.environment = app.environment.map(value => value.startsWith('PHOTO_LOCAL_DB=')
+        ? 'PHOTO_LOCAL_DB=/unexpected.sqlite' : value);
+    },
+  });
+  await assert.rejects(updateProductionApp(f.input, { run: f.run }), {
+    code: 'PRODUCTION_APP_UPDATE_ACTIVE_CONFIGURATION_CHANGED', rollbackStatus: 'FAILED',
+    rollbackCode: 'PRODUCTION_APP_UPDATE_ACTIVE_CONFIGURATION_CHANGED',
+  });
+  assert.equal(f.calls.filter(call => call.args.includes('up')).length, 1);
+});
+
+test('rollback still rejects a changed original image default environment', async t => {
+  const f = await fixture(t, {
+    originalImageEnvironment: ['NODE_VERSION=24.0.0'],
+    imageEnvironment: ['NODE_VERSION=24.1.0'],
+    healthFailure: true,
+    restoredAppMutate: app => {
+      app.environment = app.environment.map(value => value.startsWith('NODE_VERSION=')
+        ? 'NODE_VERSION=unexpected' : value);
+    },
+  });
+  await assert.rejects(updateProductionApp(f.input, { run: f.run }), {
+    code: 'PRODUCTION_APP_UPDATE_APP_VERIFICATION_FAILED', rollbackStatus: 'FAILED',
+    rollbackCode: 'PRODUCTION_APP_UPDATE_ROLLBACK_FAILED',
+  });
+  assert.equal(f.calls.filter(call => call.args.includes('up')).length, 2);
+});
+
+test('port drift after cutover blocks an unsafe rollback', async t => {
+  const f = await fixture(t, {
+    newAppMutate: app => { app.ports['4873/tcp'][0].HostPort = '4874'; },
+  });
+  await assert.rejects(updateProductionApp(f.input, { run: f.run }), {
+    code: 'PRODUCTION_APP_UPDATE_APP_VERIFICATION_FAILED', rollbackStatus: 'FAILED',
+    rollbackCode: 'PRODUCTION_APP_UPDATE_ACTIVE_CONFIGURATION_CHANGED',
+  });
+  assert.equal(f.calls.filter(call => call.args.includes('up')).length, 1);
+  assert.equal(f.app().ports['4873/tcp'][0].HostPort, '4874');
 });
 
 test('prepare-only builds and checks the replacement without changing any service', async t => {
@@ -427,4 +535,32 @@ test('untracked root repair tools are retained and excluded from source verifica
   assert.ok(checks.length >= 2);
   for (const check of checks) for (const tool of tools) assert.equal(check.args.includes(tool), false);
   for (const tool of tools) assert.equal(await readFile(join(f.input.stagingRoot, tool), 'utf8'), 'local repair tool');
+});
+
+test('updater fixtures work when Windows TEMP uses an 8.3 short-path alias', { skip: process.platform !== 'win32' }, async t => {
+  const temporaryRoot = await realpath(tmpdir());
+  const root = await realpath(await mkdtemp(join(temporaryRoot, 'photolocal-app-update-alias-')));
+  t.after(async () => {
+    assert.ok(resolve(root).startsWith(resolve(temporaryRoot) + sep));
+    await rm(root, { recursive: true, force: true });
+  });
+  const quotedRoot = "'" + root.replaceAll("'", "''") + "'";
+  const shortPath = spawnSync('powershell.exe', ['-NoProfile', '-Command',
+    `(New-Object -ComObject Scripting.FileSystemObject).GetFolder(${quotedRoot}).ShortPath`], {
+    encoding: 'utf8', timeout: 30000, windowsHide: true,
+  });
+  assert.equal(shortPath.status, 0, shortPath.stderr);
+  const alias = shortPath.stdout.trim();
+  assert.equal((await realpath(alias)).toLowerCase(), root.toLowerCase());
+  if (alias.toLowerCase() === root.toLowerCase()) {
+    t.skip('The temporary volume does not provide 8.3 aliases.');
+    return;
+  }
+  const result = spawnSync(process.execPath, ['--test',
+    '--test-name-pattern=^updates only the application', fileURLToPath(import.meta.url)], {
+    env: { ...process.env, NODE_TEST_CONTEXT: undefined, TMP: alias, TEMP: alias },
+    encoding: 'utf8', timeout: 30000, windowsHide: true,
+  });
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stdout, /tests 1(?:\r?\n|$)/);
 });
